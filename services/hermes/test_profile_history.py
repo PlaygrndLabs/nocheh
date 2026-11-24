@@ -13,9 +13,8 @@ class ProfileHistoryTests(unittest.TestCase):
     """A guard epoch change starts a new profile without losing the chat's conversation."""
 
     def setUp(self):
-        try:from hermes_state import SessionDB
+        try:import persistence_assembly  # noqa: F401
         except ImportError:self.skipTest('pinned Hermes runtime required')
-        self.SessionDB=SessionDB
         self.folder=tempfile.TemporaryDirectory();self.root=Path(self.folder.name)
 
     def tearDown(self):
@@ -31,26 +30,25 @@ class ProfileHistoryTests(unittest.TestCase):
 
     def converse(self,profile,session='nocheh-chat',thread='a'*64):
         """An earlier private conversation with a tool call, a hidden fact and a compaction summary."""
-        from .isolated_profile import database_path
-        db=self.SessionDB(database_path(profile))
-        try:
-            db.create_session(session,source='telegram')
-            db.append_message(session,role='user',content='[CONTEXT COMPACTION] earlier turns about '+FACT,_compressed_summary=True)
-            db.append_message(session,role='user',content='My kite is named '+FACT+'.'+marker(PRIVATE))
-            db.append_message(session,role='assistant',content='',tool_calls=json.loads(call('memory',{'content':'Kite: '+FACT})))
-            db.append_message(session,role='tool',content='Saved '+FACT,tool_call_id='call-memory',tool_name='memory')
-            db.append_message(session,role='assistant',content='Noted.',reasoning='Remember '+FACT)
-            db.append_message(session,role='user',content='Plan a picnic for Saturday.'+marker(UNRELATED))
-            db.append_message(session,role='assistant',content='Saturday picnic at the lake, noon.')
-        finally:db.close()
+        from .native_store import writer
+        from .store_fixture import add_message, add_session
+        with writer(profile) as db:
+            add_session(db,session)
+            add_message(db,session,role='user',content='[CONTEXT COMPACTION] earlier turns about '+FACT,_compressed_summary=True)
+            add_message(db,session,role='user',content='My kite is named '+FACT+'.'+marker(PRIVATE))
+            add_message(db,session,role='assistant',content='',tool_calls=json.loads(call('memory',{'content':'Kite: '+FACT})))
+            add_message(db,session,role='tool',content='Saved '+FACT,tool_call_id='call-memory',tool_name='memory')
+            add_message(db,session,role='assistant',content='Noted.',reasoning='Remember '+FACT)
+            add_message(db,session,role='user',content='Plan a picnic for Saturday.'+marker(UNRELATED))
+            add_message(db,session,role='assistant',content='Saturday picnic at the lake, noon.')
         (profile/('active-'+thread+'.json')).write_text(json.dumps({'session_id':session}))
 
     def replay(self,profile,session='nocheh-chat'):
         from .isolated_profile import database_path
         if not database_path(profile).exists():return []
-        db=self.SessionDB(database_path(profile),read_only=True)
-        try:return db.get_messages_as_conversation(session) if db.get_session(session) else []
-        finally:db.close()
+        from . import native_store
+        with native_store.reader(profile) as db:
+            return native_store.conversation(db,session) if native_store.session_row(db,session) else []
 
     def test_new_epoch_keeps_the_conversation_without_tool_work_reasoning_or_summaries(self):
         old=self.profile(5);self.converse(old)
@@ -100,10 +98,9 @@ class ProfileHistoryTests(unittest.TestCase):
         self.assertEqual(self.replay(self.profile(4)),[],'an older epoch never adopts a newer one')
         used=self.profile(7)
         # A profile that already holds the chat's own session is never overwritten.
-        from .isolated_profile import database_path
-        db=self.SessionDB(database_path(used))
-        try:db.append_message('nocheh-chat',role='user',content='Newer question.'+marker('9'*64))
-        finally:db.close()
+        from .native_store import writer
+        from .store_fixture import add_message
+        with writer(used) as db:add_message(db,'nocheh-chat',role='user',content='Newer question.'+marker('9'*64))
         (used/'.history-carried').unlink()
         self.profile(7)
         self.assertEqual(len(self.replay(used)),5)
@@ -111,10 +108,9 @@ class ProfileHistoryTests(unittest.TestCase):
     def test_newest_earlier_conversation_is_used_and_review_only_profiles_are_skipped(self):
         first=self.profile(5);self.converse(first)
         second=self.profile(6)
-        from .isolated_profile import database_path
-        db=self.SessionDB(database_path(second))
-        try:db.append_message('nocheh-chat',role='user',content='What about Sunday?'+marker('8'*64))
-        finally:db.close()
+        from .native_store import writer
+        from .store_fixture import add_message
+        with writer(second) as db:add_message(db,'nocheh-chat',role='user',content='What about Sunday?'+marker('8'*64))
         review=self.profile(7,purpose='memory-review')
         (review/('active-'+'a'*64+'.json')).unlink()
         (review/'.history-carried').unlink()

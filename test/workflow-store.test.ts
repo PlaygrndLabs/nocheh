@@ -4,7 +4,7 @@ import pg from 'pg';
 import {settings} from './fixture-settings.js';
 import {initialize} from '../src/database.js';
 import {ingest,type Envelope} from '../src/archive.js';
-import {requestWorkflow,publishOutbox,pauseFamily,switchFamily,enterFamily,leaveFamily,claimWorkflow,beginEffect,finishEffect,hash,registerWorker,type WorkflowEvent} from '../src/workflows/store.js';
+import {requestWorkflow,publishOutbox,rearmWaiting,pauseFamily,switchFamily,enterFamily,leaveFamily,claimWorkflow,beginEffect,finishEffect,hash,registerWorker,type WorkflowEvent} from '../src/workflows/store.js';
 import {safeMetadata,WorkflowBoundary} from '../src/workflows/boundary.js';
 import {workflowClient} from '../src/workflows/client.js';
 
@@ -111,6 +111,36 @@ test('acknowledged events retry unchanged until the workflow records receipt', {
     await pool.query("UPDATE workflow_outbox SET published_at=now()-interval '31 seconds'");
     assert.equal(await publishOutbox(pool,async event=>{sent.push(event);}),0,'Inngest owns timing after receipt');
     assert.equal(sent.length,2);
+  }finally{await pool.end();await admin.query(`DROP SCHEMA ${schema} CASCADE`);await admin.end();}
+});
+
+test('a waiting schedule whose engine run was lost is armed again, once at startup and when overdue', {skip:!process.env.PGHOST}, async()=>{
+  const admin=new pg.Pool(),schema='rearm_'+Date.now();await admin.query(`CREATE SCHEMA ${schema}`);
+  const pool=new pg.Pool({options:`-c search_path=${schema}`});
+  try{
+    await initialize(pool);await registerWorker(pool,'pipeline',['schedules','telegram']);
+    const client=await pool.connect();let id:string,other:string;
+    try{id=await requestWorkflow(client,'schedules','schedule:fixture');other=await requestWorkflow(client,'telegram',hash('other-source'));}finally{client.release();}
+    const sent:WorkflowEvent[]=[];await publishOutbox(pool,async event=>{sent.push(event);});
+    const receive=async(workflow:string,dispatch:number,run:string)=>{const c=await pool.connect();try{assert.ok(await claimWorkflow(c,workflow,dispatch,run,1));}finally{c.release();}};
+    const wait=(workflow:string,next:string,since="now()")=>pool.query(`UPDATE workflow_registry SET state='waiting',lease_token=NULL,lease_until=NULL,
+      next_attempt=${next},updated_at=${since} WHERE id=$1`,[workflow]);
+    await receive(id,1,'first-run');await receive(other,1,'other-run');
+    await wait(id,"now()+interval '1 day'");await wait(other,"now()-interval '1 hour'","now()-interval '1 hour'");
+    assert.equal(await rearmWaiting(pool,['schedules'],'2 minutes'),0,'a wait not yet due is left to its run');
+    assert.equal(await rearmWaiting(pool,['schedules'],null),1,'at startup every received waiting schedule is armed again');
+    assert.equal((await pool.query('SELECT dispatch FROM workflow_registry WHERE id=$1',[id])).rows[0].dispatch,2);
+    assert.equal((await pool.query('SELECT dispatch FROM workflow_registry WHERE id=$1',[other])).rows[0].dispatch,1,'other families are untouched');
+    sent.length=0;assert.equal(await publishOutbox(pool,async event=>{sent.push(event);}),1);
+    assert.deepEqual(sent.map(event=>[event.data.workflow_id,event.data.dispatch]),[[id,2]]);
+    const old=await pool.connect();try{assert.equal(await claimWorkflow(old,id,1,'first-run',1),null,'the lost run, if it wakes, cannot claim it');}finally{old.release();}
+    assert.equal(await rearmWaiting(pool,['schedules'],null),0,'a new dispatch the engine has not received is the outbox\'s');
+    await receive(id,2,'second-run');await wait(id,"now()-interval '10 minutes'","now()-interval '10 minutes'");
+    await pool.query("UPDATE workflow_registry SET lease_until=now()+interval '1 minute' WHERE id=$1",[id]);
+    assert.equal(await rearmWaiting(pool,['schedules'],'2 minutes'),0,'a leased row is being worked on');
+    await pool.query("UPDATE workflow_registry SET lease_until=NULL,updated_at=now()-interval '10 minutes' WHERE id=$1",[id]);
+    assert.equal(await rearmWaiting(pool,['schedules'],'2 minutes'),1,'a run overdue with no word from the engine is armed again');
+    assert.equal((await pool.query('SELECT dispatch FROM workflow_registry WHERE id=$1',[id])).rows[0].dispatch,3);
   }finally{await pool.end();await admin.query(`DROP SCHEMA ${schema} CASCADE`);await admin.end();}
 });
 

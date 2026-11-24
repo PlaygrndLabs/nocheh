@@ -51,8 +51,27 @@ type Project = {
   groups?: string[];
   /** "Share group chats": its groups read each other (ADR-0267). On unless turned off. */
   share_chats?: boolean;
+  /** The groups left unticked in "Groups that share memory": each reads only its own (ADR-0287). */
+  own_groups?: string[];
   revision: number;
 };
+
+/** Whether a group of the project is ticked in "Groups that share memory": sharing on and the group not left out. */
+const ticked = (project: Pick<Project, 'share_chats' | 'own_groups'>, group: string) =>
+  project.share_chats !== false && !(project.own_groups ?? []).includes(group);
+/** The project's ticked groups, when at least two are: they read each other. Fewer means no group shares. */
+const sharingGroups = (project: Pick<Project, 'share_chats' | 'own_groups'>, groups: string[]) => {
+  const on = groups.filter(group => ticked(project, group));
+  return on.length > 1 ? on : [];
+};
+/** One line on who reads what, under the tick list. */
+function sharingSummary(groups: string[], on: string[], name: (id: string) => string): string {
+  if (on.length < 2) return 'No groups share. Each group reads only its own chat.';
+  const off = groups.filter(group => !on.includes(group));
+  const shared = on.map(name).join(' + ') + ' share one memory.';
+  if (!off.length) return shared;
+  return `${shared} ${off.map(name).join(' and ')} ${off.length > 1 ? 'read only their own' : 'reads only its own'}.`;
+}
 type Assignment = {
   space_id: string;
   project_id: string | null;
@@ -215,13 +234,38 @@ function ProjectDialog({project, onClose}: {project: Project | null; onClose: (c
   const command = useCommand();
   const [name, setName] = useState(project?.name ?? '');
   const [description, setDescription] = useState(project?.description ?? '');
-  const [share, setShare] = useState(project?.share_chats !== false);
+  const chats = useChats();
+  const {projects} = useProjects();
+  // The project's groups, from its list row: the context's own row does not name them.
+  const groups = (project && projects.find(p => p.id === project.id)?.groups) ?? [];
+  // Ticks start from the saved project; a group with no saved choice starts ticked while sharing is on.
+  const [sharing, setSharing] = useState({
+    share_chats: project?.share_chats !== false,
+    own_groups: project?.own_groups ?? [],
+  });
+  const on = groups.filter(group => ticked(sharing, group));
+  const tick = (group: string, value: boolean) =>
+    setSharing(prior =>
+      value
+        ? // Ticking a group while none are ticked turns sharing back on for that group only.
+          prior.share_chats
+          ? {share_chats: true, own_groups: prior.own_groups.filter(other => other !== group)}
+          : {share_chats: true, own_groups: groups.filter(other => other !== group)}
+        : {...prior, own_groups: [...new Set([...prior.own_groups, group])]},
+    );
   const save = async () => {
+    // No group ticked turns sharing off; otherwise the unticked groups are kept as their own (ADR-0287).
+    const none = groups.length > 0 && on.length === 0;
     const result = await command.run<Project>('/projects', {
       ...(project ? {id: project.id} : {}),
       name: name.trim(),
       description,
-      share_chats: share,
+      ...(project
+        ? {
+            share_chats: !none && sharing.share_chats,
+            own_groups: none ? [] : sharing.own_groups.filter(group => groups.includes(group)).sort(),
+          }
+        : {}),
       state: project?.state ?? 'active',
       expected_revision: project?.revision ?? 0,
     });
@@ -275,17 +319,44 @@ function ProjectDialog({project, onClose}: {project: Project | null; onClose: (c
             onChange={event => setDescription(event.target.value)}
           />
         </Field>
-        <Field
-          label="Share group chats"
-          htmlFor="project-share"
-          hint={
-            share
-              ? `${sharedChatsNote} ${relatedGroupsHint}`
-              : 'Off: an answer in a group uses only what that group knows. The project’s tasks are still one list for all its groups.'
-          }
-        >
-          <Switch id="project-share" label="Share group chats" checked={share} onChange={setShare} />
-        </Field>
+        {project && groups.length > 1 && (
+          <fieldset className="space-y-2">
+            <legend className="text-sm font-medium">Groups that share memory</legend>
+            <p className="text-xs text-muted">
+              Ticked groups read each other’s chats and memory. An unticked group reads only its own. Tasks stay one
+              list for all groups either way. A group added later starts ticked.
+            </p>
+            <ul className="divide-y divide-line rounded-lg border border-line">
+              {groups.map(group => (
+                <li key={group}>
+                  <label className="flex items-center gap-2.5 px-3 py-2 text-sm">
+                    <input
+                      type="checkbox"
+                      className="size-4 accent-[var(--accent)]"
+                      checked={on.includes(group)}
+                      onChange={event => tick(group, event.target.checked)}
+                    />
+                    <span className="min-w-0 flex-1 truncate" dir="auto">
+                      {chats.name(group)}
+                    </span>
+                  </label>
+                </li>
+              ))}
+            </ul>
+            <div className="flex flex-wrap gap-1">
+              <Button size="sm" variant="ghost" onClick={() => setSharing({share_chats: true, own_groups: []})}>
+                Tick all
+              </Button>
+              <Button size="sm" variant="ghost" onClick={() => setSharing({share_chats: false, own_groups: []})}>
+                Clear
+              </Button>
+            </div>
+            <p className="text-xs text-muted" aria-live="polite">
+              {sharingSummary(groups, on.length > 1 ? on : [], chats.name)}{' '}
+              {on.length > 1 && `${sharedChatsNote} ${relatedGroupsHint}`}
+            </p>
+          </fieldset>
+        )}
         {command.error && <Notice tone="bad">{command.error}</Notice>}
         <button type="submit" hidden />
       </form>
@@ -321,6 +392,17 @@ function ProjectDrawer({
   );
 }
 
+/** The drawer's badge: how many of the project's groups share memory, or that none do. */
+function sharingBadge(project: Project, groups: string[]) {
+  const on = sharingGroups(project, groups);
+  if (!on.length) return <Badge>Groups don’t share memory</Badge>;
+  return (
+    <Badge tone="good">
+      {on.length === groups.length ? 'All groups share memory' : `${on.length} of ${groups.length} groups share memory`}
+    </Badge>
+  );
+}
+
 function ProjectDetail({
   project,
   context,
@@ -332,6 +414,7 @@ function ProjectDetail({
 }) {
   const feedback = useFeedback();
   const command = useCommand();
+  const {projects} = useProjects();
   const archived = project.state === 'archived';
   const setState = async (state: Project['state']) => {
     if (
@@ -357,7 +440,7 @@ function ProjectDetail({
     <div className="space-y-6">
       <div className="flex flex-wrap items-center gap-2">
         {archived ? <Badge>Archived</Badge> : <Badge tone="good">Active</Badge>}
-        {project.share_chats === false ? <Badge>Groups don’t share</Badge> : <Badge>Groups share chats</Badge>}
+        {sharingBadge(project, projects.find(p => p.id === project.id)?.groups ?? [])}
         <span className="flex-1" />
         <Button size="sm" onClick={onEdit}>
           <Pencil aria-hidden /> Edit
@@ -429,6 +512,7 @@ function ProjectChats({project, context}: {project: Project; context: ProjectCon
   const members = context.conversations;
   // The list row names the project's served groups; the context's own row does not.
   const listed = {...project, groups: projects.find(p => p.id === project.id)?.groups ?? []};
+  const shared = sharingGroups(project, listed.groups);
   const ownOf = (space: string) => own.find(row => row.space_id === space);
   const elsewhere = (space: string) => {
     const assignment = ownOf(space);
@@ -505,6 +589,11 @@ function ProjectChats({project, context}: {project: Project; context: ProjectCon
                   <span className="block truncate text-sm">{chats.name(chat.space_id)}</span>
                   {topic && <span className="text-xs text-muted">Through its group</span>}
                 </span>
+                {!topic && listed.groups.length > 1 && (
+                  <Badge tone={shared.includes(chat.space_id) ? 'accent' : undefined}>
+                    {shared.includes(chat.space_id) ? 'Shares memory' : 'Own memory only'}
+                  </Badge>
+                )}
                 {!topic && (
                   <Button size="sm" variant="ghost" disabled={command.busy} onClick={() => void remove(chat)}>
                     Remove
@@ -517,8 +606,8 @@ function ProjectChats({project, context}: {project: Project; context: ProjectCon
       )}
       {members.length > 1 && (
         <p className="mt-2 text-xs text-muted">
-          These groups share one task list, whatever “Share group chats” says. People in two of them can get private
-          answers that combine them.
+          These groups share one task list, whatever “Groups that share memory” says. People in two of them can get
+          private answers that combine them.
         </p>
       )}
       {project.state === 'active' && (

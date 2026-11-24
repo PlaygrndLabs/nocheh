@@ -66,27 +66,27 @@ class BrowserGatewayTests(unittest.TestCase):
     def test_media_preparation_adopts_only_current_native_context_without_copying_history(self):
         from dataclasses import replace
         from .scopes import Scopes
-        from hermes_state import SessionDB
-        from .isolated_profile import database_path
+        from . import native_store
+        from .store_fixture import add_message, add_session
         logical=Scopes.profile('-10');generation='11111111-1111-4111-8111-111111111111'
         self.gateway.scope=Scopes.apply_revision(Scope('-10','42',False,logical,'-10',1),
             {'generation':generation,'guard_epoch':1,'revision':1,'logical_profile':logical})
         self.gateway.home=self.root/'profiles'/self.gateway.scope.profile
         self.gateway.home.mkdir(parents=True)
         old_home=self.gateway.home;(old_home/'memories').mkdir();(old_home/'memories/MEMORY.md').write_text('old unprepared memory')
-        old_db=self.gateway.database();old_db.create_session('stored-one',source='browser');old_db.append_message('stored-one','user','old unprepared context')
+        old_db=self.gateway.database();add_session(old_db,'stored-one','browser');add_message(old_db,'stored-one','user','old unprepared context')
         self.server._sessions['sid']['history']=[{'role':'user','content':'old unprepared context'}]
         self.invoke('file.attach',filename='next.txt',content_base64=base64.b64encode(b'next original').decode())
         fresh=Scopes.apply_revision(replace(self.gateway.scope,revision=2),
             {'generation':generation,'guard_epoch':2,'revision':2,'logical_profile':logical})
         home=self.root/'profiles'/fresh.profile;home.mkdir(parents=True);(home/'native-state').mkdir()
-        db=SessionDB(database_path(home));db.create_session('stored-one',source='browser');db.append_message('stored-one','assistant','prepared answer');db.close()
+        with native_store.writer(home) as db:add_session(db,'stored-one','browser');add_message(db,'stored-one','assistant','prepared answer')
         status={'visible':True,'context':{'scope':'-10','space':'-10','owner':False,'logical_profile':logical,
             'generation':generation,'guard_epoch':2,'revision':2,'native_profile':fresh.profile}}
         self.gateway.adopt_context(status)
         self.assertEqual(self.gateway.scope,fresh);self.assertEqual(self.gateway.home,home)
         self.assertEqual(self.server._sessions['sid']['history'],[])
-        self.assertEqual(self.server._get_db().get_messages_as_conversation('stored-one')[0]['content'],'prepared answer')
+        self.assertEqual(native_store.conversation(self.server._get_db(),'stored-one')[0]['content'],'prepared answer')
         self.assertFalse((home/'memories/MEMORY.md').exists())
         self.capture();self.assertEqual(self.calls[-1][1]['revision'],2)
         self.assertEqual(base64.b64decode(self.calls[-1][1]['files'][0]['bytes_base64']),b'next original','an accepted next attachment survives history invalidation')

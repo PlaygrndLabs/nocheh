@@ -106,8 +106,8 @@ class UnexpectedProfileTool(RuntimeError):
 def bind_profile_home(profile):
     """Make Hermes read SOUL.md and skills/ from the turn profile.
 
-    Without a bound home Hermes takes the session database's folder as the
-    agent home, and Nocheh keeps that database in ``native-state/``.
+    The bound home is the profile Nocheh opened the session store for, so the
+    role and skills never come from ``native-state/`` where that store lives.
     """
     from hermes_constants import set_hermes_home_override
     set_hermes_home_override(profile)
@@ -195,7 +195,7 @@ def restrict_session_search():
     # Native reads stay in the caller's own store; only a named profile opens another.
     from tools import session_search_tool as search
     original_resolve=search._resolve_profile_db
-    def current_only(profile):
+    def current_only(profile,*rest):
         if profile is not None and str(profile).strip():raise ValueError('profile_scope_denied')
         return None
     search._resolve_profile_db=current_only
@@ -321,14 +321,14 @@ def run(body, emit=None, relay=None):
     phase=perf_counter()
     # Pinned native imports may initialize session state during module loading.
     # Install the durable path before importing any agent/tool module.
-    from .isolated_profile import database_path,install_database_paths
+    from .isolated_profile import install_database_paths
     install_database_paths()
     install_tool_search_policy()
     from services.hermes.archive_tools import bind_process_credential,bind_process_deadline
     from services.hermes.request_boundary import install
     from services.hermes.compatibility_patch import install as native_gate
     from run_agent import AIAgent
-    from hermes_state import SessionDB
+    from . import native_store
     install();native_gate();restrict_session_search();untitled_telegram()
     review = body.get('review') is True
     background = body.get('channel')=='background' and not review
@@ -360,7 +360,7 @@ def run(body, emit=None, relay=None):
     bind_profile_home(profile)
     from .profile_config import preferences, read
     prefs=body.get('preferences') or preferences(read(profile/'config.yaml'))
-    database=SessionDB(database_path(profile))
+    database=native_store.open_writer(profile)
     record('bootstrap',phase);phase=perf_counter()
     from .prompts import reply, text
     prompt=lambda key:text(body.get('prompts'),key)
@@ -378,7 +378,7 @@ def run(body, emit=None, relay=None):
         long_term='\nPrimary memory context (derived inferences):\n'+json.dumps(memory,ensure_ascii=False)
     record('memory_recall',phase);phase=perf_counter()
     session_id=body['session_id']
-    history=prepare(database.get_messages_as_conversation(session_id)) if database.get_session(session_id) else []
+    history=prepare(native_store.conversation(database,session_id)) if native_store.session_row(database,session_id) else []
     record('history_prepare',phase);phase=perf_counter()
     from . import memory_evidence
     placement=body.get('memory_context','legacy')
@@ -397,7 +397,7 @@ def run(body, emit=None, relay=None):
             api_key=credentials.access_token,base_url=credentials.base_url,
             enabled_toolsets=['memory'] if review else MEMBER_READ_TOOLSETS if member_read else (MEMBER_TOOLSETS+['cronjob'] if schedules else MEMBER_TOOLSETS) if member else ANSWER_TOOLSETS if answer else BOX_TOOLSETS if box else MACHINE_TOOLSETS if machine else BACKGROUND_TOOLSETS if background else SCHEDULE_TOOLSETS if schedules else TURN_TOOLSETS,
             fallback_model=None,
-            session_id=session_id,session_db=database,platform=body.get('channel','telegram'),chat_id=body['chat_id'],
+            session_id=session_id,persistence=database,platform=body.get('channel','telegram'),chat_id=body['chat_id'],
             user_id=body['user_id'],chat_type='dm' if body['owner'] or answer or member or member_read else 'group',
             skip_context_files=True,load_soul_identity=not review,skip_memory=False,skip_background_review=True,
             quiet_mode=True,save_trajectories=False,max_iterations=iterations or prefs['agent.max_iterations'],
@@ -470,7 +470,8 @@ def run(body, emit=None, relay=None):
             # A memory review leaves an empty native session behind: Hermes removes it, and one that holds anything is
             # hidden instead, which keeps it out of every session list.
             with contextlib.suppress(Exception):
-                if not database.delete_session_if_empty(session_id):database.set_session_hidden(session_id,True)
+                from gateway.session_ingress_media import native_inputs_root
+                if not database.sessions.delete_if_empty(session_id,media_root=str(native_inputs_root())):database.sessions.set_hidden(session_id,True)
         database.close();restore_evidence();disconnect_data_tools()
 
 

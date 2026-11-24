@@ -29,9 +29,8 @@ class BrowserGateway:
 
     def database(self):
         if self.native_db is None:
-            from hermes_state import SessionDB
-            from .isolated_profile import database_path
-            self.native_db = SessionDB(database_path(self.home))
+            from .native_store import open_writer
+            self.native_db = open_writer(self.home)
         return self.native_db
 
     def adopt_context(self, status):
@@ -168,11 +167,9 @@ class BrowserGateway:
                             with self.context_lock:
                                 self.adopt_context(status)
                                 with contextlib.suppress(Exception):
-                                    from hermes_state import SessionDB
-                                    from .isolated_profile import database_path
-                                    db=SessionDB(database_path(self.home),read_only=True)
-                                    try:session['history']=db.get_messages_as_conversation(session['session_key'])
-                                    finally:db.close()
+                                    from . import native_store
+                                    with native_store.reader(self.home) as db:
+                                        session['history']=native_store.conversation(db,session['session_key'])
                         self.server._emit('message.complete',sid,{'text':status['text'] if done else 'The managed turn ended. Its original input and execution evidence are preserved.',
                             **({'nocheh_delivery':status['delivery']} if done and status.get('delivery') else {}),
                             'usage':{},'status':'complete' if done else 'interrupted' if status['state']=='cancelled' else 'error'})
@@ -195,7 +192,7 @@ class BrowserGateway:
 
     def info(self, session):
         from .assistant_turn import ALLOWED_TOOLS
-        return {'version':'0.23.2','model':self.model,'provider':'openai','tools':{'Nocheh':sorted(ALLOWED_TOOLS)},'skills':{},
+        return {'version':'0.23.3','model':self.model,'provider':'openai','tools':{'Nocheh':sorted(ALLOWED_TOOLS)},'skills':{},
                 'cwd':str(self.home/'workspace'),'profile_name':self.scope.profile,
                 'stored_session_id':session['session_key'],'running':session.get('running',False),
                 'lazy':False,'managed_execution':'isolated_per_turn','approval_mode':'manual','yolo':False,'nocheh_scope':'owner-private' if self.scope.owner else 'selected-group'}

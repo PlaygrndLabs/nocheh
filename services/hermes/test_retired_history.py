@@ -220,7 +220,7 @@ class RetiredHistoryTests(unittest.TestCase):
         with tempfile.TemporaryDirectory() as folder:
             profile=Path(folder)/'profiles'/Scopes.profile('123');profile.mkdir(parents=True)
             self.notes(profile,MEMORY_md=['Kite '+FACT+' (nocheh:event:'+PRIVATE+')','Kite festival '+FACT+' (nocheh:event:'+UNRELATED+')'])
-            with patch.dict(sys.modules,{'hermes_state':SimpleNamespace(SessionDB=None)}):
+            with patch.dict(sys.modules,{'persistence_assembly':SimpleNamespace()}):
                 found=recall(Path(folder),{'query':'Juniper','limit':20},retirements=Lookup())
             self.assertEqual([hit['citations'] for hit in found['hits']],[['nocheh:event:'+UNRELATED]])
 
@@ -257,30 +257,32 @@ class RetiredHistoryTests(unittest.TestCase):
                                                          'model',None,'session'))['state'],'done')
 
     def test_native_hermes_replay_and_search_no_longer_return_a_retired_fact(self):
-        try:from hermes_state import SessionDB
+        try:from .native_store import reader, writer
         except ImportError:self.skipTest('pinned Hermes runtime required')
+        from . import native_store
+        from .store_fixture import add_message, add_session
         from .native_memory import recall
         from .scopes import Scopes
         with tempfile.TemporaryDirectory() as folder:
             profile=Path(folder)/'profiles'/Scopes.profile('123');profile.mkdir(parents=True)
-            database=profile/'state.db';db=SessionDB(database);db.create_session('private',source='telegram')
-            db.append_message('private',role='user',content='My kite is named '+FACT+'.'+marker(PRIVATE))
-            db.append_message('private',role='assistant',content='',tool_calls=json.loads(call('memory',{'content':'Kite: '+FACT})))
-            db.append_message('private',role='tool',content='Saved '+FACT,tool_call_id='call-memory',tool_name='memory')
-            db.append_message('private',role='assistant',content='Noted, your kite is '+FACT+'.',reasoning='Remember '+FACT)
-            db.append_message('private',role='user',content='Will it rain?'+marker(UNRELATED))
-            db.append_message('private',role='assistant',content='Rain is expected on Friday.');db.close()
+            database=profile/'state.db'
+            with writer(profile) as db:
+                add_session(db,'private')
+                add_message(db,'private',role='user',content='My kite is named '+FACT+'.'+marker(PRIVATE))
+                add_message(db,'private',role='assistant',content='',tool_calls=json.loads(call('memory',{'content':'Kite: '+FACT})))
+                add_message(db,'private',role='tool',content='Saved '+FACT,tool_call_id='call-memory',tool_name='memory')
+                add_message(db,'private',role='assistant',content='Noted, your kite is '+FACT+'.',reasoning='Remember '+FACT)
+                add_message(db,'private',role='user',content='Will it rain?'+marker(UNRELATED))
+                add_message(db,'private',role='assistant',content='Rain is expected on Friday.')
             lookup=Lookup()
             found=recall(Path(folder),{'query':'Juniper','limit':20},retirements=lookup)
             self.assertEqual([hit for hit in found['hits'] if hit['kind']=='native_session'],[],'stale profiles skip withheld rows read-only')
             withhold_retired(database,lookup)
-            db=SessionDB(database)
-            try:
-                replay=json.dumps(db.get_messages_as_conversation('private'),ensure_ascii=False)
+            with reader(profile) as db:
+                replay=json.dumps(native_store.conversation(db,'private'),ensure_ascii=False)
                 self.assertNotIn('Juniper',replay)
                 self.assertIn('Rain is expected on Friday.',replay)
-                self.assertEqual(db.search_messages('Juniper'),[])
-            finally:db.close()
+                self.assertEqual(db.search.search_messages('Juniper'),())
 
 
 # A group turn (TURN) whose frame quotes other messages: Bob's recent message, the message the turn replies to, and a
@@ -603,18 +605,19 @@ class RetiredRecordTests(unittest.TestCase):
 
 class OwnerRecallBeforeTheNextTurnTests(unittest.TestCase):
     def test_owner_recall_skips_the_note_a_retired_quoted_message_wrote_before_the_profiles_next_turn(self):
-        from hermes_state import SessionDB
+        from .native_store import writer
+        from .store_fixture import add_message, add_session
         from .native_memory import recall
         from .scopes import Scopes
         with tempfile.TemporaryDirectory() as folder:
             root=Path(folder);profile=root/'profiles'/Scopes.profile('-20');(profile/'memories').mkdir(parents=True)
             (profile/'memories'/'MEMORY.md').write_text(NOTE_DELIMITER.join(['Juniper: Bob PIN is 4321','Juniper: rain on Friday']))
-            db=SessionDB(profile/'state.db');db.create_session('s',source='telegram')
-            db.append_message('s',role='user',content=recent((BOB,BOB_SPEAKER,PIN))+'\n\n'+ANN_SPEAKER+'\nremember that'+marker(TURN))
-            db.append_message('s',role='assistant',content='',tool_calls=json.loads(call('memory',{'action':'add','target':'memory','content':'Juniper: Bob PIN is 4321'})))
-            db.append_message('s',role='tool',content='{"success":true}',tool_call_id='call-memory')
-            db.append_message('s',role='assistant',content='Noted.')
-            db.close()
+            with writer(profile) as db:
+                add_session(db,'s')
+                add_message(db,'s',role='user',content=recent((BOB,BOB_SPEAKER,PIN))+'\n\n'+ANN_SPEAKER+'\nremember that'+marker(TURN))
+                add_message(db,'s',role='assistant',content='',tool_calls=json.loads(call('memory',{'action':'add','target':'memory','content':'Juniper: Bob PIN is 4321'})))
+                add_message(db,'s',role='tool',content='{"success":true}',tool_call_id='call-memory')
+                add_message(db,'s',role='assistant',content='Noted.')
             for retired in (BOB,TURN):
                 with self.subTest(retired=retired):
                     hits=recall(root,{'query':'Juniper','limit':20},retirements=Lookup(retired=(retired,),answered=()))['hits']

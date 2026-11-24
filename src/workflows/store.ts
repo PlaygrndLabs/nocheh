@@ -77,6 +77,14 @@ export async function requestWorkflow(client:pg.PoolClient,family:WorkflowFamily
   return id;
 }
 
+/** Requests a workflow whose job id can come back after it closed, as a schedule's cursor does after a Run now: with no
+ * open row for the job id, a new generation runs it; with one, nothing changes. Call on the domain mutation's client. */
+export async function requestOpenWorkflow(client:pg.PoolClient,family:WorkflowFamily,jobId:string):Promise<string|null> {
+  const rows=(await client.query('SELECT state,generation FROM workflow_registry WHERE family=$1 AND job_id=$2 AND version=1',[family,jobId])).rows;
+  if(rows.some(row=>!(closedStates as readonly string[]).includes(row.state)))return null;
+  return requestWorkflow(client,family,jobId,rows.reduce((top,row)=>Math.max(top,Number(row.generation)),0)+1);
+}
+
 /** A touch may race a running source workflow: it can return to waiting
  * after the touch skipped all idle predecessors. Retire only idle predecessors;
  * never rewrite a leased execution or its durable effect receipt. */
@@ -203,6 +211,30 @@ export async function publishOutbox(pool:pg.Pool,send:(event:WorkflowEvent)=>Pro
     }
   }
   return published;
+}
+
+/**
+ * Arms again the waiting workflows of these families: each gets a new dispatch, so a new run asks again when it is due.
+ * Inngest keeps a waiting run's sleep in its own state; a restart that loses that state leaves the row waiting with no run
+ * to wake it, and a schedule then never fires again. With `overdue` null every waiting row is armed again, as at startup;
+ * otherwise only rows whose next attempt passed that long ago untouched. Only rows Inngest received are touched (the
+ * outbox still owns the rest), never one leased now. The old dispatch's run, if it still wakes, finds a newer dispatch and
+ * stops. Returns how many rows were armed again.
+ */
+export async function rearmWaiting(pool:pg.Pool,kinds:readonly WorkflowFamily[],overdue:string|null,limit=100):Promise<number> {
+  const client=await pool.connect();
+  try {
+    await client.query('BEGIN');
+    const rows=(await client.query(`UPDATE workflow_registry w SET dispatch=w.dispatch+1,revision=w.revision+1,updated_at=now()
+      WHERE w.id IN (SELECT c.id FROM workflow_registry c JOIN workflow_owners f ON f.family=c.family
+        WHERE c.family=ANY($1::text[]) AND c.state='waiting' AND (c.lease_until IS NULL OR c.lease_until<now()) AND f.owner='inngest' AND f.admission
+        AND ($2::interval IS NULL OR c.next_attempt<now()-$2::interval AND c.updated_at<now()-$2::interval)
+        AND EXISTS(SELECT 1 FROM workflow_runs r WHERE r.workflow_id=c.id AND r.dispatch=c.dispatch)
+        ORDER BY c.next_attempt NULLS FIRST,c.id LIMIT $3 FOR UPDATE OF c SKIP LOCKED)
+      RETURNING w.id,w.dispatch`,[kinds,overdue,limit])).rows;
+    for(const row of rows)await client.query('INSERT INTO workflow_outbox(id,workflow_id,dispatch) VALUES($1,$2,$3) ON CONFLICT DO NOTHING',[hash(row.id+':'+row.dispatch),row.id,row.dispatch]);
+    await client.query('COMMIT');return rows.length;
+  }catch(error){await client.query('ROLLBACK');throw error;}finally{client.release();}
 }
 
 export async function claimWorkflow(client:pg.PoolClient,id:string,dispatch:number,runId:string,epoch:number) {

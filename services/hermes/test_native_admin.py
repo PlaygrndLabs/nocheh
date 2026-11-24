@@ -147,10 +147,10 @@ class NativeAdminTests(unittest.TestCase):
         self.assertEqual(rejected.status_code, 400)
 
     def test_sessions_are_actual_scoped_and_inspection_does_not_write(self):
-        from hermes_state import SessionDB
+        from .native_store import writer
+        from .store_fixture import add_message, add_session
         for path, sid in ((self.owner, 'owner-session'), (self.group, 'group-session')):
-            db = SessionDB(path / 'state.db'); db.create_session(sid, source='telegram', model='gpt-5.6-sol')
-            db.append_message(sid, 'user', 'Synthetic ' + sid); db.close()
+            with writer(path) as db: add_session(db, sid, model='gpt-5.6-sol'); add_message(db, sid, 'user', 'Synthetic ' + sid)
         def fingerprint():
             return {str(p.relative_to(self.root)): hashlib.sha256(p.read_bytes()).hexdigest() for p in self.root.rglob('*') if p.is_file() and not p.name.endswith(('-wal','-shm'))}
         # SQLite may create lock/WAL sidecars on a mode=ro connection.
@@ -250,12 +250,13 @@ class BrowserBoundaryTests(unittest.TestCase):
         import asyncio
         from urllib.parse import urlencode,parse_qs
         from .native_admin import Administration
-        from hermes_state import SessionDB
+        from .native_store import writer
+        from .store_fixture import add_session
         with tempfile.TemporaryDirectory() as folder:
             root=Path(folder);policy=Scopes({'enabled':False},Served.of('42',groups=['-10']))
             owner=root/'profiles'/Scopes.profile('42');owner.mkdir(parents=True)
             group=root/'profiles'/Scopes.profile('-10');group.mkdir(parents=True)
-            db=SessionDB(owner/'state.db');db.create_session('private-session',source='browser');db.close()
+            with writer(owner) as db:add_session(db,'private-session','browser')
             forwarded=[];sent=[]
             async def app(scope,receive,send): forwarded.append(parse_qs(scope['query_string'].decode()))
             admin=Administration(app,root,'model',policy,'fixture',True)

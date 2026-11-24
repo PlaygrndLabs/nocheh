@@ -3,7 +3,7 @@ import type pg from 'pg';
 import type {Settings} from '../config.js';
 import {agentOperation,type Agent} from '../agent/agent.js';
 import {HttpError,object,string} from '../http.js';
-import {hash,type ExecutionAuthority} from './store.js';
+import {hash,requestOpenWorkflow,type ExecutionAuthority} from './store.js';
 import {observation,type WorkflowOperation} from './pipeline.js';
 import {ownerChat} from '../assistant-policy.js';
 import {servedGroup} from '../spaces.js';
@@ -32,9 +32,32 @@ export async function recordSchedule(pool:pg.Pool,source:string,input:unknown){
     }
     await client.query(`UPDATE workflow_registry SET state='skipped',waiting_reason='superseded',revision=revision+1,updated_at=now()
       WHERE family='schedules' AND job_id LIKE $1 AND job_id<>$2 AND state IN ('queued','waiting','retryable_failed')`,['schedule:'+id+':%','schedule:'+id+':'+cursor]);
-    await client.query("SELECT nocheh_workflow_request('schedules',$1)",['schedule:'+id+':'+cursor]);
+    // A Run now moves the cursor away and back again (pending, running, then idle with the same next run); the cursor's
+    // earlier row is then closed, and a new generation runs it (ADR-0266).
+    await requestOpenWorkflow(client,'schedules','schedule:'+id+':'+cursor);
     await client.query('COMMIT');
   }catch(error){await client.query('ROLLBACK');throw error;}finally{client.release();}
+}
+/** A schedule whose current cursor has no open workflow, only one closed as superseded, gets a new generation; a Run now
+ * left such a schedule without a run before this was fixed (ADR-0266). Returns how many were started again. */
+export async function reviveSchedules(pool:pg.Pool):Promise<number> {
+  const stuck=(await pool.query(`SELECT s.id,s.cursor FROM workflow_schedules s
+    WHERE EXISTS(SELECT 1 FROM workflow_registry w WHERE w.family='schedules' AND w.job_id='schedule:'||s.id||':'||s.cursor
+      AND w.state='skipped' AND w.waiting_reason='superseded')
+    AND NOT EXISTS(SELECT 1 FROM workflow_registry w WHERE w.family='schedules' AND w.job_id='schedule:'||s.id||':'||s.cursor
+      AND w.state NOT IN ('skipped','cancelled'))`)).rows;
+  let revived=0;
+  for(const row of stuck) {
+    const client=await pool.connect();
+    try {
+      await client.query('BEGIN');
+      // The same lock a definition takes, so a cursor that moved meanwhile is left to its own request.
+      const current=(await client.query('SELECT cursor FROM workflow_schedules WHERE id=$1 FOR UPDATE',[row.id])).rows[0];
+      if(current?.cursor===row.cursor&&await requestOpenWorkflow(client,'schedules','schedule:'+row.id+':'+row.cursor))revived++;
+      await client.query('COMMIT');
+    }catch(error){await client.query('ROLLBACK');throw error;}finally{client.release();}
+  }
+  return revived;
 }
 export async function scheduledContext(pool:pg.Pool,config:Settings,input:unknown){
   const b=object(input),row=(await pool.query(`SELECT r.*,e.scope,e.payload,o.epoch,o.owner,o.admission FROM managed_runs r

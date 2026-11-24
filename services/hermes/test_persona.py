@@ -223,12 +223,11 @@ class PersonaTurnTests(unittest.TestCase):
 
     def test_turn_prompt_uses_the_chats_role_and_lists_its_skills_without_skill_writing(self):
         from contextvars import copy_context
-        from hermes_state import SessionDB
         from run_agent import AIAgent
         from agent.system_prompt import build_system_prompt
+        from .native_store import open_writer
         from tools.skills_tool import skill_view
         from .assistant_turn import OWNER_SET_TOOLS, bind_profile_home
-        from .isolated_profile import database_path
         with tempfile.TemporaryDirectory() as folder:
             root = Path(folder)
             chat = persona.chat_path(root, '-20')
@@ -242,7 +241,7 @@ class PersonaTurnTests(unittest.TestCase):
                 if bind: bind_profile_home(turn)
                 agent = AIAgent(provider='openai', api_mode='chat_completions', model='synthetic', api_key='synthetic',
                                 base_url='http://127.0.0.1:9/v1', enabled_toolsets=['skills'], fallback_model=None,
-                                session_db=SessionDB(database_path(turn)), session_id='s',
+                                persistence=open_writer(turn), session_id='s',
                                 platform='telegram', chat_id='-20', user_id='5', chat_type='group',
                                 skip_context_files=True, load_soul_identity=True, skip_background_review=True,
                                 quiet_mode=True, save_trajectories=False)
@@ -253,8 +252,8 @@ class PersonaTurnTests(unittest.TestCase):
             with patch.dict('os.environ', {'HERMES_HOME': str(turn)}):
                 _, unbound, _ = copy_context().run(build, False)
                 agent, prompt, viewed = copy_context().run(build, True)
-            self.assertFalse(unbound.startswith('You are the family cooking helper.'),
-                             'without a bound home Hermes looks beside the session database')
+            self.assertTrue(unbound.startswith('You are the family cooking helper.'),
+                            'Hermes reads the role from the profile its store belongs to, not from native-state/')
             self.assertTrue(prompt.startswith('You are the family cooking helper.'))
             self.assertIn('- weekly-menu: ' + COOKING['description'], prompt)
             self.assertEqual(agent.valid_tool_names, {'skills_list', 'skill_view'})
@@ -262,9 +261,10 @@ class PersonaTurnTests(unittest.TestCase):
 
     def test_a_role_or_skill_change_rebuilds_each_continuing_sessions_prompt_once(self):
         from contextvars import copy_context
-        from hermes_state import SessionDB
         from run_agent import AIAgent
         from agent import conversation_loop
+        from . import native_store
+        from .store_fixture import add_session
         from .assistant_turn import ALLOWED_TOOLS, OWNER_SET_TOOLS, bind_profile_home, install_tool_search_policy, verify_profile_tools
         from .isolated_profile import database_path
         self.addCleanup(install_tool_search_policy())
@@ -281,12 +281,12 @@ class PersonaTurnTests(unittest.TestCase):
                 # What a turn's run_conversation sends: the session's stored prompt, or a new one it stores.
                 def build():
                     bind_profile_home(turn)
-                    database = SessionDB(database_path(turn))
-                    continuing = database.get_session(session) is not None
-                    if not continuing: database.create_session(session, source='telegram')
+                    database = native_store.open_writer(turn)
+                    continuing = database.sessions.get(session) is not None
+                    if not continuing: add_session(database, session)
                     agent = AIAgent(provider='openai', api_mode='chat_completions', model='synthetic', api_key='synthetic',
                                     base_url='http://127.0.0.1:9/v1', enabled_toolsets=['memory', 'session_search', 'skills'],
-                                    fallback_model=None, session_db=database, session_id=session, platform='telegram',
+                                    fallback_model=None, persistence=database, session_id=session, platform='telegram',
                                     chat_id='-20', user_id='5', chat_type='group', skip_context_files=True,
                                     load_soul_identity=True, skip_background_review=True, quiet_mode=True, save_trajectories=False)
                     agent.tools = [t for t in agent.tools if t['function']['name'] not in OWNER_SET_TOOLS]
@@ -295,7 +295,7 @@ class PersonaTurnTests(unittest.TestCase):
                         conversation_loop._restore_or_build_system_prompt(
                             agent, None, [{'role': 'user', 'content': 'hello'}, {'role': 'assistant', 'content': 'hi'}] if continuing else [])
                         verify_profile_tools(agent.valid_tool_names, ALLOWED_TOOLS)
-                        self.assertEqual(database.get_session(session)['system_prompt'], agent._cached_system_prompt)
+                        self.assertEqual(native_store.session_row(database, session)['system_prompt'], agent._cached_system_prompt)
                         return agent._cached_system_prompt, [t['function']['name'] for t in agent.tools]
                     finally: agent.close(); database.close()
                 rebuild = conversation_loop.rebuild_for_refresh
@@ -304,9 +304,7 @@ class PersonaTurnTests(unittest.TestCase):
                     return copy_context().run(build)
 
             def epoch():
-                database = SessionDB(database_path(turn))
-                try: return database.prompt_refresh_epoch('s')
-                finally: database.close()
+                with native_store.writer(turn) as database: return database.sessions.prompt_refresh_epoch('s')
 
             first, tools = prompt('s')
             self.assertTrue(first.startswith('You are role A.'))
@@ -333,19 +331,17 @@ class PersonaTurnTests(unittest.TestCase):
             self.assertFalse(any(database_path(path).exists() for path in (default, chat)), 'a save never creates a session database')
 
     def test_a_save_into_a_profile_that_runs_turns_asks_hermes_to_refresh_its_prompts(self):
-        from hermes_state import SessionDB
-        from .isolated_profile import database_path
+        from .native_store import writer
+        from .store_fixture import add_session
         with tempfile.TemporaryDirectory() as folder:
             root = Path(folder)
             chat = persona.chat_path(root, '-20'); (chat / 'native-state').mkdir(parents=True)
-            database = SessionDB(database_path(chat))
-            try:
-                database.create_session('s', source='telegram')
+            with writer(chat) as database:
+                add_session(database, 's')
                 persona.save(chat, 'Group role', [], persona.view(chat)['revision'])
-                self.assertEqual(database.prompt_refresh_epoch('s'), 1)
+                self.assertEqual(database.sessions.prompt_refresh_epoch('s'), 1)
                 persona.materialize(root, chat, '-20')
-                self.assertEqual(database.prompt_refresh_epoch('s'), 1, 'a turn in the chat\'s own profile reads its files as saved')
-            finally: database.close()
+                self.assertEqual(database.sessions.prompt_refresh_epoch('s'), 1, 'a turn in the chat\'s own profile reads its files as saved')
 
 if __name__ == '__main__':
     unittest.main()

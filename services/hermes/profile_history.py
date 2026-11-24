@@ -22,7 +22,6 @@ import shutil
 import time
 from pathlib import Path
 
-from .isolated_profile import database_path
 
 CURSOR=re.compile(r'active-[0-9a-f]{64}\.json')
 CARRIED='.history-carried'
@@ -100,28 +99,27 @@ def _conversation(messages):
 
 
 def _copy(source,profile):
-    from hermes_state import SessionDB
-    old=SessionDB(database_path(source),read_only=True)
-    try:
+    from . import native_store
+    from persistence.conversation.messages import NewMessage
+    from persistence.conversation.sessions import NewSession
+    with native_store.reader(source) as old:
         found={}
         for name,session in _cursors(source).items():
-            stored=old.get_session(session)
-            messages=_conversation(old.get_messages(session,latest=True,limit=MESSAGES*3))[-MESSAGES:] if stored else []
+            stored=native_store.session_row(old,session)
+            messages=_conversation(native_store.messages(old,session,latest=True,limit=MESSAGES*3))[-MESSAGES:] if stored else []
             if messages:found[name]=(session,str(stored.get('source') or 'telegram'),messages)
-    finally:old.close()
     if not found:return 0
     # Isolated turns keep the database in native-state/; a fresh profile starts in that layout.
     if not (profile/'state.db').exists():(profile/'native-state').mkdir(exist_ok=True,mode=0o700)
-    new=SessionDB(database_path(profile));copied=0
-    try:
+    copied=0
+    with native_store.writer(profile) as new:
         for name,(session,origin,messages) in found.items():
-            if new.get_session(session):continue
-            new.create_session(session,source=origin)
-            new.append_messages_batch(session,messages)
+            if new.sessions.get(session):continue
+            new.sessions.create(NewSession(session_id=session,source=origin))
+            new.messages.append_batch(session,[NewMessage.from_live(message) for message in messages])
             copied+=len(messages)
             cursor=profile/name;temporary=cursor.with_suffix('.tmp')
             temporary.write_text(json.dumps({'session_id':session}));temporary.replace(cursor)
-    finally:new.close()
     return copied
 
 

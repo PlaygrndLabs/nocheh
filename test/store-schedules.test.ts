@@ -8,6 +8,7 @@ import {canonical,digest} from '../src/archive.js';
 import {connectStores,initializeStoreDatabases} from '../src/stores/connections.js';
 import {fixtureServices} from './fixture-agent.js';
 import {honchoEngine} from '../src/memory/honcho.js';
+import {reviveSchedules} from '../src/workflows/schedules.js';
 
 test('schedule definitions and fires are recoverable control operations with durable guarded derivatives',
  {skip:process.env.NOCHEH_STORES_FIXTURE!=='1',timeout:180000},async()=>{
@@ -54,6 +55,15 @@ test('schedule definitions and fires are recoverable control operations with dur
     const duplicate=await publish({workflow_sequence:1,workflow_cursor:digest('cursor-1')});assert.equal(duplicate.duplicate,true);
     await assert.rejects(publish({workflow_sequence:1}),{code:'schedule_sequence_conflict'});
     await assert.rejects(publish({workflow_sequence:0}),{code:'invalid_schedule_sequence'});
+    // A Run now moves the cursor away and back to an earlier one, whose row is closed: a new generation runs it.
+    const timed="SELECT state,generation FROM workflow_registry WHERE family='schedules' AND job_id LIKE 'schedule:%:'||$1 ORDER BY generation";
+    await publish({workflow_cursor:digest('cursor-2')});await publish({workflow_cursor:digest('cursor-1')});
+    assert.deepEqual((await stores.control.query(timed,[digest('cursor-1')])).rows.map(row=>[row.state,row.generation]),[['skipped',1],['queued',2]]);
+    assert.deepEqual((await stores.control.query(timed,[digest('cursor-2')])).rows.map(row=>row.state),['skipped']);
+    // A schedule an earlier Run now left with only a superseded row starts again once at startup.
+    await stores.control.query("UPDATE workflow_registry SET state='skipped',waiting_reason='superseded' WHERE family='schedules' AND job_id LIKE 'schedule:%'");
+    assert.equal(await reviveSchedules(stores.control),1);assert.equal(await reviveSchedules(stores.control),0);
+    assert.deepEqual((await stores.control.query(timed,[digest('cursor-1')])).rows.map(row=>[row.state,row.generation]),[['skipped',1],['skipped',2],['queued',3]]);
     const first=await input('first');fail='INSERT INTO managed_runs';await assert.rejects(s.schedules.capture(owner,first),/lost control write/);
     lostCommit=true;await assert.rejects(s.schedules.capture(owner,first),/lost commit acknowledgement/);
     const committed=await s.schedules.capture(owner,first);assert.equal(committed.state,'captured');
