@@ -1245,6 +1245,10 @@ listed:listed.entries.filter(entry=>entry.name===name).map(entry=>entry.size),le
                   len({json.loads(r['parameters'].get('reply_parameters', '{}')).get('message_id') for r in self.replies(before, OWNER)}) == 1)
 
     def restart_preserves_receipts(self):
+        # A mark said in the private chat and in a group topic before the restart, which each chat's next turn must
+        # still have in its own history, not only in memory.
+        self.turn(self.f.message(OWNER, 'یادت باشد: HISTMARK-PRIVATE-31'), OWNER)
+        self.turn(self.f.message(GROUP, 'یادت باشد: HISTMARK-GROUP-31', topic=11), GROUP, 11)
         sent = len(self.f.sent())
         self.wait('updates_acknowledged', lambda: not self.f.telegram()['updates'], 120)
         # The whole runtime restarts: the Telegram service with its delivery receipts, and the agent.
@@ -1253,7 +1257,19 @@ listed:listed.entries.filter(entry=>entry.name===name).map(entry=>entry.size),le
         wait_telegram_connected(self.wait, self.f.command, 'polling_reconnected')
         time.sleep(10)
         self.gate('restart_sends_nothing', len(self.f.sent()) == sent)
-        self.turn(self.f.message(OWNER, 'بعد از راه‌اندازی دوباره'), OWNER)
+        self.history_kept('after_restart')
+
+    def upgraded_copy_keeps_history(self):
+        # full_test --upgrade: every container was made again on the new images.
+        wait_telegram_connected(self.wait, self.f.command, 'polling_after_upgrade', 300)
+        self.history_kept('after_upgrade')
+
+    def history_kept(self, when):
+        """The private chat and the group topic each still have their mark in the agent's session history."""
+        _, text = self.turn(self.f.message(OWNER, 'قبلا چه گفتم؟ [[history:HISTMARK-PRIVATE-31]]'), OWNER)
+        self.gate('private_history_kept_'+when, 'present' in text, answer=text)
+        _, text = self.turn(self.f.message(GROUP, 'قبلا چه گفتم؟ [[history:HISTMARK-GROUP-31]]', topic=11), GROUP, 11)
+        self.gate('group_history_kept_'+when, 'present' in text, answer=text)
 
     def granted_participant(self):
         # The owner makes someone a member by their Telegram user ID, with only OTHER_GROUP ticked, through the dashboard's

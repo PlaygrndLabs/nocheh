@@ -12,13 +12,19 @@ repeat and nothing is spent.
 The owner allowed this copy to run beside the live installation. It never reads
 the live state, credentials or volumes.
 
-    python3 -m tools.acceptance.full_test [--build] [--only NAME ...] [--keep]
+    python3 -m tools.acceptance.full_test [--build | --upgrade] [--only NAME ...] [--keep]
 
 The images are the installation's own by default. On a development machine
 those can be older than the checkout, because the development stack runs its
 own source-watched images; --build first builds the checkout's images under
 separate `:tester` tags, so the run tests the current code and the live
 images stay as they are.
+
+--upgrade checks an upgrade instead: the copy starts on the installation's own
+images, the scenarios fill it, then the checkout's images (built as with
+--build) replace them in place. Nothing may be lost: every table's rows in each
+store and Hermes state.db, and the kept files (upgrade_check.py). Then each chat
+must still have its history and answer, and the dashboard pages open.
 
 Reports go to data/acceptance/results/full-<time>/report.md and result.json.
 A failed run also keeps every container's state and log in logs/ there. When
@@ -72,7 +78,7 @@ TITLES = {
     'telegram_refresh_names': 'Group names refresh', 'owner_freedom_keeps_group_cards': 'Setting: your private requests run without approval, except posts to groups',
     'launcher_stop_mid_turn': 'Stopping mid-answer recovers', 'deleted_topic': 'A deleted topic does not leak elsewhere',
     'polling_outage': 'Telegram outage recovers', 'lost_send_response': 'A lost Telegram answer is not sent twice',
-    'blocked_private_then_recovery': 'Blocked bot recovers', 'restart_preserves_receipts': 'Restart sends nothing twice',
+    'blocked_private_then_recovery': 'Blocked bot recovers', 'restart_preserves_receipts': 'Restart sends nothing twice, and each chat keeps its history',
     'granted_participant': 'A member added by Telegram user ID talks at once; switched off in a group, they get the fixed reply', 'storage_report': 'Storage report', 'stage_timings': 'Reply timings',
     'group_members': 'Set up members on the Members page, with no restart', 'group_name_addresses': 'Groups: calling Nocheh by name',
     'unaddressed_messages_reach_next_reply': 'Groups: unaddressed messages inform the next reply',
@@ -180,6 +186,8 @@ TITLES = {
     'member_app_never_leaks': 'No private mark is in any answer of the members\' app or any reminder a member got',
     'no_lingering_isolated_turns': 'Nothing left running afterwards', 'dashboard_pages': 'Every dashboard page opens',
     'end_of_run_health': 'No service ran out of memory or kept restarting',
+    'upgrade_keeps_data': 'An upgrade to the checkout\'s images keeps every table, Hermes session and kept file',
+    'upgraded_copy_keeps_history': 'After an upgrade, your private chat and a group still have their history',
 }
 
 
@@ -387,14 +395,21 @@ def main():
     parser.add_argument('--directory', type=Path, help='Reuse a kept fixture instead of starting a new one')
     parser.add_argument('--keep', action='store_true', help='Leave the fixture running afterwards for diagnosis')
     parser.add_argument('--build', action='store_true', help='Build the checkout\'s images under :tester tags first and test those')
+    parser.add_argument('--upgrade', action='store_true', help='Start on the installation\'s images, then upgrade the filled copy to '
+                        'the checkout\'s and check nothing was lost')
     for role, image in IMAGES.items():
         parser.add_argument('--'+role+'-image', default=image)
     parser.add_argument('--vm-image', default=VM_IMAGE, help='The made-up machine of the machine job scenarios; built when missing')
     args = parser.parse_args()
+    if args.upgrade and (args.build or args.directory):
+        parser.error('--upgrade starts its own copy on the installation\'s images; leave out --build and --directory')
     os.environ['NOCHEH_TESTER_VM_IMAGE'] = args.vm_image
     from tools.acceptance.product_scenarios import PRODUCT_ORDER, ProductScenarios
     from tools.acceptance.telegram_scenarios import ORDER, run
     order = args.only or ([] if args.skip_existing else ORDER)+PRODUCT_ORDER
+    if args.upgrade and 'restart_preserves_receipts' not in order:
+        # It leaves the history marks the upgraded copy must still have.
+        order = order+['restart_preserves_receipts']
     steps, fresh = [], args.directory is None
     directory = (args.directory or ROOT/'data/acceptance/results'/('full-'+time.strftime('%Y%m%dT%H%M%SZ', time.gmtime()))).resolve()
     log = (directory.parent if fresh else directory)/(directory.name+'.log' if fresh else 'full-test.log')
@@ -425,6 +440,21 @@ def main():
     if all(row['passed'] for row in steps):
         summary, _ = run(directory, [name for name in order if name != 'dashboard_pages'], ProductScenarios)
         scenarios = summary['scenarios']
+        if args.upgrade:
+            built, tags = build_images(log)
+            steps += built
+            # Honcho's image is built per pinned revision, not by --build: a moved pin upgrades to its image when built.
+            honcho = 'nocheh-honcho:'+json.loads((ROOT/'services/honcho/upstreams.lock.json').read_text())['honcho']['revision'][:8]
+            if honcho != args.honcho_image and not subprocess.call(['docker', 'image', 'inspect', honcho], stdout=subprocess.DEVNULL,
+                                                                  stderr=subprocess.DEVNULL):
+                tags['honcho'] = honcho
+            if all(row['passed'] for row in built):
+                from tools.acceptance import upgrade_check
+                upgraded, row = upgrade_check.upgrade(directory, tags, log, step)
+                steps += upgraded
+                scenarios.append(row)
+                if all(row['passed'] for row in upgraded):
+                    scenarios += run(directory, ['upgraded_copy_keeps_history'], ProductScenarios)[0]['scenarios']
         if not args.only or 'dashboard_pages' in args.only:
             scenarios.append(dashboard_pages(directory, directory))
     directory.mkdir(parents=True, exist_ok=True)
