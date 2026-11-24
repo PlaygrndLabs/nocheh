@@ -515,7 +515,9 @@ class MachineServerTests(unittest.TestCase):
     def test_cleanup_finds_programs_with_lsof_and_ps_where_there_is_no_proc(self):
         # As on macOS: no /proc; `lsof` names the holders of the marker, `ps -E` prints a process's command line, which may
         # span lines, then its environment, and shows none for the system's own programs (here: sleep and a sh in sys);
-        # BWK awk where it is installed, which refuses a newline in -v. A program with the tag counts also under such a
+        # BWK awk where it is installed, which refuses a newline in -v. A line of a command line that starts with a number,
+        # one that is no process of the login's or the pid of its program that names the tag, never hides the program it
+        # belongs to. A program with the tag counts also under such a
         # system program left to init by a launcher that closed what it inherited, but not under the owner's program that
         # shows its environment; the owner's program that only names the tag in its command line is not the job's, also
         # one started under another name (as macOS's sh runs bash, or Homebrew's grep runs ggrep) or whose first argument
@@ -565,9 +567,10 @@ class MachineServerTests(unittest.TestCase):
             time.sleep(5)
             job=[self.launch(JOB,folder,'mine'),self.launch(None,folder,'tagged','tail -f /dev/null'),
                  self.launch(JOB,folder,'started',f'(env -i sleep 600 7<&- & echo $! > {folder}/child; wait)')]
-            # A command line that spans lines, with a line that starts like another process's, then the environment with
-            # the tag; its child shows none.
-            job+=[int((here/'child').read_text()),self.launch(None,folder,'lines',"sh -c 'sleep 600; :' 'one\n2 two'")]
+            # A command line that spans lines, with a line that starts like a process that is not the login's (no pid on
+            # Linux is that high, so it is the same whoever runs the test), then the environment with the tag; its child
+            # shows none.
+            job+=[int((here/'child').read_text()),self.launch(None,folder,'lines',"sh -c 'sleep 600; :' 'one\n4194304 two'")]
             launcher=self.launch(JOB,folder,'launcher',f'{sys.executable} -c \'import subprocess; subprocess.Popen(["{here}/sys/sh", "-c", '
                                  f'"echo $$ > {folder}/syssh; tail -f /dev/null & echo $! > {folder}/systail; wait"])\'')
             sleeper=f'-c "import time; time.sleep(600)" {ms.TAG}={JOB}'
@@ -581,10 +584,14 @@ class MachineServerTests(unittest.TestCase):
                                  f"{ms.TAG}={JOB} {folder}/worker'",tag=False)
             (here/'names.sh').write_text(f"bash -c 'exec -a sh bash -c \"tail -f /dev/null & echo \\$! > {folder}/namedchild; wait; : {ms.TAG}={JOB}\"' & "
                                          f"echo $! > {folder}/named; wait\n")
+            named=self.launch(None,folder,'named-py',f'{sys.executable} {sleeper}',tag=False)
+            # A command line that spans lines, with a line that starts like the login's program that names the tag: the
+            # pid then starts two lines.
+            job.append(self.launch(None,folder,'lines-named',f"sh -c 'sleep 600; :' 'one\n{named} two'"))
             others=[self.launch(None,folder,'own',tag=False),self.launch('e'*64,folder,'other'),
                     self.launch(None,folder,'manager',f'sh -c \'{ms.TAG}=$1 tail -f /dev/null & echo $! > {folder}/managed; wait\' sh {JOB}',tag=False),
                     self.launch(None,folder,'names',f'{here}/sys/sh {here}/names.sh',tag=False),
-                    self.launch(None,folder,'named-py',f'{sys.executable} {sleeper}',tag=False),
+                    named,
                     self.launch(None,folder,'grep',f"{here}/sys/sh -c 'grep {ms.TAG}={JOB} {folder}/fifo & echo $! > {folder}/grepped; wait'",tag=False),
                     self.launch(None,folder,'shim',f"bash -c 'exec -a sh bash -c \"read x < {folder}/fifo; : {ms.TAG}={JOB}\"'",tag=False),
                     self.launch(None,folder,'orphan-grep',f'grep {ms.TAG}={JOB} {folder}/fifo',tag=False),
