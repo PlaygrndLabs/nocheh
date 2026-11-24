@@ -256,6 +256,12 @@ let retirementRevision=0,retired=false;const retirementHistory:any[]=[];
 let settingsChanges:Record<string,unknown>={};
 // The settings apply that is running in the `slow-apply` and `lost-apply` scenarios.
 let applying:any=null;
+// Saved settings that work at once, as LIVE in tools/operations/installation/settings.py; any other saved setting waits
+// for Apply, as on the real server, so the dashboard offers it. An apply that never finished leaves it waiting.
+const liveSettings=new Set(['NOCHEH_BACKUP_SCHEDULE','NOCHEH_BACKUP_TIME','NOCHEH_BACKUP_TIME_ZONE','NOCHEH_BACKUP_KEEP','TELEGRAM_PROBLEM_NOTICES',
+  'NOCHEH_OFFSITE','NOCHEH_OFFSITE_PROVIDER','NOCHEH_OFFSITE_ENDPOINT','NOCHEH_OFFSITE_BUCKET','NOCHEH_OFFSITE_REGION','NOCHEH_OFFSITE_ACCESS_KEY_ID',
+  'NOCHEH_OFFSITE_SECRET_ACCESS_KEY','NOCHEH_OFFSITE_PASSPHRASE','NOCHEH_OFFSITE_KEEP']);
+let applyPending=false;
 /** Which provider and model each part uses, as owner monitoring reports it; never a key. */
 function modelRoutes() {
   const setting=(key:string)=>String(settingsChanges[key]??fields.find(f=>f.key===key)?.value??'');
@@ -274,7 +280,7 @@ const fields=[{key:'TELEGRAM_ENABLED',value:'false',editable:true},{key:'TELEGRA
 // `no-owner` is an installation with its bot token and owner ID still to add.
 const settingValue=(mode:string,f:{key:string;value?:string|null})=>settingsChanges[f.key]??(mode==='fresh'?freshInstall[f.key]?.value:mode==='no-owner'&&f.key==='TELEGRAM_OWNER_ID'?'':undefined)??f.value;
 // What GET /settings answers; connecting off-site storage answers it too.
-const settingsView=(mode:string)=>({revision:settingsRevision,apply_state:applying?'pending':'current',
+const settingsView=(mode:string)=>({revision:settingsRevision,apply_state:applying||applyPending?'pending':'current',
    applying:applying?{id:applying.id,step:applying.step,started_at:applying.created_at}:null,fields:fields.map(f=>({...f,value:settingValue(mode,f),
      // A saved owner ID changes only from the command line, like the real settings.
      ...(f.key==='TELEGRAM_OWNER_ID'&&settingValue(mode,f)?{editable:false,changes_from:'cli'}:{}),
@@ -1158,8 +1164,9 @@ const server=createServer((req,res)=>{void(async()=>{
   if(route==='/settings/apply'&&['slow-apply','lost-apply'].includes(mode)){if(applying)throw new HttpError(409,'wait_for_active_jobs');
    const job:any={id:randomUUID(),kind:'settings.apply',state:'running',step:'restarting',created_at:new Date().toISOString()};jobs.unshift(job);applying=job;
    if(mode==='lost-apply')setTimeout(()=>{job.state='interrupted';job.error='dashboard_restarted';applying=null;},2500);
-   else{setTimeout(()=>{job.step='memory';},5000);setTimeout(()=>{job.state='complete';job.result={status:'applied'};applying=null;},8000);}
+   else{setTimeout(()=>{job.step='memory';},5000);setTimeout(()=>{job.state='complete';job.result={status:'applied'};applying=null;applyPending=false;},8000);}
    return json(res,202,job);}
+  if(route==='/settings/apply')applyPending=false;
   if(route==='/operations'||route==='/settings/apply'){const job={id:randomUUID(),kind:route==='/operations'?'operations.'+body.action:'settings.apply',state:'complete',created_at:new Date().toISOString(),result:{status:'synthetic_only'}};jobs.unshift(job);return json(res,200,job);}
   const importAction=/^\/jobs\/([a-f0-9-]{36})\/(start|cancel)$/.exec(route);
   if(importAction){const job=jobs.find(j=>j.id===importAction[1]);if(!job)throw new HttpError(404,'job_not_found');if(importAction[2]==='start'){if(job.state!=='ready'&&(JSON.stringify(body.mapping)!==JSON.stringify(job.mapping)||body.review_approved!==job.review_approved))throw new HttpError(409,'import_configuration_conflict');job.mapping=body.mapping;job.review_approved=body.review_approved;job.state='running';}else job.state='cancelled';return json(res,200,job);}
@@ -1228,7 +1235,9 @@ const server=createServer((req,res)=>{void(async()=>{
       throw new HttpError(400,'Your Telegram user ID changes only from the command line: ./bin/nocheh config set TELEGRAM_OWNER_ID <id>');
     // Memory already holds small-model vectors here; another model needs the confirmed rebuild.
     if(mode!=='no-provider'&&body.changes?.NOCHEH_EMBEDDING_MODEL&&body.changes.NOCHEH_EMBEDDING_MODEL!=='text-embedding-3-small'&&body.rebuild_memory!==true)throw new HttpError(400,'embedding_model_change_requires_rebuild');
-    settingsChanges={...settingsChanges,...body.changes};settingsRevision+='x';return json(res,200,{ok:true});}
+    settingsChanges={...settingsChanges,...body.changes};settingsRevision+='x';
+    if(Object.keys(body.changes??{}).some(key=>!liveSettings.has(key)))applyPending=true;
+    return json(res,200,{ok:true});}
   if(route==='/data/'+id+'/guarded'){if(body.expected_revision!==revision)throw new HttpError(409,'guard_revision_conflict');guarded=body.content?.text??source.event.text;revision++;return json(res,200,{ok:true});}
   if(route==='/sources/'+id+'/retirement'){
     if(body.expected_revision!==retirementRevision)throw new HttpError(409,'source_retirement_conflict');

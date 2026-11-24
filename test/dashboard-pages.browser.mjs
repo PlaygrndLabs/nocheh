@@ -77,7 +77,23 @@ const routes = [
   ...['chats', 'pause'].map(tab => ['members?member=' + MIRA + '&tab=' + tab, 'Members']),
 ];
 
-let server, browser;
+let server, browser, session;
+
+/**
+ * A new page in its own browser context that signs in to the preview with the one session the whole file shares: the
+ * preview keeps at most 256 open sessions for 12 hours each (src/dashboard-auth.ts), fewer than this file opens pages.
+ */
+async function newPage(options) {
+  const page = await browser.newPage(options);
+  await page.context().addCookies([{...session, url: origin, httpOnly: true, sameSite: 'Strict'}]);
+  // A route still reading its answer when the test closes the page would otherwise fail after the test has ended.
+  const close = page.close.bind(page);
+  page.close = async options => {
+    await page.unrouteAll({behavior: 'ignoreErrors'});
+    return close(options);
+  };
+  return page;
+}
 
 function browserPath() {
   const candidates = [process.env.PLAYWRIGHT_CHROMIUM_EXECUTABLE, '/opt/pw-browsers/chromium'];
@@ -106,6 +122,8 @@ before(async () => {
     });
   });
   browser = await chromium.launch({executablePath: browserPath()});
+  const [name, value] = (await fetch(origin + '/')).headers.get('set-cookie').split(';')[0].split('=');
+  session = {name, value};
 });
 
 after(async () => {
@@ -148,7 +166,7 @@ const membersTable = page => tableOf(page, 'Members', 'All members');
 const memberPart = (page, name) => page.getByRole('tablist', {name: 'This member'}).getByRole('tab', {name}).click();
 
 async function open(hash, viewport = {width: 1440, height: 900}) {
-  const page = await browser.newPage({viewport});
+  const page = await newPage({viewport});
   const problems = [];
   page.on('pageerror', error => problems.push('page error: ' + error.message));
   page.on('console', message => {
@@ -504,7 +522,7 @@ test('the private chat and groups each start from their own default role and ski
 });
 
 test('a page for a feature the connected agent lacks says so instead of offering a retry', async () => {
-  const page = await browser.newPage({viewport: {width: 1440, height: 900}});
+  const page = await newPage({viewport: {width: 1440, height: 900}});
   await page.route(/\/api\/nocheh\/memory\/persona\?/, route =>
     route.fulfill({status: 409, contentType: 'application/json', body: '{"error":"agent_capability_unavailable"}'}),
   );
@@ -515,6 +533,20 @@ test('a page for a feature the connected agent lacks says so instead of offering
   assert.equal(await card.getByRole('button', {name: 'Try again'}).count(), 0);
   await page.close();
 });
+
+/** How many rows of the table say Changed, on all its pages. */
+async function changedCount(card, table) {
+  const turn = async label => {
+    const button = card.getByRole('button', {name: label, exact: true});
+    if (!(await button.count()) || !(await button.isEnabled())) return false;
+    await button.click();
+    return true;
+  };
+  while (await turn('Previous'));
+  let count = await table.getByText('Changed', {exact: true}).count();
+  while (await turn('Next')) count += await table.getByText('Changed', {exact: true}).count();
+  return count;
+}
 
 test('a built-in instruction is replaced, checked and reset to the built-in text', async () => {
   const {page, problems} = await open('settings?view=assistant&tab=instructions');
@@ -545,7 +577,7 @@ test('a built-in instruction is replaced, checked and reset to the built-in text
   await bar.getByText('No unsaved changes').waitFor();
   await page.reload();
   await table.getByText('Changed').first().waitFor();
-  assert.equal(await table.getByText('Changed', {exact: true}).count(), 2);
+  assert.equal(await changedCount(card, table), 2);
   drawer = await instruction(page, 'Groups');
   await drawer.getByRole('button', {name: 'Reset to built-in'}).click();
   assert.equal(
@@ -557,7 +589,7 @@ test('a built-in instruction is replaced, checked and reset to the built-in text
   await bar.getByRole('button', {name: 'Save'}).click();
   await bar.getByText('No unsaved changes').waitFor();
   await page.getByRole('searchbox', {name: 'Find an instruction'}).fill('');
-  assert.equal(await table.getByText('Changed', {exact: true}).count(), 1);
+  assert.equal(await changedCount(card, table), 1);
   assert.deepEqual(problems, []);
   await page.close();
 });
@@ -1009,21 +1041,21 @@ test('off-site storage connects from one Cloudflare token or a Backblaze key, th
   ]);
   const token = page.locator('#offsite-cloudflare-token');
   await token.fill('refused');
-  await page.getByRole('button', {name: 'Connect'}).click();
+  await page.getByRole('button', {name: 'Connect', exact: true}).click();
   const refused = page.getByRole('alert').filter({hasText: 'Cloudflare didn’t accept this token'});
   await refused.waitFor();
   assert.doesNotMatch(await refused.textContent(), /Nocheh setup/);
   // A stop after the token was accepted leaves it for another try, and says where to delete it.
   await token.fill('no-r2');
-  await page.getByRole('button', {name: 'Connect'}).click();
+  await page.getByRole('button', {name: 'Connect', exact: true}).click();
   const stopped = page.getByRole('alert').filter({hasText: 'R2 isn’t turned on'});
   await stopped.waitFor();
   assert.match(await stopped.textContent(), /delete “Nocheh setup”/);
   // A token that reaches two accounts asks which one.
   await token.fill('two-accounts');
-  await page.getByRole('button', {name: 'Connect'}).click();
+  await page.getByRole('button', {name: 'Connect', exact: true}).click();
   await page.locator('#offsite-cloudflare-account').selectOption({label: 'Example work'});
-  await page.getByRole('button', {name: 'Connect'}).click();
+  await page.getByRole('button', {name: 'Connect', exact: true}).click();
   const done = page.getByRole('status').filter({hasText: 'Connected to bucket nocheh-backups.'});
   await done.waitFor();
   assert.match(await done.textContent(), /locked for 7 days.*Now type your passphrase below and save\./);
@@ -1041,7 +1073,7 @@ test('off-site storage connects from one Cloudflare token or a Backblaze key, th
   assert.equal(await bar.getByText('No unsaved changes').count(), 1);
   await page.locator('#offsite-backblaze-key-id').fill('0041example');
   await page.getByLabel('Application key').fill('K004example');
-  await page.getByRole('button', {name: 'Connect'}).click();
+  await page.getByRole('button', {name: 'Connect', exact: true}).click();
   await page.getByRole('status').filter({hasText: 'Connected to bucket example-backups.'}).waitFor();
   await bar.getByText('No unsaved changes').waitFor();
   // Other S3 storage keeps every field to fill in by hand, and is saved with Save.
@@ -1771,7 +1803,7 @@ test('a project ticks the groups that share memory, and a group joins one only a
   await page.close();
 
   // Adding a group that is in another project moves it, and says its tasks stay on the old project's list.
-  const moving = await browser.newPage({viewport: {width: 1440, height: 900}});
+  const moving = await newPage({viewport: {width: 1440, height: 900}});
   await moving.route(/\/api\/nocheh\/projects\/assignments\?after=$/, route =>
     route.fulfill({
       status: 200,
@@ -1880,7 +1912,7 @@ test('a project ticks the groups that share memory, and a group joins one only a
   await topic.close();
 
   // A served group with no answer yet asks which project it joins; None is saved as an answer.
-  const unanswered = await browser.newPage({viewport: {width: 1440, height: 900}});
+  const unanswered = await newPage({viewport: {width: 1440, height: 900}});
   const posted = [];
   await unanswered.route(/\/api\/nocheh\/projects\/effective\?space=-10042$/, route =>
     route.fulfill({
@@ -1908,7 +1940,7 @@ test('a project ticks the groups that share memory, and a group joins one only a
   await unanswered.close();
 
   // A group that only follows no project (an older removal or an undo) has not answered either.
-  const following = await browser.newPage({viewport: {width: 1440, height: 900}});
+  const following = await newPage({viewport: {width: 1440, height: 900}});
   const followingPosted = [];
   const inheritRow = space => ({space_id: space, project_id: null, mode: 'inherit', revision: 3});
   for (const space of ['-10042', '-10073'])
@@ -1963,7 +1995,7 @@ test('a project ticks the groups that share memory, and a group joins one only a
 
   // A group already in a project names that project's other groups and its task list before Nocheh turns on there,
   // since it then joins them.
-  const placed = await browser.newPage({viewport: {width: 1440, height: 900}});
+  const placed = await newPage({viewport: {width: 1440, height: 900}});
   const placedRow = {space_id: '-10073', project_id: 'ab'.repeat(32), mode: 'assigned', revision: 4};
   await placed.route(/\/api\/nocheh\/projects\/effective\?space=-10073$/, route =>
     route.fulfill({
@@ -2315,7 +2347,7 @@ test('a group and a person show the short ID a send card adds after their name, 
 });
 
 test('a group’s Members here card is read-only, links each member, offers Make member, and an older topic is added by its number or link', async () => {
-  const page = await browser.newPage({viewport: {width: 1440, height: 900}});
+  const page = await newPage({viewport: {width: 1440, height: 900}});
   const problems = [];
   page.on('pageerror', error => problems.push('page error: ' + error.message));
   // The new group is on here, so its Topics card shows.
@@ -2418,7 +2450,7 @@ test('a group’s Members here card is read-only, links each member, offers Make
 test('a group people were seen in, past the first page of chats, is listed once and opens as itself', async () => {
   // More than 100 chats: the upgraded group is not on the first page. People were seen there, so the list shows it from
   // the people route, which names it by its Nocheh id, and opening it looks it up (ADR-0252).
-  const page = await browser.newPage({viewport: {width: 1440, height: 900}});
+  const page = await newPage({viewport: {width: 1440, height: 900}});
   const problems = [];
   page.on('pageerror', error => problems.push('page error: ' + error.message));
   await page.route(/\/api\/nocheh\/conversations\?limit=100$/, async route => {
@@ -2549,7 +2581,7 @@ test('every group Nocheh is on in can be shared with and refreshed, past the fir
 
 test('a group that moves to a page not read yet is never dropped quietly, and sharing it still asks first', async () => {
   writeFileSync('/tmp/nocheh-ui-scenario', 'many-chats');
-  const page = await browser.newPage({viewport: {width: 1440, height: 900}});
+  const page = await newPage({viewport: {width: 1440, height: 900}});
   try {
     const problems = [];
     page.on('pageerror', error => problems.push('page error: ' + error.message));
@@ -2601,7 +2633,7 @@ test('a sharing rule finds messages from its groups by their chat, a new-id grou
     channel: 'telegram',
     occurred_at: new Date().toISOString(),
   });
-  const page = await browser.newPage({viewport: {width: 1440, height: 900}});
+  const page = await newPage({viewport: {width: 1440, height: 900}});
   await page.route(/\/api\/nocheh\/sharing\/rules\?after=$/, route =>
     route.fulfill({status: 200, contentType: 'application/json', body: JSON.stringify({rules: [rule], next: null})}),
   );
@@ -2644,7 +2676,7 @@ test('a rule keeps a source the chat directory is still looking up, and saving w
     private_sources: [],
   };
   let failing = true;
-  const page = await browser.newPage({viewport: {width: 1440, height: 900}});
+  const page = await newPage({viewport: {width: 1440, height: 900}});
   const problems = [];
   page.on('pageerror', error => problems.push('page error: ' + error.message));
   await page.route(/\/api\/nocheh\/sharing\/rules\?after=$/, route =>
@@ -3982,10 +4014,13 @@ test('the members’ app lists the member’s own schedules in Settings, which t
   assert.equal(await zone.inputValue(), phone);
   await zone.selectOption('');
   await page.waitForFunction(() => document.querySelector('#member-time-zone')?.value === '');
-  const zones = answers
-    .filter(answer => answer.path === '/api/member/time-zone')
-    .map(answer => JSON.parse(answer.request).time_zone);
-  assert.deepEqual(zones, ['Asia/Tokyo', phone, null]);
+  // The response listener stores each answer a moment after the page has it.
+  const zones = () =>
+    answers
+      .filter(answer => answer.path === '/api/member/time-zone')
+      .map(answer => JSON.parse(answer.request).time_zone);
+  for (let tries = 0; tries < 50 && zones().length < 3; tries++) await new Promise(done => setTimeout(done, 100));
+  assert.deepEqual(zones(), ['Asia/Tokyo', phone, null]);
   assert.deepEqual(problems, []);
   await page.close();
   // A member without Personal assistant sees no Schedules card.
@@ -4387,7 +4422,7 @@ test('People says a name the owner set is shown to everyone, and keeps a private
 
 /** A page opened with every dashboard request it makes counted by path, the query left out. */
 async function counted(hash) {
-  const page = await browser.newPage({viewport: {width: 1440, height: 900}});
+  const page = await newPage({viewport: {width: 1440, height: 900}});
   const problems = [],
     asked = new Map();
   page.on('pageerror', error => problems.push('page error: ' + error.message));
