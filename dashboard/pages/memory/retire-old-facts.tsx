@@ -1,7 +1,8 @@
 /**
- * Memory › Long-term memory › Clean up: "Hide replaced facts" is Honcho's dreams (ADR-0298), saved with the page and
- * applied by restarting long-term memory. "Hide unused facts" is Nocheh's own rule (ADR-0299), saved at once in its
- * dialog. Both are off by default, and both only hide facts, which can be brought back.
+ * The two ways long-term memory hides facts, both off by default; a hidden fact can be brought back. "Hide replaced
+ * facts" is Honcho's own clean-up, its dreams (ADR-0298), on Memory › Long-term memory › Clean up: saved with the page
+ * and applied by restarting long-term memory. "Hide unused facts" is Nocheh's own rule (ADR-0299), on Memory › Facts:
+ * saved at once in its dialog.
  */
 import {useState} from 'react';
 import {useResource} from '../../lib/resource';
@@ -30,11 +31,11 @@ export function RetireOldFactsCard() {
   return (
     <Card>
       <CardHeader
-        title="Hide old facts"
-        description="Two ways to keep long-term memory tidy. Both are off until you turn them on. A hidden fact is not deleted: replies stop using it, and you can bring it back from Hidden facts."
+        title="Honcho clean-up"
+        description="Built into Honcho, off until you turn it on. A hidden fact is not deleted: replies stop using it, and you can bring it back from Hidden facts."
         className="pb-3"
       />
-      {/* Its own rows: the card sits in the narrow column, where a setting row's wide control would crush the text. */}
+      {/* Its own row: the card sits in the narrow column, where a setting row's wide control would crush the text. */}
       {field && (
         <div className="flex items-start justify-between gap-4 border-t border-line px-5 py-4">
           <div className="min-w-0">
@@ -43,9 +44,9 @@ export function RetireOldFactsCard() {
               <Unsaved show={s.changed(retireKey)} />
             </label>
             <p className="mt-0.5 text-[13px] text-muted">
-              Built into Honcho. Honcho rereads what it learned and hides a fact when a newer one replaces it. For
-              example, “lives in Paris” is hidden once it learns “moved to Berlin”. It runs by itself, at most every 8
-              hours, while new facts come in.
+              Honcho rereads what it learned and hides a fact when a newer one replaces it. For example, “lives in
+              Paris” is hidden once it learns “moved to Berlin”. It runs by itself, at most every 8 hours, while new
+              facts come in.
             </p>
             <p className="mt-1 text-[13px] text-muted">
               Costs extra: each run uses up to about 22 memory-model calls, counted in the memory thinking limit.
@@ -62,12 +63,12 @@ export function RetireOldFactsCard() {
           </div>
         </div>
       )}
-      <HideUnusedRow />
     </Card>
   );
 }
 
-function HideUnusedRow() {
+/** Nocheh's own rule for long-term memory's facts, on Memory › Facts. */
+export function HideUnusedCard() {
   const rule = useResource<CleanUp>('/memory/clean-up', 60000);
   const [editing, setEditing] = useState(false);
   const data = rule.data;
@@ -75,14 +76,14 @@ function HideUnusedRow() {
   const days = data.hide_unused_days;
   const waiting = days !== null && data.starts_at !== null && Date.parse(data.starts_at) > Date.now();
   return (
-    <div className="flex items-start justify-between gap-4 border-t border-line px-5 py-4">
-      <div className="min-w-0">
-        <p className="text-sm font-medium">Hide unused facts</p>
-        <p className="mt-0.5 text-[13px] text-muted">
-          Nocheh’s own rule. It hides a fact when no reply used it and no chat mentioned it again for the number of days
-          you choose. Free: it only compares dates, once a day.
-        </p>
-        <p className="mt-1 text-[13px]">
+    <Card>
+      <CardHeader
+        title="Hide unused facts"
+        description="Nocheh’s own rule for facts in long-term memory, off until you turn it on. It hides a fact when no reply used it and no chat mentioned it again for the number of days you choose. Free: it only compares dates, once a day. Hidden facts are listed under Long-term memory › Clean up, where you can bring them back."
+        className="pb-3"
+      />
+      <div className="flex items-start justify-between gap-4 border-t border-line px-5 py-4">
+        <p className="min-w-0 text-[13px]">
           {days === null ? 'Off' : `On: after ${days.toLocaleString()} days`}
           {waiting && (
             <span className="text-muted">
@@ -98,11 +99,11 @@ function HideUnusedRow() {
             </span>
           )}
         </p>
-      </div>
-      <div className="shrink-0">
-        <Button size="sm" onClick={() => setEditing(true)}>
-          Change
-        </Button>
+        <div className="shrink-0">
+          <Button size="sm" onClick={() => setEditing(true)}>
+            Change
+          </Button>
+        </div>
       </div>
       <Dialog
         open={editing}
@@ -112,7 +113,7 @@ function HideUnusedRow() {
       >
         <HideUnusedForm rule={data} onSaved={() => setEditing(false)} />
       </Dialog>
-    </div>
+    </Card>
   );
 }
 
