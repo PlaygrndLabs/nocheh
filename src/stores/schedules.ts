@@ -66,8 +66,9 @@ const grantId=(kind:'edit'|'run_now',schedule:string,request:string)=>digest(can
 const bodyHash=(document:Record<string,unknown>)=>{const {enabled:_on,removed:_gone,execution_version:_version,...body}=document;return digest(canonical(body));};
 const LOGICAL=/^nocheh-[a-f0-9]{24}$/;
 /** Who a turn sets schedules as: the member in their own chat, else the owner. */
-/** Reads that never hold a schedule (ADR-0294): the asker's own archive or task lookups, and an unreported conversation. */
-const SCHEDULE_IGNORES=new Set<OutsideRead>(['archive','unchecked']);
+/** Reads that never hold a schedule (ADR-0294): only an unreported conversation. An archive search holds one, since it
+ * returns other people's messages too (owner's choice, 2026-11-24). */
+const SCHEDULE_IGNORES=new Set<OutsideRead>(['unchecked']);
 const turnPerson=(principal:Reader)=>boundReader(principal)==='member'?principal.member??null:'owner';
 
 /** Who set a definition version: a person's live turn, a person's press (edit grant), or Hermes's own checkpoint. */
@@ -263,7 +264,7 @@ export class ScheduleRepository {
     if(schedule.kind==='cron'&&!parseCron(schedule.expr))throw new HttpError(400,'schedule_cron_unsupported');
     // What outside content reached this turn so far, and the instruction the schedule ran with before it (ADR-0294). The
     // asker's own typed words are theirs, the owner's or a member's in their own chat, whose chat id is their account's.
-    // Their own archive and task lookups and a runtime that never reported its conversation do not hold a schedule.
+    // A runtime that never reported its conversation does not hold a schedule; an archive search does.
     const asker=grant.person==='owner'?s.access.policy().owner_id:grant.scope;
     const reads=(await outsideReads(this.control,s.stores.archive,turn,asker)).filter(read=>!SCHEDULE_IGNORES.has(read));
     const before=(await this.control.query(currentSql,[scheduleId(grant.profile,identity(body.job_id))])).rows[0];

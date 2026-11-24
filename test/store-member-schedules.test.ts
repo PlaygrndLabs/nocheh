@@ -123,7 +123,7 @@ test('a member\'s own schedules: captured only with Personal assistant on, run a
     const profile='nocheh-'+digest(MEMBER_GP_CHAT).slice(0,24),announced:unknown[]=[];
     const turn={...member,turnEvent:'member-turn-'+base} as Reader;
     // The message the turn answers, as the archive keeps it: by default her own typed words in her chat.
-    const asking=(message:Record<string,unknown>)=>({query:async(sql:string)=>sql.includes('id=ANY')?{rows:[{id:turn.turnEvent,payload:Buffer.from(JSON.stringify(
+    const asking=(message:Record<string,unknown>,id=turn.turnEvent!)=>({query:async(sql:string)=>sql.includes('id=ANY')?{rows:[{id,payload:Buffer.from(JSON.stringify(
       {message:{message_id:1,chat:{id:Number(MEMBER_GP_CHAT),type:'private'},from:{id:Number(MEMBER_GP_CHAT)},...message}}))}]}:live.stores.archive.query(sql)}) as any;
     const turnServices={...live,stores:{...live.stores,archive:asking({text:'Remind me every weekday at 8'})},turns:{binding:async()=>({logical_profile:profile})},
       access:{policy:()=>policy},schedules:s.schedules,scheduleNotices:{announce:async(input:unknown)=>{announced.push(input);return {state:'sent'};}}};
@@ -166,6 +166,12 @@ test('a member\'s own schedules: captured only with Personal assistant on, run a
     // Removed by asking frees a place.
     const removed=definition('asked-'+base,{workflow_sequence:3,workflow_cursor:digest('removed')});Object.assign(removed.definition,{enabled:false,removed:true,execution_version:'v3'});
     await s.schedules.turnDefinition(turn,removed,turnServices);
+    // A turn that searched the archive cannot either: its results hold other people's messages (owner's choice, 2026-11-24).
+    const searched={...member,turnEvent:digest('member-search-'+base)} as Reader;
+    assert.equal((await recordScheduleTurn(turnServices,searched,await scheduleTurn(turnServices,searched))).allowed,true);
+    await stores.control.query("INSERT INTO turn_reads(event_id,origin,read) VALUES($1,'conversation','none'),($1,'turn','archive')",[searched.turnEvent]);
+    const typed={...turnServices,stores:{...turnServices.stores,archive:asking({text:'Remind me every weekday at 8'},searched.turnEvent)}};
+    await assert.rejects(s.schedules.turnDefinition(searched,definition('searched-'+base),typed),{status:409,code:'schedule_start_needed'});
     // A turn that read outside content, here a file, cannot leave a schedule running (ADR-0294): Hermes saves it paused,
     // and its message shows what it does, says why and offers Start.
     const filed={...turnServices,stores:{...turnServices.stores,archive:asking({document:{file_id:'x'},caption:'every morning'})}};
