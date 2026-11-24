@@ -738,6 +738,7 @@ function ModelChoices({providers, name}: {providers: Provider[]; name: (id: stri
         {parts.map(part => (
           <PartRow key={part.id} part={part} providers={providers} name={name} providerOptions={providerOptions} />
         ))}
+        <BackupRow providers={providers} name={name} />
         <div className="grid gap-3 border-t border-line px-5 py-2.5 sm:grid-cols-[minmax(0,2fr)_minmax(0,1fr)_minmax(0,1.2fr)] sm:items-start">
           <div>
             <p className="text-sm font-medium">Memory search</p>
@@ -849,6 +850,44 @@ function ModelChoices({providers, name}: {providers: Provider[]; name: (id: stri
         </div>
       </div>
     </Card>
+  );
+}
+
+/** A second reply model on the replies provider, used only when the replies model cannot answer. */
+function BackupRow({providers, name}: {providers: Provider[]; name: (id: string) => string}) {
+  const settings = useSettings();
+  const provider = settings.value('NOCHEH_REPLY_PROVIDER') || settings.value('NOCHEH_PROVIDER');
+  const listing = useProviderModels(providers.find(p => p.id === provider));
+  const replyModel = settings.value('NOCHEH_REPLY_MODEL') || settings.value('NOCHEH_MODEL');
+  const backup = settings.value('NOCHEH_REPLY_BACKUP_MODEL');
+  return (
+    <div className="grid gap-3 border-t border-line px-5 py-2.5 sm:grid-cols-[minmax(0,2fr)_minmax(0,1fr)_minmax(0,1.2fr)] sm:items-start">
+      <div>
+        <p className="text-sm font-medium">Backup for replies</p>
+        <p className="text-[13px] text-muted">
+          Answers instead when the replies model fails after its retries, such as during a provider outage. Leave empty
+          for none.
+        </p>
+      </div>
+      <p className="text-[13px] text-muted sm:pt-2">
+        {provider ? `Same as replies (${name(provider)})` : 'Same as replies'}
+      </p>
+      <Field
+        labelHidden
+        label="Backup model"
+        htmlFor="reply-backup-model"
+        error={backup && backup === replyModel ? 'Choose a model other than the replies model.' : undefined}
+      >
+        <ModelInput
+          id="reply-backup-model"
+          value={backup}
+          listing={provider ? listing : null}
+          disabled={settings.busy || !provider}
+          inherit="None"
+          onChange={value => settings.set('NOCHEH_REPLY_BACKUP_MODEL', value)}
+        />
+      </Field>
+    </div>
   );
 }
 

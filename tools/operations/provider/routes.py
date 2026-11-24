@@ -32,7 +32,7 @@ PARTS = {
 }
 DEFAULTS = {
     'NOCHEH_PROVIDER': '',
-    'NOCHEH_REPLY_PROVIDER': '', 'NOCHEH_REPLY_MODEL': '',
+    'NOCHEH_REPLY_PROVIDER': '', 'NOCHEH_REPLY_MODEL': '', 'NOCHEH_REPLY_BACKUP_MODEL': '',
     'NOCHEH_MEMORY_PROVIDER': '', 'NOCHEH_MEMORY_MODEL': '',
     'NOCHEH_GUARD_PROVIDER': '', 'NOCHEH_GUARD_MODEL': '',
     'NOCHEH_IMAGE_PROVIDER': '', 'NOCHEH_IMAGE_MODEL': '',
@@ -187,6 +187,12 @@ def routes(values):
     return {part: route(values, part) for part in PARTS}
 
 
+def backup_model(values):
+    """The reply model Hermes switches to when the reply model cannot answer, on the same provider; '' is none."""
+    model = (values.get('NOCHEH_REPLY_BACKUP_MODEL') or '').strip()
+    return model if model and route(values, 'reply').configured else ''
+
+
 def validate(values):
     known = providers(values)
     keys(values)
@@ -204,6 +210,15 @@ def validate(values):
             raise ValueError(label + ' needs a model name')
         if not selected.key:
             raise ValueError(label + ' uses ' + known[selected.provider]['name'] + ', which has no API key')
+    backup = (values.get('NOCHEH_REPLY_BACKUP_MODEL') or '').strip()
+    if backup:
+        reply = route(values, 'reply')
+        if not reply.configured:
+            raise ValueError('A backup reply model needs a replies provider')
+        if not MODEL.fullmatch(backup):
+            raise ValueError('The backup reply model needs a model name')
+        if backup == reply.model:
+            raise ValueError('The backup reply model must differ from the replies model')
     embedding_route(values)
     transcription_route(values)
 
@@ -218,6 +233,7 @@ def environment(values):
         configured = current.configured
         result.update({f'NOCHEH_{name}_ROUTE_URL': current.url, f'NOCHEH_{name}_ROUTE_MODEL': current.model if configured else '',
                        f'NOCHEH_{name}_ROUTE_KEY': current.key, f'NOCHEH_{name}_ROUTE_PROVIDER': current.provider})
+    result['NOCHEH_REPLY_ROUTE_BACKUP_MODEL'] = backup_model(values)
     result['NOCHEH_MEMORY_ROUTE_MODEL'] = selected['memory'].model if selected['memory'].configured else ''
     from tools.operations.provider.transcription_config import MODELS
     voice = transcription_route(values)

@@ -16,6 +16,7 @@ export const settingLabels: Record<string, string> = {
   NOCHEH_MODEL: 'Default model',
   NOCHEH_REPLY_PROVIDER: 'Replies provider',
   NOCHEH_REPLY_MODEL: 'Replies model',
+  NOCHEH_REPLY_BACKUP_MODEL: 'Backup for replies',
   NOCHEH_MEMORY_PROVIDER: 'Memory provider',
   NOCHEH_MEMORY_MODEL: 'Memory model',
   NOCHEH_GUARD_PROVIDER: 'Secret check provider',

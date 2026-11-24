@@ -33,6 +33,8 @@ x-service: &service
     NOCHEH_HONCHO_ENABLED: ${NOCHEH_HONCHO_ENABLED:-false}
     # The reply model: the security broker admits only this model and provider address.
     NOCHEH_MODEL: ${NOCHEH_REPLY_ROUTE_MODEL:-${NOCHEH_MODEL:-claude-sonnet-5-5}}
+    # The model it also admits when the reply model fails; empty is none.
+    NOCHEH_BACKUP_MODEL: ${NOCHEH_REPLY_ROUTE_BACKUP_MODEL:-}
     NOCHEH_REPLY_ROUTE_URL: ${NOCHEH_REPLY_ROUTE_URL:-}
     NOCHEH_GUARD_ROUTE_MODEL: ${NOCHEH_GUARD_ROUTE_MODEL:-${NOCHEH_MODEL:-claude-sonnet-5-5}}
     GUARD_MODE: ${NOCHEH_GUARD_MODE:-on}
@@ -655,6 +657,7 @@ services:
       NOCHEH_HERMES_JOURNAL_RETENTION_DAYS: ${NOCHEH_HERMES_JOURNAL_RETENTION_DAYS:-0}
       # Settings › Models: replies and secret checks each use their own provider and model.
       NOCHEH_MODEL: ${NOCHEH_REPLY_ROUTE_MODEL:-${NOCHEH_MODEL:-claude-sonnet-5-5}}
+      NOCHEH_BACKUP_MODEL: ${NOCHEH_REPLY_ROUTE_BACKUP_MODEL:-}
       NOCHEH_REPLY_ROUTE_URL: ${NOCHEH_REPLY_ROUTE_URL:-}
       NOCHEH_REPLY_ROUTE_KEY: ${NOCHEH_REPLY_ROUTE_KEY:-}
       # Provider ids label Nocheh's usage tracker rows.

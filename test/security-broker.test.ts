@@ -152,7 +152,7 @@ test('PostgreSQL broker: scoped credential, exact preparation, route denial and 
     }}),{headers:{'content-type':'text/event-stream'}});
     return Response.json({ok:true});
   };
-  const server=brokerServer({pool,token,archive:'http://archive',prepare:async(principal,input)=>{preparedPrincipals.push(principal);if(guardDown)throw Error('detector unavailable');return {guarded:true,payload:(input as any).payload};},hermes:'http://hermes',model:'same-model',fetch:mock});
+  const server=brokerServer({pool,token,archive:'http://archive',prepare:async(principal,input)=>{preparedPrincipals.push(principal);if(guardDown)throw Error('detector unavailable');return {guarded:true,payload:(input as any).payload};},hermes:'http://hermes',model:'same-model',backupModel:'backup-model',fetch:mock});
   try {
     await initialize(pool);
     const event=await ingest(pool,{version:1,key:'security-turn',origin:'live',kind:'message',channel:'browser',bot_id:'fixture',scope:'1',source_id:'1',revision:'0',occurred_at:null,text:'exact source',payload:{profile:'owner'}},false);
@@ -179,6 +179,10 @@ test('PostgreSQL broker: scoped credential, exact preparation, route denial and 
     const provider=calls.at(-1)!;assert.deepEqual(provider.body,payload);assert.equal(provider.auth,'Bearer '+secret);
     assert.equal(provider.agent,'Nocheh','a reply names its client, so a gateway bot check does not refuse it');
     assert.equal(preparedPrincipals[0].turnEvent,event.id);assert.equal(preparedPrincipals[0].admin,false);
+    // The backup reply model is admitted as well, and reaches the provider unchanged.
+    const backup=await request('/v1/chat/completions',{...payload,model:'backup-model'});
+    assert.equal(backup.status,200);await backup.text();
+    assert.equal((calls.at(-1)!.body as {model:string}).model,'backup-model');
     const before=calls.length;
     for(const path of ['/internal/security/transport','/v1/tools/claim','/v1/chat/completions?url=https://evil.example'])assert.equal((await request(path,payload)).status,403);
     assert.equal((await request('/v1/chat/completions',{...payload,model:'changed-model'})).status,403);
