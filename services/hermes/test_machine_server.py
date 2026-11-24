@@ -585,9 +585,6 @@ class MachineServerTests(unittest.TestCase):
             (here/'names.sh').write_text(f"bash -c 'exec -a sh bash -c \"tail -f /dev/null & echo \\$! > {folder}/namedchild; wait; : {ms.TAG}={JOB}\"' & "
                                          f"echo $! > {folder}/named; wait\n")
             named=self.launch(None,folder,'named-py',f'{sys.executable} {sleeper}',tag=False)
-            # A command line that spans lines, with a line that starts like the login's program that names the tag: the
-            # pid then starts two lines.
-            job.append(self.launch(None,folder,'lines-named',f"sh -c 'sleep 600; :' 'one\n{named} two'"))
             others=[self.launch(None,folder,'own',tag=False),self.launch('e'*64,folder,'other'),
                     self.launch(None,folder,'manager',f'sh -c \'{ms.TAG}=$1 tail -f /dev/null & echo $! > {folder}/managed; wait\' sh {JOB}',tag=False),
                     self.launch(None,folder,'names',f'{here}/sys/sh {here}/names.sh',tag=False),
@@ -606,6 +603,14 @@ class MachineServerTests(unittest.TestCase):
                 job+=[int((here/name).read_text()) for name in ('syssh','systail','worker','sshtop','sshtail')]
                 others+=[editor,monitor,*(int((here/name).read_text()) for name in ('managed','named','namedchild','grepped','ggrepped','edited','session'))]
                 self.assertFalse(alive(launcher))
+                self.assertEqual(self.cleanup_here(script,path),0)
+                for pid in job:self.assertFalse(alive(pid),pid)
+                for pid in others:self.assertTrue(alive(pid),pid)
+                # A command line that spans lines, with a line that starts like the login's program that names the tag: the
+                # pid then starts two lines. A cleanup of its own, so nothing else makes it check every process; the job's
+                # marker is back, as a command of the job would make it, so the editor still started before the job.
+                (self.home/'.nocheh'/'jobs'/JOB).touch()
+                job.append(self.launch(None,folder,'lines-named',f"sh -c 'sleep 600; :' 'one\n{named} two'"))
                 self.assertEqual(self.cleanup_here(script,path),0)
                 for pid in job:self.assertFalse(alive(pid),pid)
                 for pid in others:self.assertTrue(alive(pid),pid)

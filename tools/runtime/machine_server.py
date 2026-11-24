@@ -162,7 +162,7 @@ shows() {
   ! ps -E -ww -o command= -p "$1" | tr ' ' '\n' | grep -qxF -- "$2"
 }
 hits() {
-  local tag=$1 file=$2 e d p f v w rest dirs all born now table= marked= tagged= plain=
+  local tag=$1 file=$2 e d p f v w rest dirs all live born now table= marked= tagged= plain=
   if [ -n "$proc" ]; then
     for e in /proc/[0-9]*; do
       p=${e#/proc/}
@@ -186,18 +186,21 @@ hits() {
     table=$(ps -x -U "$u" -o pid= -o ppid= -o stat=) && [ -n "$table" ] || return 1
     table=$(printf '%s\n' "$table" | awk '$3 !~ /^Z/ {print $1, $2}')
     # ps -E prints each command line, then the environment; where a command line spans lines (macOS's ps prints none
-    # that do), one may start like another process's. So a line starts a process only where its first word is the pid
-    # of one of the login's live processes (table); any other line goes with the process above it, also one that starts
-    # with another user's pid. Each process that shows the tag is checked on its own.
-    # Where a line with the tag has no process above it, a pid starts two lines, or a process shows the tag nowhere,
-    # the line may be another's: then every process is (-). One that is gone by then is skipped.
-    all=
-    for p in $(ps -E -ww -x -U "$u" -o pid= -o command= | T=$table awk -v t="$tag" '
-      BEGIN {n=split(ENVIRON["T"], a, "\n"); for (i=1; i<=n; i++) if (split(a[i], f, " ")) live[f[1]]=1}
-      ($1 in live) {p=$1; starts[p]++}
+    # that do), one may start like another process's. Each process that shows the tag is checked on its own. The line
+    # may be another's where a line with the tag has no number above it, a number starts two lines, a process shows the
+    # tag nowhere, or a number is none of the login's live processes (table) nor a program with the tag that started
+    # since (+): then every process is (-). One that is gone by then is skipped. The pids reach awk on one line, so its
+    # own environment, which ps -E lists too, starts no line.
+    all= live=$(printf '%s\n' "$table" | awk '{printf "%s ", $1}')
+    for p in $(ps -E -ww -x -U "$u" -o pid= -o command= | T=$live awk -v t="$tag" '
+      BEGIN {n=split(ENVIRON["T"], a, " "); for (i=1; i<=n; i++) live[a[i]]=1}
+      $1 ~ /^[0-9]+$/ {p=$1; starts[p]++}
       {for (i=1; i<=NF; i++) if ($i==t) {hit[p]=1; break}}
-      END {for (q in hit) print ((q=="" || starts[q]>1) ? "-" : q)}'); do
-      case $p in -) all=1; continue;; esac
+      END {for (q in hit) print ((q=="" || starts[q]>1) ? "-" : (q in live) ? q : "+" q)}'); do
+      case $p in
+        -) all=1; continue;;
+        +*) has "${p#+}" "$tag" || all=1; continue;;
+      esac
       has "$p" "$tag"
       case $? in 0) tagged="$tagged $p";; 2) all=1;; esac
     done
