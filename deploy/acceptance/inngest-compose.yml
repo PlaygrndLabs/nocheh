@@ -30,6 +30,7 @@ services:
       INNGEST_EVENT_KEY: ${INNGEST_EVENT_KEY}
       INNGEST_SIGNING_KEY: ${INNGEST_SIGNING_KEY}
       SERVICE_TOKEN: ${SERVICE_TOKEN}
+      AGENT_KEY: inngest-fixture-agent-key-not-a-real-credential
       NOCHEH_DATA_DIR: /tmp/nocheh-fixture
       TELEGRAM_ENABLED: "false"
     depends_on:
@@ -69,6 +70,7 @@ services:
     environment:
       <<: *database
       SERVICE_TOKEN: ${SERVICE_TOKEN}
+      AGENT_KEY: inngest-fixture-agent-key-not-a-real-credential
       NOCHEH_DATA_DIR: /tmp/nocheh-fixture
       INNGEST_BASE_URL: http://inngest-server:8288
       INNGEST_CONNECT_GATEWAY_URL: ws://inngest-server:8289/v0/connect

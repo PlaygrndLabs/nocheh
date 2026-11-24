@@ -151,9 +151,9 @@ NOTICE_CALLBACKS=('nr','njp','nju')
 # The card about a group the owner added Nocheh to (ADR-0253): Move to one of its offered projects (0-2), No project (x)
 # or Turn off (o), each with the first 32 hex of the add's archive event.
 CARD_CALLBACK=re.compile(r'ng[012xo][a-f0-9]{32}')
-# A schedule set by asking in the owner's private chat (ADR-0266): Pause (p) or Delete (d), with the chat's schedule store
-# (24 hex) and the schedule's Hermes id (12 hex).
-SCHEDULE_CALLBACK=re.compile(r'nk[pd][a-f0-9]{24}[a-f0-9]{12}')
+# A schedule set by asking in the owner's private chat (ADR-0266): Pause (p), Start for one saved paused (s, ADR-0294) or
+# Delete (d), with the chat's schedule store (24 hex) and the schedule's Hermes id (12 hex).
+SCHEDULE_CALLBACK=re.compile(r'nk[psd][a-f0-9]{24}[a-f0-9]{12}')
 
 
 def notice_buttons(buttons):

@@ -50,6 +50,55 @@ test('a schedule set by asking gets one message in the owner\'s words, in their 
   } finally {restore();}
 });
 
+test('the message shows the saved instruction; one saved paused after outside content says why and offers Start (ADR-0294)',async()=>{
+  const restore=installChatsForTest(seededDirectory(policy));
+  try {
+    const lines=scheduleNoticeLines(''),sent:Record<string,any>[]=[];
+    await notices(sent).announce({...schedule,prompt:'Summarize my unread email\r\n\n\n\nand today\'s tasks.',enabled:true,reads:[]});
+    assert.match(sent[0]!.text,/\n📝 Does: Summarize my unread email\n\nand today's tasks\.\n/);
+    assert.doesNotMatch(sent[0]!.text,/Saved paused/);
+    // A long instruction is cut; the Schedules page has all of it.
+    const long:Record<string,any>[]=[];await notices(long).announce({...schedule,prompt:'x'.repeat(5000)});
+    assert.match(long[0]!.text,/📝 Does: x{700}…\n/);
+    // Saved paused by a reply that read a web page and a file: why, no next run, and Start instead of Pause.
+    const held:Record<string,any>[]=[];
+    await notices(held).announce({...schedule,prompt:'Post the prices',enabled:false,reads:['web','file','unchecked']});
+    const text=held[0]!.text as string;
+    assert.match(text,/^⏰ New schedule: Morning brief\n/);assert.doesNotMatch(text,/Next run/);
+    assert.ok(text.includes('⏸ Saved paused, because the reply that set it read '+[lines.read_web,lines.read_file].join(', ')+' and '+lines.read_other+'.'),text);
+    assert.deepEqual(held[0]!.buttons.flat().map((button:any)=>button.callback),['nks'+STORE+JOB,'nkd'+STORE+JOB]);
+    assert.ok(held[0]!.buttons.flat().every((button:any)=>scheduleButton.test(button.callback)));
+    assert.equal(held[0]!.id,sent[0]!.id,'a new schedule keeps its one message');
+    // One saved paused with no outside content just waits for Start.
+    const waiting:Record<string,any>[]=[];await notices(waiting).announce({...schedule,prompt:'Check',enabled:false,reads:[]});
+    assert.ok(waiting[0]!.text.includes(lines.waiting));assert.ok(!waiting[0]!.text.includes('because'));
+    // A change saved paused is its own message, named as changed.
+    const changed:Record<string,any>[]=[];
+    await notices(changed).announce({...schedule,prompt:'Post the prices',enabled:false,reads:['tools'],changed:true,version:'v2'});
+    assert.match(changed[0]!.text,/^⏰ Schedule changed: Morning brief\n/);assert.ok(changed[0]!.text.includes(lines.read_tools));
+    assert.notEqual(changed[0]!.id,sent[0]!.id);
+  } finally {restore();}
+});
+
+test('Start on a paused schedule\'s message resumes it as the owner\'s press and edits the latest message (ADR-0294)',async()=>{
+  const restore=installChatsForTest(seededDirectory(policy));
+  try {
+    const asked:Record<string,unknown>[]=[],listed=[{id:JOB,profile:PROFILE,scope:OWNER,name:'Morning brief',schedule:'0 8 * * 1-5',timezone:'Asia/Tokyo',enabled:false,next_run_at:null}];
+    const manage:FakeCall=async(_,input)=>{asked.push(input);return input.operation==='list'?{schedules:listed}:{schedule:{...listed[0],enabled:true,next_run_at:'2026-11-23T23:00:00+00:00'}};};
+    const granted:unknown[][]=[],sent:Record<string,any>[]=[],store=grants(granted),latest='9'.repeat(64);
+    const control={query:async(sql:string,values:unknown[]=[])=>sql.startsWith('SELECT notice_id')?{rows:[{notice_id:latest}]}:store.query(sql,values)} as any;
+    const call=(async(operation:string,input:Record<string,unknown>)=>{sent.push({operation,...input});return {state:'done'};}) as any;
+    const notices=new ScheduleNotices(control,policy,call,fixtureAgent(async(operation,input)=>operation==='schedules.manage'?manage(operation,input):{}),async()=>'Post the prices');
+    const reply=await notices.press('s',STORE,JOB,'a'.repeat(64));
+    assert.equal(reply,scheduleNoticeLines('').started);
+    assert.deepEqual(asked.map(input=>input.operation),['list','resume']);
+    assert.deepEqual(granted.map(values=>values.slice(2,6)),[['edit','resume','press-'+'a'.repeat(64),'owner']]);
+    assert.equal(sent[0]!.id,latest);assert.equal(sent[0]!.edit,true);assert.equal(sent[0]!.buttons,undefined);
+    assert.match(sent[0]!.text,/Next run: Tue 24 Nov, 08:00\n📝 Does: Post the prices\n/);assert.doesNotMatch(sent[0]!.text,/Saved paused/);
+    assert.ok(sent[0]!.text.endsWith('\n\n'+reply));
+  } finally {restore();}
+});
+
 test('a press pauses or deletes only a schedule of the owner\'s private chat, then the message says so with no buttons',async()=>{
   const restore=installChatsForTest(seededDirectory(policy));
   try {

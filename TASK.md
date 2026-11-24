@@ -19,14 +19,14 @@ Nocheh is in development mode and not yet released. Everything below is built an
   durable workflows; data tools reach the agent over Nocheh's MCP server.
 - Chats: groups reply only when addressed and capture every message and file from everyone
   ([ADR-0264](docs/adr/0264-groups-are-read-whole-from-everyone.md)); held messages are all answered; reactions show progress. A message
-  sent while the agent works joins its running turn ([ADR-0291](docs/adr/0291-a-message-joins-the-running-turn-in-its-chat.md)).
+  sent while the agent works joins its running turn ([ADR-0299](docs/adr/0299-a-message-joins-the-running-turn-in-its-chat.md)).
 - Members: owner-added members use their joined groups and their own private chat; in a group
   Nocheh answers from that group only; the mini app is English only (members steps 1 to 5,
   [ADR-0242](docs/adr/0242-private-chats-stay-out-of-group-sharing.md) to [ADR-0265](docs/adr/0265-member-mini-app.md)).
 - Workspaces: several installs run side by side on one machine ([ADR-0245](docs/adr/0245-several-workspaces-on-one-machine.md)).
 - Memory: fact sources and People pages ([ADR-0261](docs/adr/0261-recalled-facts-and-search-hits-name-their-source.md)); memory search stays on
   `text-embedding-3-small` until the owner picks another model ([ADR-0181](docs/adr/0181-memory-search-model-change-rebuilds-memory.md)); a group's recall, search and learning read
-  through a memory wall that only holds its own chats ([ADR-0286](docs/adr/0286-memory-walls.md)); each project ticks which of its groups share memory ([ADR-0287](docs/adr/0287-projects-tick-the-groups-that-share-memory.md)).
+  through a memory wall that only holds its own chats ([ADR-0286](docs/adr/0286-memory-walls.md)); "Retire old facts" (Honcho dreams) is an owner setting, off by default, and keeps retired facts hidden with "Bring back" ([ADR-0298](docs/adr/0298-retire-old-facts.md)); each project ticks which of its groups share memory ([ADR-0287](docs/adr/0287-projects-tick-the-groups-that-share-memory.md)).
 - People: the name the owner sets in Memory › People is the person's name everywhere, and each
   person has a private note only the owner reads
   ([ADR-0274](docs/adr/0274-people-names-everywhere-and-private-notes.md)). Honcho 3.6.2 reads
@@ -51,7 +51,11 @@ Nocheh is in development mode and not yet released. Everything below is built an
   account's name and email, from Notion's notion-get-self tool.
 - Approvals: cards with scopes once, here and always this site; approved answers return to the
   asking chat ([ADR-0212](docs/adr/0212-approved-operations-answer-in-the-chat-that-asked.md), [ADR-0214](docs/adr/0214-allow-a-site-or-command-in-one-chat.md), [ADR-0215](docs/adr/0215-an-allowed-operation-answers-in-the-same-turn.md)); only addresses no model built open without a
-  card ([ADR-0263](docs/adr/0263-only-addresses-no-model-built-open-without-a-card.md)).
+  card ([ADR-0263](docs/adr/0263-only-addresses-no-model-built-open-without-a-card.md)); "Do what I ask" runs a
+  command with no card only from the owner's own typed words, with nothing outside in the message, the day's
+  conversation or the turn's reads before it ([ADR-0293](docs/adr/0293-do-what-i-ask-runs-commands-only-from-the-owners-typed-words.md)); Inbox › History says why each action ran, and a card for a request made
+  in another chat quotes who asked ([ADR-0294](docs/adr/0294-show-why-each-action-is-allowed.md)). A new schedule's notice shows its
+  instruction, and one set by a reply that read outside content is saved paused until Start.
 - Security: the 2026-11 security review's fixes parts 1 to 5 are merged; machine jobs read only their
   card's chat, period and named Notion pages ([ADR-0283](docs/adr/0283-machine-jobs-read-only-their-card.md)), and
   watch start-up files and admin rights ([ADR-0284](docs/adr/0284-machine-jobs-watch-start-up-files-and-admin.md)); files are
@@ -59,8 +63,11 @@ Nocheh is in development mode and not yet released. Everything below is built an
   Per-person keys, step 1: the dashboard chat page is off and Hermes reads passes without the
   master key ([ADR-0289](docs/adr/0289-chat-page-off-and-hermes-reads-passes-without-the-master-key.md)); Nocheh
   grants every schedule change and fire, and Hermes's Cron page is read-only
-  ([ADR-0290](docs/adr/0290-nocheh-grants-schedule-changes-and-fires.md)). Next: the agent login replaces the
-  master key in Hermes, then one-time keys per reply.
+  ([ADR-0290](docs/adr/0290-nocheh-grants-schedule-changes-and-fires.md)); an agent login replaces the master key in
+  Hermes, which reaches only its own routes, and `rotate-keys` renews the master key, the agent login and Hermes's session token
+  ([ADR-0295](docs/adr/0295-agent-login-replaces-the-master-key-in-hermes.md)). Next: one-time keys per reply. A group's
+  tools permission runs only what carries no data, within ten reads a message; the rest asks
+  ([ADR-0291](docs/adr/0291-group-tools-run-only-what-carries-no-data.md)).
 - Dashboard: compact tables and sub-tabs on every page (table-first plan, steps 1 to 5);
   Connections, Members and Sent to apps pages.
 - Operations: daily backups, export and import, an encrypted off-site copy (off until the owner
@@ -76,12 +83,16 @@ Owner steps:
 - Machine jobs: the owner's own Stop test on the connected VM.
 
 Checks and follow-ups:
+- Retire old facts ([ADR-0298](docs/adr/0298-retire-old-facts.md)): untried live. Once the owner turns it on, check the first dreams' cost on Usage, that the learning queue keeps up, and that a retired fact shows under Hidden facts and comes back. Next: an owner rule, off by default, that hides facts no reply read and no chat said again for a set number of days (e.g. 180).
 - Security fixes part 2 ([ADR-0251](docs/adr/0251-fixes-that-lose-nothing.md)): about a week after install, check `./bin/nocheh diagnose`
   for `hermes_page_script_reports` (none) and a passing tester run, then switch the Hermes page
   script policy from Report-Only to enforced in one commit. Later: one shared name cleaner for
   cards, forwards and recall labels, and a notice when an off-site restore check fails.
+- "Do what I ask" asks first after outside content ([ADR-0293](docs/adr/0293-do-what-i-ask-runs-commands-only-from-the-owners-typed-words.md)):
+  one live check on the owner's install with the setting on: a typed command runs, and the same command after a
+  forward in that day's conversation shows its card with the reason line.
 - Development startup order: a full tester run of `project_groups_stay_apart` alone.
-- Talk while it works ([ADR-0291](docs/adr/0291-a-message-joins-the-running-turn-in-its-chat.md)): a live check on the owner's install, two messages
+- Talk while it works ([ADR-0299](docs/adr/0299-a-message-joins-the-running-turn-in-its-chat.md)): a live check on the owner's install, two messages
   in a row while the agent uses a tool, after the merge.
 - A project's tasks are one list ([ADR-0276](docs/adr/0276-a-projects-tasks-are-one-list.md)): a full tester run of
   `project_groups_stay_apart`, `member_private_chat_reads_joined_groups`, `member_app_tasks`,

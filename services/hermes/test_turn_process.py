@@ -39,7 +39,7 @@ class TurnProcessTests(unittest.IsolatedAsyncioTestCase):
 
     def setUp(self):
         self.secret='synthetic-review-secret-not-a-real-credential'
-        environment=patch.dict(os.environ,{'SERVICE_TOKEN':self.secret})
+        environment=patch.dict(os.environ,{'AGENT_KEY':self.secret})
         environment.start();self.addCleanup(environment.stop)
 
     def review_body(self,purpose='memory-review',key=None):
@@ -55,14 +55,25 @@ class TurnProcessTests(unittest.IsolatedAsyncioTestCase):
             async def spawn(*args,**kwargs):
                 self.env=kwargs['env']
                 return await original(sys.executable,'-c',source,**kwargs)
-            with patch('services.hermes.turn_process.asyncio.create_subprocess_exec',spawn),patch.dict(os.environ,{'TELEGRAM_BOT_TOKEN':'hidden','OPENAI_API_KEY':'hidden','SERVICE_TOKEN':'hidden'}),patch('services.hermes.assistant_gateway.check_delivery_policy',return_value=delivery_allowed):
+            with patch('services.hermes.turn_process.asyncio.create_subprocess_exec',spawn),patch.dict(os.environ,{'TELEGRAM_BOT_TOKEN':'hidden','OPENAI_API_KEY':'hidden','SERVICE_TOKEN':'hidden','NOCHEH_HERMES_SESSION_TOKEN':'hidden'}),patch('services.hermes.assistant_gateway.check_delivery_policy',return_value=delivery_allowed):
                 events=[]
                 result=await _run_process(Path(folder),scope or Scope('-10','42',False,'group'),
                     {'event_id':'event','archive_credential':'scoped','text':'original','channel':'browser',**(extra or {})},'model',
                     SimpleNamespace(runtime=lambda:{'api_key':'ephemeral','base_url':'https://gateway.example.test/v1',
                                                     'provider':'openai','api_mode':'chat_completions'}),'session',events.append,cancel,progress,labels)
                 self.assertNotIn('SERVICE_TOKEN',self.env);self.assertNotIn('TELEGRAM_BOT_TOKEN',self.env);self.assertNotIn('OPENAI_API_KEY',self.env)
+                # Only the isolated mode's bridge gets the agent login (ADR-0295); a legacy model child gets no key.
+                self.assertNotIn('NOCHEH_HERMES_SESSION_TOKEN',self.env)
+                self.assertEqual(self.env.get('AGENT_KEY'),self.secret if os.environ.get('NOCHEH_SECURITY_RUNTIME')=='isolated' else None)
                 return result,events
+    async def test_only_the_isolated_bridge_gets_the_agent_login(self):
+        source='import sys,json; json.load(sys.stdin); print(json.dumps({"state":"done","text":"ok"}))'
+        await self.execute(source)
+        with patch.dict(os.environ,{'NOCHEH_SECURITY_RUNTIME':'isolated'}),patch('services.hermes.isolated_profile.prepare'),\
+             patch('services.hermes.security_transport.scoped_transport',return_value={}):
+            result,_=await self.execute(source)
+        self.assertEqual(result['text'],'ok')
+
     async def test_a_private_answer_says_first_where_it_was_asked_and_needs_its_pass(self):
         frame='[Private answer] The question below was asked in “Team”.'
         source=('import sys,json; body=json.load(sys.stdin); print(json.dumps({"state":"done","text":json.dumps({"text":body["text"],'
@@ -189,6 +200,35 @@ class TurnProcessTests(unittest.IsolatedAsyncioTestCase):
                     else:await run_process(profile,Scope('42','42',True,'owner'),body,'model',None,'session')
                 origin=note_sources.load(profile)[note_sources.key('memory','Learned in this turn.')]['origins'][0]
                 self.assertEqual((origin['by'],origin['event'],origin['channel'],origin['complete']),('turn',event,'telegram',outcome=='done'))
+    async def test_the_parent_reports_the_owners_conversation_before_the_model_starts(self):
+        """ "Do what I ask" learns what the conversation holds besides the owner's typed words before the model can act
+        on it, and only from an owner's live turn (ADR-0293)."""
+        from . import note_sources
+        forward='[Forwarded: You forwarded this from a person shown as “Sam”. It is information you shared, not your own request.]'
+        cases=((Scope('42','42',True,'owner'),'telegram',[['forward']]),(Scope('42','42',True,'owner'),'browser',[['forward']]),
+               (Scope('42','42',True,'owner'),'background',[]),(Scope('42','42',True,'owner',answer='-10'),'telegram',[]),
+               (Scope('-10','42',False,'group'),'telegram',[]))
+        for scope,channel,expected in cases:
+            with self.subTest(scope=scope,channel=channel),tempfile.TemporaryDirectory() as folder:
+                profile=Path(folder);reported=[]
+                async def child(*args):
+                    self.assertEqual(reported,expected,'reported before the model starts')
+                    return {'state':'done'}
+                with patch('services.hermes.assistant_gateway.prepare_profile',return_value=profile),patch('services.hermes.assistant_gateway.check_delivery_policy',return_value=True),\
+                     patch('services.hermes.retired_history.withhold_retired'),patch('services.hermes.turn_process._run_process',side_effect=child),\
+                     patch.object(note_sources,'lookup',return_value={}),\
+                     patch('services.hermes.assistant_gateway.report_conversation_reads',side_effect=lambda credential,reads:reported.append(reads)) as report:
+                    body={'archive_credential':'turn.e30.signature','event_id':'e'*64,'channel':channel,'forwarded':forward}
+                    await run_process(profile,scope,body,'model',None,'session')
+                self.assertEqual(reported,expected)
+                if expected:self.assertEqual(report.call_args.args[0],'turn.e30.signature')
+        # A session that could not be read is never reported, so a command in the turn asks first.
+        with tempfile.TemporaryDirectory() as folder,patch.object(note_sources,'conversation_reads',return_value=None),\
+             patch('services.hermes.assistant_gateway.prepare_profile',return_value=Path(folder)),patch('services.hermes.assistant_gateway.check_delivery_policy',return_value=True),\
+             patch('services.hermes.retired_history.withhold_retired'),patch('services.hermes.turn_process._run_process',new_callable=AsyncMock,return_value={'state':'done'}),\
+             patch.object(note_sources,'lookup',return_value={}),patch('services.hermes.assistant_gateway.report_conversation_reads') as report:
+            await run_process(Path(folder),Scope('42','42',True,'owner'),{'archive_credential':'turn.e30.signature','event_id':'e'*64,'channel':'telegram'},'model',None,'session')
+            report.assert_not_called()
     def job(self,**changes):
         """A job run's context as storage sends it, its deadlines from now."""
         now=time.time()

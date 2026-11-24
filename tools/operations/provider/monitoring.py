@@ -12,7 +12,9 @@ from tools.operations.installation.services import containers,describe,host_stat
 
 # Keys Nocheh generates for its own services. Provider keys are listed under Settings › Models.
 INTERNAL_KEYS = (
-    ('SERVICE_TOKEN', 'Nocheh services', 'Lets Nocheh’s own services and the dashboard call each other'),
+    ('SERVICE_TOKEN', 'Nocheh services', 'Lets Nocheh’s own services and the dashboard call each other; never given to the agent'),
+    ('AGENT_KEY', 'Agent (Hermes)', 'Lets Nocheh and the agent call each other; reaches only the agent’s own routes'),
+    ('NOCHEH_HERMES_SESSION_TOKEN', 'Hermes dashboard', 'Lets the dashboard open Hermes’s own pages'),
     ('INNGEST_EVENT_KEY', 'Background work (Inngest)', 'Sends new background work to Inngest'),
     ('INNGEST_SIGNING_KEY', 'Background work (Inngest)', 'Proves that a call from Inngest is genuine'),
     ('POSTGRES_PASSWORD', 'Database', 'Database administrator login, used for setup and backups'),

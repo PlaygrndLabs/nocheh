@@ -113,7 +113,7 @@ async def native_turn(root,scope,body,model,credentials,cancelled=None,steering=
             from .native_store import writer
             from .profile_config import preferences, read
             carry=preferences(read(profile/'config.yaml'))['nocheh.carry_messages']
-            with writer(profile) as db:daily_session.start(db,session_id,previous,carry,body.get('channel','telegram'))
+            with writer(profile) as db:daily_session.start(db,session_id,previous,carry,body.get('channel','telegram'),profile)
         await asyncio.to_thread(open_day)
     from .turn_process import run_process
     result = await run_process(root, scope, body, model, credentials, session_id,cancelled=cancelled,prepared_profile=profile,steering=steering)
@@ -168,6 +168,17 @@ def title_session(profile,session_id,message,owner,answer=False,member=False,mem
         if record is None or record.title_source in (TitleSource.LLM,TitleSource.USER):return
         try:db.sessions.set_auto_title(session_id,title,source=TitleSource.LLM)
         except ValueError:db.sessions.set_auto_title(session_id,db.sessions.next_title_in_lineage(title),source=TitleSource.LLM)
+
+
+def report_conversation_reads(credential,reads):
+    """Tell storage what the conversation a turn runs in holds besides the owner's typed words (ADR-0293). Never fails
+    the turn: storage then has no report, and a command in the turn asks first."""
+    import urllib.request
+    try:
+        request=urllib.request.Request(os.environ.get('ARCHIVE_URL','http://nocheh-app:8780')+'/v1/turn/conversation-reads',method='POST',
+            data=json.dumps({'reads':list(reads)}).encode(),headers={'Authorization':'Bearer '+credential,'Content-Type':'application/json'})
+        with urllib.request.urlopen(request,timeout=10) as response:return json.loads(response.read(1024)).get('recorded') is True
+    except Exception:return False
 
 
 def check_delivery_policy(credential):

@@ -1,4 +1,4 @@
-# ADR-0291: A message joins the running turn in its chat
+# ADR-0299: A message joins the running turn in its chat
 
 <status>
 Accepted on 2026-11-24. The owner asked for "Talk while it works" ("love 'Talk while it works'
@@ -36,7 +36,7 @@ runs each turn as its own sealed process and must keep every message answered on
    the conversation ends, it withdraws every ticket the agent never read and names the rest in
    its result (`joined`).
 5. **Sealed turns.** The bridge sends joined messages to the launcher's `/v1/turn/steer`, with the
-   service token, the turn's pass and a random nonce the turn was started with. The launcher writes
+   agent login ([ADR-0295](0295-agent-login-replaces-the-master-key-in-hermes.md)), the turn's pass and a random nonce the turn was started with. The launcher writes
    them to that turn's container stdin only; anything else is refused.
 6. **Answered or not.** A joined message the agent read, in a turn that ended done or silent,
    closes `suppressed` with `joined_turn`: no reply of its own, 👍 on it, and it counts as answered

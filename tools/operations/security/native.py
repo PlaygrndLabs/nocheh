@@ -7,9 +7,15 @@ from urllib.parse import urlencode
 from tools.operations.installation.configuration import load, native_endpoint
 
 
+def session_token(state):
+    """Hermes's own dashboard session token (ADR-0295): never the agent login or the master key, and never sent empty."""
+    token = load(state).get('NOCHEH_HERMES_SESSION_TOKEN', '')
+    if not token: raise ValueError('native_session_unavailable')
+    return token
+
+
 def call(state, path, body=None, method=None, revision=None):
-    import os
-    token = load(state)['SERVICE_TOKEN']
+    token = session_token(state)
     host,port = native_endpoint(state)
     headers = {'X-Hermes-Session-Token': token, 'Content-Type': 'application/json'}
     if revision: headers['If-Match'] = '"' + revision + '"'
@@ -22,7 +28,7 @@ def call(state, path, body=None, method=None, revision=None):
         try: code = json.load(error).get('error', 'native_administration_unavailable')
         except Exception: code = 'native_administration_unavailable'
         allowed = {'configuration_conflict', 'profile_scope_denied', 'invalid_preference',
-                   'unsupported_preference', 'managed_operation_unavailable', 'setting_managed_by_nocheh'}
+                   'unsupported_preference', 'managed_operation_unavailable', 'setting_managed_by_nocheh', 'profiles_read_only'}
         raise ValueError(code if code in allowed or isinstance(code,str) and code.startswith(('cron_','invalid_cron_')) else 'native_administration_unavailable') from None
 
 

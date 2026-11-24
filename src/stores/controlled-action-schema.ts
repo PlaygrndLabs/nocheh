@@ -50,6 +50,8 @@ ALTER TABLE controlled_actions ADD COLUMN IF NOT EXISTS authority text CHECK(aut
 -- ('rule'). One message opens only so many this way.
 ALTER TABLE controlled_actions ADD COLUMN IF NOT EXISTS free_read text CHECK(free_read IS NULL OR free_read IN ('typed','forwarded','page','named','rule'));
 CREATE INDEX IF NOT EXISTS controlled_action_free_reads ON controlled_actions(event_id) WHERE free_read IS NOT NULL;
+-- Why "Do what I ask" left a command to its card: what reached the turn besides the owner's typed words (ADR-0293).
+ALTER TABLE controlled_actions ADD COLUMN IF NOT EXISTS outside_reads text[];
 -- Page reads that ended unclear before reads closed themselves.
 UPDATE controlled_actions SET resolution='read_closed',resolved_at=updated_at WHERE state='ambiguous' AND kind='browser' AND resolution IS NULL;
 CREATE TABLE IF NOT EXISTS action_owner_commands (

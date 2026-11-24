@@ -22,9 +22,11 @@ from pathlib import Path
 from urllib.parse import quote
 from urllib.request import Request,build_opener,ProxyHandler
 from .isolated_profile import DATA_DIRS,DATA_FILES
-from .environment import parallel
+from .environment import parallel,agent_key,refuse_master_key
 
 CONFIGURATION=('config.yaml','SOUL.md','skills')
+# The agent login Hermes's bridge sends; read once by main() (ADR-0295). Unset, every turn is refused.
+AGENT_KEY=''
 BOX_NAME=re.compile(r'nocheh-box-[a-f0-9]{24}')
 def security_url():return os.environ.get('NOCHEH_SECURITY_URL') or 'http://nocheh-security:8786'
 def agent_network():return os.environ.get('NOCHEH_AGENT_NETWORK','nocheh-agent')
@@ -108,7 +110,7 @@ def schedule_store(binding,boxed,machine,root=Path('/profiles')):
     return logical
 
 class Inlet:
-    """Messages that join a running turn (ADR-0291), for its container's stdin after the request, in the order they came.
+    """Messages that join a running turn (ADR-0299), for its container's stdin after the request, in the order they came.
     Ones that come before the turn's container is attached wait for it; after the turn, none is taken."""
     def __init__(self,nonce):self.nonce,self.lock,self.sock,self.waiting,self.closed=nonce,threading.Lock(),None,[],False
 
@@ -614,7 +616,7 @@ class Handler(BaseHTTPRequestHandler):
         if self.path!='/health':self.send_error(404);return
         self.send_response(200);self.end_headers();self.wfile.write(b'{"ok":true,"service":"security-launcher"}')
     def steer(self):
-        """A message that joins the running turn of the pass's profile (ADR-0291), for that turn only: the turn's nonce must
+        """A message that joins the running turn of the pass's profile (ADR-0299), for that turn only: the turn's nonce must
         match. Refused when no such turn runs, and its message then runs on its own."""
         try:
             length=int(self.headers.get('Content-Length','0'))
@@ -631,8 +633,8 @@ class Handler(BaseHTTPRequestHandler):
         self.send_response(204);self.end_headers()
 
     def do_POST(self):
-        secret=os.environ['SERVICE_TOKEN']
-        if self.path not in ('/v1/turn','/v1/turn/steer') or not hmac.compare_digest(self.headers.get('Authorization','').encode(),('Bearer '+secret).encode()):
+        secret=AGENT_KEY
+        if self.path not in ('/v1/turn','/v1/turn/steer') or not secret or not hmac.compare_digest(self.headers.get('Authorization','').encode(),('Bearer '+secret).encode()):
             self.send_error(403);return
         if self.path=='/v1/turn/steer':self.steer();return
         if not SLOTS.acquire(blocking=False):self.send_error(503);return
@@ -660,6 +662,8 @@ class Handler(BaseHTTPRequestHandler):
             from .security_transport import scoped_transport
             body.update(scoped_transport(credential,body['api_mode']))
             body['model_context_length']=binding['model_context_length']
+            # The backup reply model comes from the binding only, so a turn cannot name one the broker refuses.
+            body['backup_model']=binding.get('backup_model') or None
             box=None
             if boxed:
                 # Without its box the turn stops with job_box_unavailable before its agent runs.
@@ -724,6 +728,10 @@ def repo_problems(mounted):
     return ['the GitHub copies folder is not mounted at '+REPO_COPIES+' (./bin/nocheh up adds it)']
 
 def main():
+    global AGENT_KEY
+    refuse_master_key()
+    try:AGENT_KEY=agent_key()
+    except ValueError as error:raise SystemExit(str(error)+'; run ./bin/nocheh up') from None
     network=agent_network();limit=box_limit()
     description=docker('GET','/networks/'+network)
     if description.get('Internal') is not True:raise RuntimeError('internal_network_required')

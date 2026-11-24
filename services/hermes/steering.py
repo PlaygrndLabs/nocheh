@@ -1,4 +1,4 @@
-"""Talk while it works (ADR-0291): a later message in a chat joins the turn already running there.
+"""Talk while it works (ADR-0299): a later message in a chat joins the turn already running there.
 
 Hermes's own steer (``AIAgent.steer`` with a ticket) hands the message to the running agent, which reads it after its
 current tool step and answers both in one reply. A message the agent did not read before it finished runs as its own

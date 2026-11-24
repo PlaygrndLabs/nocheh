@@ -743,8 +743,10 @@ class HandlerTests(unittest.TestCase):
         for name,value in (('docker',self.docker),('attach',attach),('prepare_box',prepare_box),('running',running),('exit_code',exit_code),
                            ('validate_local_profile',lambda profile:None)):
             patcher=patch.object(launcher,name,value);patcher.start();self.addCleanup(patcher.stop)
-        environment=patch.dict(os.environ,{'SERVICE_TOKEN':'s'*32,'NOCHEH_UID':'1000','NOCHEH_GID':'1000','NOCHEH_SECURITY_URL':self.security.url()})
+        environment=patch.dict(os.environ,{'NOCHEH_UID':'1000','NOCHEH_GID':'1000','NOCHEH_SECURITY_URL':self.security.url()})
         environment.start();self.addCleanup(environment.stop);os.environ.pop('NOCHEH_DEV_TURN_SOURCE',None)
+        # The agent login main() reads once (ADR-0295).
+        key=patch.object(launcher,'AGENT_KEY','s'*32);key.start();self.addCleanup(key.stop)
 
     def bind(self,credential,profile=None,entry=None,machine=None):
         self.security.bindings[credential]={'profile':profile or self.PROFILE,'model':'model-1','owner':'owner-1','scope':'chat-1',
@@ -806,6 +808,17 @@ class HandlerTests(unittest.TestCase):
         self.release.set();running.join(5);self.settled()
         self.assertEqual((launcher.INLETS,inlet.closed),({},True))
         self.assertEqual(steer({}),409,'nothing joins a turn that ended')
+
+    def test_only_the_agent_login_starts_a_turn(self):
+        # The agent login, never Nocheh's master key (ADR-0295); unset, nothing is accepted.
+        self.bind('first')
+        def call(bearer):
+            connection=http.client.HTTPConnection('127.0.0.1',self.server.server_address[1],timeout=10)
+            connection.request('POST','/v1/turn',body=self.body('first'),headers={'Authorization':bearer,'Content-Type':'application/json'})
+            status=connection.getresponse().status;connection.close();return status
+        for bearer in ('Bearer '+'t'*32,'Bearer ','s'*32):self.assertEqual(call(bearer),403)
+        with patch.object(launcher,'AGENT_KEY',''):self.assertEqual(call('Bearer '),403)
+        self.assertEqual(self.turn_specs(),[])
 
     def test_a_box_step_mounts_its_prepared_box(self):
         self.bind('first',entry=box())
@@ -936,7 +949,7 @@ class FakeServer:
 class StartupTests(unittest.TestCase):
     def start(self,docker,environment):
         with patch.object(launcher,'docker',docker),patch.object(launcher,'ThreadingHTTPServer',FakeServer),patch.object(launcher,'sweeper',lambda:None),\
-                patch.object(launcher.signal,'signal'),patch.dict(os.environ,environment),patch('sys.stderr',new_callable=io.StringIO) as errors:
+                patch.object(launcher.signal,'signal'),patch.dict(os.environ,{'AGENT_KEY':'s'*32,**environment}),patch('sys.stderr',new_callable=io.StringIO) as errors:
             launcher.main()
         return errors.getvalue()
 

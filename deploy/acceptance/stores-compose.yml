@@ -30,6 +30,7 @@ services:
       PGDATABASE: nocheh
       PGPASSWORD: stores-fixture-admin-not-a-real-credential
       SERVICE_TOKEN: stores-fixture-token-not-a-real-credential
+      AGENT_KEY: stores-fixture-agent-key-not-a-real-credential
       NOCHEH_STORES_FIXTURE: "1"
       TELEGRAM_ENABLED: "false"
     depends_on:

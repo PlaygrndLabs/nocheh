@@ -10,6 +10,7 @@ import {connectStores,initializeStoreDatabases} from '../src/stores/connections.
 import {fixtureServices} from './fixture-agent.js';
 import {savePolicy} from '../src/security/store.js';
 import {honchoEngine} from '../src/memory/honcho.js';
+import {recordTurnReads} from '../src/stores/turn-reads.js';
 
 test('owner freedom lets only the owner\'s live private requests approve themselves, never for a group, defaults to approval and keeps deny rules',
  {skip:process.env.NOCHEH_STORES_FIXTURE!=='1',timeout:180000},async()=>{
@@ -27,7 +28,10 @@ test('owner freedom lets only the owner\'s live private requests approve themsel
     const source=(await s.capture.capture(value)).source.reference;await s.guards.prepare(source,'fixture',s.detect);return source;
   };
   const actor=async(source:string,scope:string|null,space:string):Promise<Reader>=>{
-    const binding=await s.guards.state();return {admin:false,scope,space,turnEvent:source,generation:binding.generation,guard_epoch:binding.epoch,revision:binding.epoch};
+    const binding=await s.guards.state(),turn:Reader={admin:false,scope,space,turnEvent:source,generation:binding.generation,guard_epoch:binding.epoch,revision:binding.epoch};
+    // The agent's runtime reports a conversation with nothing outside in it (ADR-0293).
+    if(scope===null)await recordTurnReads(stores.control,turn,'conversation',[]);
+    return turn;
   };
   const state=async(id:string)=>(await stores.control.query('SELECT state FROM telegram_action_requests WHERE id=$1',[id])).rows[0].state;
   const queued=async(id:string)=>Number((await stores.control.query("SELECT count(*) FROM workflow_registry WHERE family='actions' AND job_id=$1",[id])).rows[0].count);
@@ -64,6 +68,13 @@ test('owner freedom lets only the owner\'s live private requests approve themsel
     assert.equal(tool.state,'approved');assert.match(tool.message,/answer will follow here as a reply/);
     const groupTool=await s.controlledActions.propose(await actor((await capture(group,123,'Group tool')).id,group,group),{kind:'shell',arguments:{command:'printf group'}});
     assert.equal(groupTool.state,'proposed');
+    // Each says why it ran, quoting the owner's own words; one still waiting says only who asked (ADR-0294).
+    const said=(words:string)=>({kind:'said',who:'owner',name:null,words});
+    assert.deepEqual(await s.actionBecause.describe('telegram',direct.id),{because:said('Send it now'),asked:said('Send it now')});
+    assert.deepEqual((await s.actionBecause.describe('telegram',sameGroup.id)).because,said('Owner posts here'));
+    assert.deepEqual((await s.actionBecause.describe('controlled',tool.id)).because,said('Run a tool'));
+    assert.deepEqual(await s.actionBecause.describe('telegram',asked.id),{because:null,asked:said('Send a note')});
+    assert.deepEqual(await s.actionBecause.describe('controlled',groupTool.id),{because:null,asked:said('Group tool')});
 
     const security=(await stores.control.query('SELECT revision FROM security_policy WHERE singleton')).rows[0].revision;
     await savePolicy(stores.control,owner,{expected_revision:Number(security),policy:{version:1,rules:[{id:key+':deny',kind:'telegram.send',outcome:'deny'}]}});

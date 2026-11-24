@@ -12,19 +12,22 @@ test('container dashboard reaches internal services and survives application out
   {skip:process.env.NOCHEH_CONTAINER_TEST!=='1',timeout:30000},async()=>{
   const state=await mkdtemp(join(tmpdir(),'nocheh-container-dashboard-'));
   const token='synthetic-owner-token-'.repeat(3);
+  // Hermes's dashboard gets its own session token (ADR-0295), never the master key or the agent login.
+  const session='synthetic-hermes-session-'.repeat(3),agentKey='synthetic-agent-login-'.repeat(3);
   const app=createServer((req,res)=>{
     assert.equal(req.headers.authorization,'Bearer '+token);
     res.setHeader('content-type','application/json');res.end('{"service":"fixture-app"}');
   });
   const native=createServer((req,res)=>{
-    assert.equal(req.headers['x-hermes-session-token'],token);
+    assert.equal(req.headers['x-hermes-session-token'],session);
+    assert.ok(!JSON.stringify(req.headers).includes(token)&&!JSON.stringify(req.headers).includes(agentKey));
     assert.equal(req.headers.host,'127.0.0.1:8785');
     res.setHeader('content-type','application/json');res.end('{"service":"fixture-hermes"}');
   });
   const close=(server:Server)=>new Promise<void>(resolve=>server.close(()=>resolve()));
   for(const [server,port] of [[app,8780],[native,8785]] as const){server.listen(port,'0.0.0.0');await once(server,'listening');}
   await mkdir(join(state,'admin/dashboard'),{recursive:true});await writeFile(join(state,'admin/dashboard/token'),token);
-  await writeFile(join(state,'.env'),`NOCHEH_CONFIG_VERSION=1\nNOCHEH_PORT=19980\nSERVICE_TOKEN=${token}\n`);
+  await writeFile(join(state,'.env'),`NOCHEH_CONFIG_VERSION=1\nNOCHEH_PORT=19980\nSERVICE_TOKEN=${token}\nAGENT_KEY=${agentKey}\nNOCHEH_HERMES_SESSION_TOKEN=${session}\n`);
   const child=spawn(process.execPath,[resolve('dist/src/management.js')],{stdio:'ignore',env:{...process.env,NOCHEH_CONTAINER:'1',NOCHEH_STATE_DIR:state,NOCHEH_DASHBOARD_PORT:'19883'}});
   const base='http://127.0.0.1:19883';
   try{

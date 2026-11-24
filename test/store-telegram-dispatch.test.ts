@@ -219,7 +219,7 @@ test('Telegram workflow dispatch uses current prepared derivatives and durable s
     assert.equal((await run(silent.reference.id)).state,'skipped');
     const silentCalls:number=calls.length;await due(silent.reference.id);await run(silent.reference.id);assert.equal(calls.length,silentCalls,'terminal execution cannot automatically restart');
     assert.deepEqual(sends.filter(item=>item.input.event_id===silent.reference.id).map(item=>item.input.finish??null),[null,'clear'],'no answer clears the working reaction');
-    // A message that joined the turn running in its chat is answered by that turn's reply: 👍, no reply of its own (ADR-0291).
+    // A message that joined the turn running in its chat is answered by that turn's reply: 👍, no reply of its own (ADR-0299).
     const joined=await capture('Joined the running turn');await prepare(joined.reference.id);mode='joined';
     assert.equal((await run(joined.reference.id)).state,'skipped');
     assert.deepEqual(sends.filter(item=>item.input.event_id===joined.reference.id).map(item=>item.input.finish??null),[null,'answered'],'a joined message gets 👍');

@@ -192,7 +192,7 @@ export class TelegramDispatchRepository {
       next_attempt=CASE WHEN $2='failed' THEN now()+least(300,5*power(2,least(attempts,6)))*interval '1 second' ELSE next_attempt END,
       revision=revision+1,updated_at=now() WHERE event_id=$1`,[row.event_id,result.state,reference,result.error_code??null,result.state==='done'?'delivery':'assistant']);
     if(row.input_reference&&['done','cancelled','suppressed'].includes(result.state))try {const input=await this.input(row.input_reference);
-      // A message that joined the running turn is answered by that turn's reply (ADR-0291).
+      // A message that joined the running turn is answered by that turn's reply (ADR-0299).
       if(result.state!=='done'&&!joinedTurn(result))await this.unanswered(input);
       // A private answer that went out is recorded once, with the send of its /start; nothing else is suggested from it.
       else if(input.principal.answer!==undefined)await this.answers?.answered(input.principal.answer,String(input.body.source_key));
@@ -275,7 +275,7 @@ export class TelegramDispatchRepository {
     }
     if(state!=='done') {
       // Without a current pass the bot cannot be asked; an unrenewed presence lapses on its own. A message that joined the
-      // running turn in its chat is answered by that turn's reply, so it gets 👍 too (ADR-0291).
+      // running turn in its chat is answered by that turn's reply, so it gets 👍 too (ADR-0299).
       if(credential)await finishPresence(this.call,replyTarget(input,attempt,credential),joinedTurn(receipt)?'answered':unansweredFinish(state));
       // The agent never sends anything, so a turn it lost to a restart runs again under a new attempt.
       return await this.storeResult(row,state==='ambiguous'?{...receipt,state:'failed',error_code:'assistant_runtime_unavailable'}:receipt);

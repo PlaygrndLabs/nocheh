@@ -138,17 +138,25 @@ console.log(JSON.stringify({status:response.status,body:text?JSON.parse(text):nu
     def app(self, path, body=None, allow_error=False):
         return self.http(path, body, service='nocheh-app', port=8780, allow_error=allow_error)
 
+    def session(self):
+        """What `docker compose exec` passes Hermes's dashboard session token with (ADR-0295): by name only, its value in
+        this process's environment, never on a command line. nocheh-app itself does not hold it."""
+        token = self.manifest['services']['hermes']['environment'].get('NOCHEH_HERMES_SESSION_TOKEN')
+        if not token: raise Failed('native_session_token_missing: make a fresh fixture')
+        return ['-e', 'NOCHEH_HERMES_SESSION_TOKEN'], {**os.environ, 'NOCHEH_HERMES_SESSION_TOKEN': token}
+
     def native(self, path, body=None, method=None, allow_error=False):
         """The owner's native administration route, as `./bin/nocheh cron` calls it. `allow_error` returns {status, body}
         instead of failing on an error."""
         script = """const [path,encoded,method,tolerant]=process.argv.slice(1),body=JSON.parse(encoded);
 const response=await fetch('http://hermes:8785'+path,{method:method||(body===null?'GET':'POST'),
-headers:{'content-type':'application/json','X-Hermes-Session-Token':process.env.SERVICE_TOKEN},
+headers:{'content-type':'application/json','X-Hermes-Session-Token':process.env.NOCHEH_HERMES_SESSION_TOKEN},
 ...(body===null?{}:{body:JSON.stringify(body)}),signal:AbortSignal.timeout(60000)});
 const text=await response.text();if(!response.ok&&tolerant!=='1')throw Error('native_http_'+response.status+':'+text.slice(0,300));
 console.log(tolerant==='1'?JSON.stringify({status:response.status,body:text?JSON.parse(text):null}):text);"""
-        return json.loads(subprocess.check_output(self.command+['exec', '-T', 'nocheh-app', 'node', '--input-type=module', '-e', script,
-            path, json.dumps(body), method or '', '1' if allow_error else '0'], text=True))
+        named, env = self.session()
+        return json.loads(subprocess.check_output(self.command+['exec', '-T', *named, 'nocheh-app', 'node', '--input-type=module', '-e', script,
+            path, json.dumps(body), method or '', '1' if allow_error else '0'], text=True, env=env))
 
     def mini(self, path, method='GET', body=None, headers=None):
         """A call to the Telegram mini app's edge (nocheh-miniapp) as a phone makes it through the tunnel: run inside that
@@ -980,7 +988,8 @@ class Scenarios:
     def voice_is_transcribed(self):
         # A voice note keeps its original bytes, is transcribed by Hermes's
         # transcriber through the Voice notes route, and its reply waits for it.
-        _, event_id = self.voice(b'OggS\x00\x02synthetic voice note\n\xff'*4)
+        # A real recording: the file reader decodes it before it is transcribed (ADR-0285).
+        _, event_id = self.voice(synthetic_wav(2))
         row = self.finished(event_id, seconds=300)
         self.gate('voice_dispatch_closed', row['state'] in ('done', 'suppressed'), state=row['state'], error=row['error'])
         transcript = self.f.query('nocheh_derived', "SELECT count(*) FROM derived_artifacts WHERE kind='transcript' AND event_id='"+event_id+"'"
@@ -1067,6 +1076,18 @@ class Scenarios:
         self.gate('memory_tmp', '/tmp' in (host.get('Tmpfs') or {}) or mounts.get('/tmp', {}).get('Type') == 'tmpfs', tmpfs=host.get('Tmpfs'))
         self.gate('memory_home', environment.get('HOME') == '/tmp/home',
                   home=environment.get('HOME'))
+        # The agent login, never Nocheh's master key (ADR-0295), and it reaches only the agent's own routes.
+        self.gate('no_master_key', 'SERVICE_TOKEN' not in environment and 'SERVICE_TOKEN_FILE' not in environment)
+        self.gate('agent_login_present', bool(environment.get('AGENT_KEY')))
+        script = """const answers=[];for(const [method,path] of [['GET','/v1/status'],['POST','/v1/agent/manage']]){
+const response=await fetch('http://nocheh-app:8780'+path,{method,headers:{'content-type':'application/json',Authorization:'Bearer '+process.env.AGENT_KEY},
+...(method==='POST'?{body:'{}'}:{}),signal:AbortSignal.timeout(30000)});const text=await response.text();
+let error=null;try{error=JSON.parse(text).error}catch{}answers.push({path,status:response.status,error});}
+console.log(JSON.stringify(answers));"""
+        answers = json.loads(subprocess.check_output(self.f.command+['exec', '-T', 'nocheh-app', 'node', '--input-type=module', '-e', script],
+                                                     text=True).strip().splitlines()[-1])
+        self.gate('agent_login_refused_elsewhere', all(row['status'] == 403 and row['error'] == 'agent_route_not_allowed' for row in answers),
+                  answers=answers)
         self.gate('only_the_folders_it_uses', {'/dashboard-state/home', '/data/spool/agent-turns'} <= set(mounts)
                   and not {'/dashboard-state', '/data/spool'} & set(mounts), mounts=sorted(mounts))
         probe = ('token=absent; [ -e /dashboard-state/token ] && token=present; '
@@ -1089,7 +1110,7 @@ class Scenarios:
 const folder='nocheh-tester-'+process.argv[1],name='large-upload.bin',file=folder+'/'+name;
 const call=(path,{method='GET',body=null,headers={}}={})=>new Promise((resolve,reject)=>{
 const request=http.request({host:'hermes',port:8785,path,method,timeout:120000,headers:{host:'127.0.0.1:8785',
-'X-Hermes-Session-Token':process.env.SERVICE_TOKEN,...headers,...(body?{'content-length':body.length}:{})}},response=>{
+'X-Hermes-Session-Token':process.env.NOCHEH_HERMES_SESSION_TOKEN,...headers,...(body?{'content-length':body.length}:{})}},response=>{
 const chunks=[];response.on('data',chunk=>chunks.push(chunk));response.on('end',()=>{const data=Buffer.concat(chunks);
 response.statusCode>=400?reject(Error('native_http_'+response.statusCode+':'+data.toString().slice(0,300))):resolve(data);});});
 request.on('timeout',()=>request.destroy(Error('native_timeout')));request.on('error',reject);if(body)request.write(body);request.end();});
@@ -1105,22 +1126,28 @@ const after=JSON.parse(await call('/api/files?profile=default'));
 const digest=value=>crypto.createHash('sha256').update(value).digest('hex');
 console.log(JSON.stringify({bytes:content.length,sent:digest(content),received:digest(downloaded),
 listed:listed.entries.filter(entry=>entry.name===name).map(entry=>entry.size),left:after.entries.some(entry=>entry.name===folder)}));"""
-        found = json.loads(subprocess.check_output(self.f.command+['exec', '-T', 'nocheh-app', 'node', '--input-type=module', '-e', script,
-                                                                  str(self.f.ids())], text=True).strip().splitlines()[-1])
+        named, env = self.f.session()
+        found = json.loads(subprocess.check_output(self.f.command+['exec', '-T', *named, 'nocheh-app', 'node', '--input-type=module', '-e', script,
+                                                                  str(self.f.ids())], text=True, env=env).strip().splitlines()[-1])
         self.current['observed'] = {'bytes': found['bytes']}
         self.gate('uploaded_whole', found['listed'] == [found['bytes']], listed=found['listed'])
         self.gate('downloaded_unchanged', found['sent'] == found['received'])
         self.gate('upload_deleted', not found['left'])
 
     def profiles_round_trip(self):
-        # A profile made, listed and retired from the dashboard, with Hermes's image read-only.
-        name = 'tester-'+str(self.f.ids())
-        created = self.f.native('/api/profiles', {'name': name})
-        self.gate('profile_created', created.get('status') == 'created', name=name)
-        self.gate('profile_listed', any(row['name'] == name for row in self.f.native('/api/profiles')['profiles']))
-        retired = self.f.native('/api/profiles/'+name, {}, 'DELETE')
-        self.gate('profile_retired', retired.get('ok') is True and all(row['name'] != name or row.get('state') == 'retired'
-                                                                      for row in self.f.native('/api/profiles')['profiles']))
+        # Hermes's Profiles page lists profiles and refuses changes (ADR-0295, the owner's pending answer): the agent
+        # login cannot save a profile in Nocheh.
+        before = self.f.native('/api/profiles')['profiles']
+        default = next((row['name'] for row in before if row.get('is_default')), None)
+        self.gate('profiles_listed', default is not None, names=[row['name'] for row in before])
+        created = self.f.native('/api/profiles', {'name': 'tester-'+str(self.f.ids())}, allow_error=True)
+        self.gate('profile_create_refused', created['status'] == 403 and (created['body'] or {}).get('error') == 'profiles_read_only',
+                  status=created['status'])
+        retired = self.f.native('/api/profiles/'+str(default), {}, 'DELETE', allow_error=True)
+        self.gate('profile_retire_refused', retired['status'] == 403 and (retired['body'] or {}).get('error') == 'profiles_read_only',
+                  status=retired['status'])
+        after = self.f.native('/api/profiles')['profiles']
+        self.gate('profiles_unchanged', [(row['name'], row.get('state')) for row in after] == [(row['name'], row.get('state')) for row in before])
 
     def no_refused_writes(self):
         # After the document, photo and voice scenarios, no file failed to be read for want of room in /tmp or a
@@ -1244,7 +1271,24 @@ listed:listed.entries.filter(entry=>entry.name===name).map(entry=>entry.size),le
         self.gate('one_reply_after_recovery', len(self.replies(before, OWNER)) >= 1 and
                   len({json.loads(r['parameters'].get('reply_parameters', '{}')).get('message_id') for r in self.replies(before, OWNER)}) == 1)
 
+    def sends_quiet(self, seconds=15, limit=240):
+        """Wait until Nocheh has sent nothing for `seconds`, so a late notice of an earlier scenario (an import's
+        "ready" message) is not counted as the next turn's reply."""
+        state = {'count': len(self.f.sent()), 'since': time.monotonic()}
+
+        def quiet():
+            count = len(self.f.sent())
+            if count != state['count']:
+                state.update(count=count, since=time.monotonic())
+            return time.monotonic()-state['since'] >= seconds
+        self.wait('sends_quiet', quiet, limit, interval=3)
+
     def restart_preserves_receipts(self):
+        # A mark said in the private chat and in a group topic before the restart, which each chat's next turn must
+        # still have in its own history, not only in memory.
+        self.sends_quiet()
+        self.turn(self.f.message(OWNER, 'یادت باشد: HISTMARK-PRIVATE-31'), OWNER)
+        self.turn(self.f.message(GROUP, 'یادت باشد: HISTMARK-GROUP-31', topic=11), GROUP, 11)
         sent = len(self.f.sent())
         self.wait('updates_acknowledged', lambda: not self.f.telegram()['updates'], 120)
         # The whole runtime restarts: the Telegram service with its delivery receipts, and the agent.
@@ -1253,7 +1297,19 @@ listed:listed.entries.filter(entry=>entry.name===name).map(entry=>entry.size),le
         wait_telegram_connected(self.wait, self.f.command, 'polling_reconnected')
         time.sleep(10)
         self.gate('restart_sends_nothing', len(self.f.sent()) == sent)
-        self.turn(self.f.message(OWNER, 'بعد از راه‌اندازی دوباره'), OWNER)
+        self.history_kept('after_restart')
+
+    def upgraded_copy_keeps_history(self):
+        # full_test --upgrade: every container was made again on the new images.
+        wait_telegram_connected(self.wait, self.f.command, 'polling_after_upgrade', 300)
+        self.history_kept('after_upgrade')
+
+    def history_kept(self, when):
+        """The private chat and the group topic each still have their mark in the agent's session history."""
+        _, text = self.turn(self.f.message(OWNER, 'قبلا چه گفتم؟ [[history:HISTMARK-PRIVATE-31]]'), OWNER)
+        self.gate('private_history_kept_'+when, 'present' in text, answer=text)
+        _, text = self.turn(self.f.message(GROUP, 'قبلا چه گفتم؟ [[history:HISTMARK-GROUP-31]]', topic=11), GROUP, 11)
+        self.gate('group_history_kept_'+when, 'present' in text, answer=text)
 
     def granted_participant(self):
         # The owner makes someone a member by their Telegram user ID, with only OTHER_GROUP ticked, through the dashboard's

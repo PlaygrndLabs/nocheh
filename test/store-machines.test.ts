@@ -100,7 +100,7 @@ test('only the owner\'s own request in their private chat or an active project\'
   const archive=storageServer(s,{token,dataDir:root,guardMode:'on',assistant:policy} as unknown as Settings,async()=>({}));
   await new Promise<void>(resolve=>archive.listen(0,'127.0.0.1',resolve));
   const archiveBase='http://127.0.0.1:'+(archive.address() as {port:number}).port;
-  const broker=brokerServer({pool:stores.control,storage:s.turns,token,archive:archiveBase,hermes:'http://hermes',model:'fixture-model',prepare:storageGuardService(s),fetch:mock});
+  const broker=brokerServer({agentKey:'synthetic-agent-login-only-for-tests-0001',pool:stores.control,storage:s.turns,token,archive:archiveBase,hermes:'http://hermes',model:'fixture-model',prepare:storageGuardService(s),fetch:mock});
   await new Promise<void>(resolve=>broker.listen(0,'127.0.0.1',resolve));
   const brokerBase='http://127.0.0.1:'+(broker.address() as {port:number}).port;
   /** The dashboard's owner routes, as management reaches them with the service token. */
@@ -359,7 +359,8 @@ test('only the owner\'s own request in their private chat or an active project\'
     // Before its first command, once: the login is still not admin, as the card said, and its start-up files are read.
     assert.deepEqual(probes.slice(-1),[{id:build,address:'192.0.2.10',port:22,login:'nocheh',host_key:hostKey}]);
     assert.deepEqual([(await job(asked.id)).machine_check,(await job(asked.id)).machine_files],['pending',probe.files]);
-    assert.deepEqual((await rows("job_id=$1 AND kind='test'",[asked.id])).map(row=>[row.command,row.state]),[['check admin rights and start-up files before the job','done']]);
+    assert.deepEqual((await rows("job_id=$1 AND kind='test'",[asked.id])).map(row=>[row.command,row.state,row.run_event_id]),
+      [['check admin rights and start-up files before the job','done',a.step]],'the check belongs to the run whose first command it came before');
     const probed=probes.length;
     await exec(brokerBase,a.credential,execBody({timeout:3600}));
     assert.equal(probes.length,probed,'only before the first command');
@@ -617,6 +618,8 @@ test('only the owner\'s own request in their private chat or an active project\'
     await s.machines.cleanupTick();
     await until(async()=>(await job(planted.id)).machine_check==='changed','the job\'s start-up files are checked after it ends');
     assert.deepEqual((await job(planted.id)).machine_changed,['.bashrc']);
+    assert.deepEqual((await rows("job_id=$1 AND kind='test'",[planted.id])).map(row=>row.run_event_id),[plantedRun.step,plantedRun.step],
+      'both checks belong to the job\'s run');
     await until(()=>approvals.some(input=>input.kind==='settle'&&input.id===planted.id&&
       String(input.text).endsWith("\n⚠️ It changed start-up files or tools: ~/.bashrc. Check them: Stop can't be trusted while they may hold something it left.")),'the settled card names the changed file');
     const warned=await ask('123',123);

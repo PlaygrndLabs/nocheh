@@ -10,7 +10,7 @@ LAUNCHER='http://hermes-agent-sb:8787'
 
 
 def forward_steers(feed,credential,nonce):
-    """Messages that join the running turn (ADR-0291), one stdin line each after the request, go to the launcher in
+    """Messages that join the running turn (ADR-0299), one stdin line each after the request, go to the launcher in
     order; it hands them to this turn's container only. One it cannot take is dropped, and its message runs on its own."""
     while True:
         try:line=feed.line()
@@ -19,7 +19,7 @@ def forward_steers(feed,credential,nonce):
         try:
             value=json.loads(line)
             request=Request(LAUNCHER+'/v1/turn/steer',data=json.dumps({'archive_credential':credential,'nonce':nonce,**value},ensure_ascii=False).encode(),
-                headers={'Authorization':'Bearer '+os.environ['SERVICE_TOKEN'],'Content-Type':'application/json'})
+                headers={'Authorization':'Bearer '+os.environ['AGENT_KEY'],'Content-Type':'application/json'})
             with build_opener(ProxyHandler({})).open(request,timeout=30) as response:response.read(1024)
         except Exception:
             continue
@@ -29,7 +29,7 @@ def main():
     from services.hermes.steering import Feed
     feed=Feed()
     raw=feed.line(2*1024*1024)
-    headers={'Authorization':'Bearer '+os.environ['SERVICE_TOKEN'],'Content-Type':'application/json'}
+    headers={'Authorization':'Bearer '+os.environ['AGENT_KEY'],'Content-Type':'application/json'}
     body=json.loads(raw)
     if isinstance(body,dict) and body.get('steer') is True:
         # Names this turn to the launcher, so a late message never reaches a later turn of the same chat.

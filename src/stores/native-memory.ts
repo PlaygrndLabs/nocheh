@@ -677,9 +677,11 @@ export class NativeMemoryRepository {
         const peers=(Array.isArray(row.peer_ids)&&row.peer_ids.length?row.peer_ids:[row.peer_id]).filter((value:unknown)=>typeof value==='string') as string[];
         const role=(peer:string)=>peer===assistantPeer?'silent' as const:peer===row.peer_id?'writer' as const:'subject' as const;
         for(const peer of peers){await this.authorizedReceipt(row);await this.engine.addParticipant(space,peer,role(peer));}
-        // A session joins the walls of its chat before its first write, so what it learns reaches them as it is learned (ADR-0286).
-        const walls=await this.walls.of(space,row.audience);
+        // A session joins the walls of its chat before its first write, so what it learns reaches them as it is learned, and
+        // each wall only once (ADR-0286).
+        const walls=await this.walls.of(space,row.audience,session);
         await this.authorizedReceipt(row);await this.engine.openSession(space,session,Object.fromEntries(peers.map(peer=>[peer,role(peer)])),walls);
+        await this.walls.joined(space,walls,session);
         let remote=this.observed(row,await this.engine.findWrites(space,session,id));
         if(!remote) {
           const createdAt=await this.occurredAt(row);
@@ -1037,8 +1039,10 @@ export class NativeMemoryRepository {
       const facts=options.subject?{subject:options.subject,sessions:options.limitToSession?[session.session_id]:null,profile:false}:null;
       // The fact list is read beside the context, so the turn waits for the slower of the two.
       const listed=this.listFacts(workspace,facts),read=await this.engine.context(workspace,session.session_id,options);
+      // Only the owner's block may fall back to the engine's prose. A chat's own prose can hold a conclusion an old-fact
+      // clean-up drew across every chat of its speaker and filed under this chat (ADR-0298); its listed facts never do.
       return this.contextBlock(current,audience,source,configuration,empty,{title,summaryTitle:headers.summary,summary:read.summary,
-        summaryMessage:read.summaryMessage,representation:read.subject,facts,listed});
+        summaryMessage:read.summaryMessage,representation:owner?read.subject:'',facts,listed});
     }
     if(owner&&known)return this.contextBlock(current,audience,source,{engine:this.engine.id,workspace,audience,peer:speaker,profile:true,...block},empty,
       {title,summaryTitle:headers.summary,summary:'',summaryMessage:null,representation:'',facts:{subject:speaker!,sessions:null,profile:true}});

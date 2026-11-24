@@ -214,9 +214,9 @@ test('a member\'s private chat: admission, its groups, the daily cap, its passes
       const source=await capture(telegram,from,text,type);await s.guards.prepare(source,'fixture',s.detect);
       return {id:source.id,external:{chat:{id:Number(telegram),type},message_id:update}};
     };
-    // A whole ID, not the same digits inside an event's 64-hex id, which a short ID like 123 often is.
-    const noIds=(value:unknown)=>{const text=JSON.stringify(value);for(const id of [MEMBER_NG,MEMBER_GP,OWNER,NG1_TG,bot])
-      assert.ok(!new RegExp('(?<![0-9a-f])'+id.replace('-','\\-')+'(?![0-9a-f])').test(text),'no Telegram ID: '+id);};
+    // A whole ID only: the owner's synthetic ID is short enough to turn up inside a random hex id.
+    const noIds=(value:unknown)=>{const text=JSON.stringify(value);
+      for(const id of [MEMBER_NG,MEMBER_GP,OWNER,NG1_TG,bot])assert.ok(!new RegExp(`(?<![0-9A-Za-z])${id}(?![0-9A-Za-z])`).test(text),'no Telegram ID: '+id);};
     const shift=await said(MEMBER_NG,'Your shift starts at 09:00.','reply');
     const toShift=await dispatch(MEMBER_NG,MEMBER_NG,'source?','private',{reply_to_message:shift.message});
     assert.equal(toShift.claims!.member,MEMBER_NG_ID);

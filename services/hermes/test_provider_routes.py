@@ -84,6 +84,28 @@ class ProviderRouteTests(unittest.TestCase):
         parts = {part['id']: part for part in view(self.state)['providers']['parts']}
         self.assertEqual((parts['guard']['defaults'], parts['reply']['defaults']), ({'anthropic': 'claude-haiku-5-5'}, {}))
 
+    def test_a_backup_reply_model_follows_the_replies_provider(self):
+        values = load(self.state)
+        env = compose_environment(self.state)
+        self.assertEqual(env['NOCHEH_REPLY_ROUTE_BACKUP_MODEL'], '')
+        with self.assertRaisesRegex(ValueError, 'needs a replies provider'):
+            routes.validate({**values, 'NOCHEH_REPLY_BACKUP_MODEL': 'claude-opus-5-5'})
+        values.update(NOCHEH_PROVIDER='anthropic', NOCHEH_MODEL='claude-sonnet-5-5', ANTHROPIC_API_KEY='synthetic-anthropic-key')
+        routes.validate(values)
+        self.assertEqual(routes.backup_model(values), '')
+        for model, error in (('claude-sonnet-5-5', 'must differ'), ('bad name!', 'needs a model name')):
+            with self.subTest(model=model), self.assertRaisesRegex(ValueError, error):
+                routes.validate({**values, 'NOCHEH_REPLY_BACKUP_MODEL': model})
+        values['NOCHEH_REPLY_BACKUP_MODEL'] = 'claude-opus-5-5'
+        routes.validate(values)
+        from tools.operations.installation.configuration import write_env, env_path
+        write_env(env_path(self.state), values)
+        env = compose_environment(self.state)
+        self.assertEqual((env['NOCHEH_REPLY_ROUTE_MODEL'], env['NOCHEH_REPLY_ROUTE_BACKUP_MODEL']), ('claude-sonnet-5-5', 'claude-opus-5-5'))
+        # Settings › Models may save it.
+        save(self.state, {'NOCHEH_REPLY_BACKUP_MODEL': 'claude-haiku-5-5'}, view(self.state)['revision'])
+        self.assertEqual(load(self.state)['NOCHEH_REPLY_BACKUP_MODEL'], 'claude-haiku-5-5')
+
     def test_invalid_providers_and_missing_keys_are_refused(self):
         values = load(self.state)
         bad = [

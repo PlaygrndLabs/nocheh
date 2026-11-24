@@ -172,6 +172,21 @@ function verifiedReader(req:IncomingMessage,secret:string,now:number,missed:()=>
   } catch { throw new HttpError(401,'invalid_scope_token'); }
 }
 export function admin(principal:Reader):void { if (!principal.admin) throw new HttpError(403,'owner_required'); }
+/**
+ * The agent login (ADR-0295): the agent's own processes hold AGENT_KEY instead of SERVICE_TOKEN. It is its own kind of
+ * caller, never a Reader, so no owner check that keys on scope===null or admin can take it; it reaches only the routes
+ * the agent calls, each listed by the server that answers it.
+ */
+export type AgentLogin={readonly kind:'agent';readonly agent:string};
+/** The agent login when the bearer is exactly the configured AGENT_KEY (32 characters or more); null otherwise. */
+export function agentLogin(req:IncomingMessage,key:string|undefined):AgentLogin|null {
+  const header=req.headers.authorization;
+  if(!key||key.length<32||typeof header!=='string'||!header.startsWith('Bearer '))return null;
+  return equal(header.slice(7),key)?{kind:'agent',agent:activeAgent}:null;
+}
+export const isAgentLogin=(caller:unknown):caller is AgentLogin=>typeof caller==='object'&&caller!==null&&(caller as {kind?:unknown}).kind==='agent';
+/** The few repository calls the agent makes as itself take the agent login or the owner's admin bearer; nothing else. */
+export function adminOrAgent(caller:Reader|AgentLogin):void { if(!isAgentLogin(caller))admin(caller); }
 export async function assertAudience(pool:pg.Pool,principal:Reader) {
   if(!principal.admin){const guard=await guardState(pool);if((guard.mode==='on'||principal.guard_epoch!==undefined)&&principal.guard_epoch!==guard.epoch)throw new HttpError(409,'guard_context_changed');}
   if(principal.scope!==null && principal.space && principal.revision!==await policyRevision(pool))throw new HttpError(409,'space_policy_changed');
