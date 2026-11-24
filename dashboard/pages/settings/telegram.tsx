@@ -517,7 +517,7 @@ function QuietHoursRow() {
           <Unsaved show={s.changed('NOCHEH_QUIET_HOURS')} />
         </>
       }
-      description="Notices, cards and job reports that Nocheh starts on its own arrive without sound in these hours, in each person's own time zone. Reminders and schedules set for that time, and replies, still ring. Groups are not affected."
+      description="Off by default. When on, notices, cards and job reports that Nocheh starts on its own arrive without sound in these hours, in each person's own time zone. Reminders and schedules set for that time still ring. Groups are not affected."
       htmlFor="quiet-hours"
     >
       <div className="flex flex-wrap items-center gap-2 sm:justify-end">

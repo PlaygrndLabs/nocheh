@@ -2,7 +2,7 @@
 
 <status>
 Accepted on 2026-11-24. The owner asked for it after the comparison with another personal
-assistant ("add Quiet hours feat"). Default: on, 23:00 to 07:00.
+assistant ("add Quiet hours feat"). Default: off (owner, 2026-11-24: "keep it off by default"); switching it on suggests 23:00 to 07:00.
 </status>
 
 ## Context
@@ -16,7 +16,7 @@ ring at the time the person chose.
 
 1. **One setting.** Settings › Telegram › Activity and notices has "Quiet hours"
    (`NOCHEH_QUIET_HOURS`, `HH:MM-HH:MM`, a window past midnight wraps; empty is off).
-   The default is `23:00-07:00`.
+   It is off by default; switching it on fills in `23:00-07:00`, which the owner can change.
 2. **Each person's own clock.** Core's `GET /internal/quiet-hours` (service token) names
    the private chats that have a time zone: the owner's, in the owner's task time zone, and
    each active member's, in their own time zone, else the owner's. Groups have none.

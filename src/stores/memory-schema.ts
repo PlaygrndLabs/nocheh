@@ -7,6 +7,14 @@ CREATE TABLE IF NOT EXISTS memory_engine_connection (
 INSERT INTO memory_engine_connection(singleton) VALUES(true) ON CONFLICT DO NOTHING;
 ALTER TABLE memory_engine_connection ADD COLUMN IF NOT EXISTS revision integer NOT NULL DEFAULT 0;
 ALTER TABLE memory_engine_connection ADD COLUMN IF NOT EXISTS workspace_revision integer NOT NULL DEFAULT 1;
+-- The unused-facts rule (ADR-0299): off (NULL) or a number of days. Facts' use is tracked from tracking_since, so the rule
+-- hides nothing before it has watched for its full number of days.
+CREATE TABLE IF NOT EXISTS memory_clean_up (
+ singleton boolean PRIMARY KEY DEFAULT true CHECK(singleton),
+ hide_unused_days integer CHECK(hide_unused_days IS NULL OR hide_unused_days BETWEEN 30 AND 3650),
+ tracking_since timestamptz NOT NULL DEFAULT now(),swept_at timestamptz,last_hidden integer,revision integer NOT NULL DEFAULT 0
+);
+INSERT INTO memory_clean_up(singleton) VALUES(true) ON CONFLICT DO NOTHING;
 CREATE TABLE IF NOT EXISTS memory_generations (
  id text PRIMARY KEY,installation_generation uuid NOT NULL,guard_epoch bigint NOT NULL,
  audience text NOT NULL,state text NOT NULL DEFAULT 'building' CHECK(state IN ('building','ready','retired')),

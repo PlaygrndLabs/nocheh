@@ -69,14 +69,14 @@ class QuietHoursTests(unittest.TestCase):
         self.assertTrue(quiet.silent('100', 'notice', at(23, 30)))
 
 
-    def test_the_setting_is_on_by_default_and_saved_only_as_a_window_or_empty(self):
+    def test_the_setting_is_off_by_default_and_saved_only_as_a_window_or_empty(self):
         import tempfile
         from pathlib import Path
         from tools.operations.installation.configuration import initialize, load, validate
         with tempfile.TemporaryDirectory() as folder:
             initialize(Path(folder))
             values = load(Path(folder))
-            self.assertEqual(values['NOCHEH_QUIET_HOURS'], '23:00-07:00')
+            self.assertEqual(values['NOCHEH_QUIET_HOURS'], '')
             for good in ('', '22:30-06:15', '01:00-02:00'):
                 with self.subTest(good=good):
                     validate({**values, 'NOCHEH_QUIET_HOURS': good})

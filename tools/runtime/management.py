@@ -99,7 +99,7 @@ def dispatch(body):
     if operation == 'memory.api':
         from urllib.parse import urlsplit
         path=body['path'];parsed=urlsplit(path)
-        if parsed.scheme or parsed.netloc or parsed.path not in ('/v1/memory/longterm','/v1/memory/longterm/rebuild','/v1/memory/longterm/retry-failed','/v1/memory/longterm/fresh-start','/v1/memory/spaces','/v1/memory/shares','/v1/memory/shares/revoke','/v1/memory/reviews','/v1/memory/reviews/control','/v1/memory/recall','/v1/memory/preview','/v1/memory/facts','/v1/memory/longterm/coverage','/v1/memory/originals','/v1/memory/message-facts','/v1/memory/hidden','/v1/memory/hidden/restore'):
+        if parsed.scheme or parsed.netloc or parsed.path not in ('/v1/memory/longterm','/v1/memory/longterm/rebuild','/v1/memory/longterm/retry-failed','/v1/memory/longterm/fresh-start','/v1/memory/spaces','/v1/memory/shares','/v1/memory/shares/revoke','/v1/memory/reviews','/v1/memory/reviews/control','/v1/memory/recall','/v1/memory/preview','/v1/memory/facts','/v1/memory/longterm/coverage','/v1/memory/originals','/v1/memory/message-facts','/v1/memory/hidden','/v1/memory/hidden/restore','/v1/memory/clean-up'):
             raise ValueError('memory_route_denied')
         return api_call(path,body.get('body'),'memory_operation_unavailable')
     if operation == 'operations.list':

@@ -306,6 +306,30 @@ class SessionDescendantTests(unittest.IsolatedAsyncioTestCase):
             with self.assertRaises(ValueError): restore_ids(bad)
         self.assertIn("copied_from'=ANY(:ids)", RESTORE_HIDDEN_SQL, 'bringing a fact back brings back its wall copies')
         self.assertIn('workspace_name=:workspace', HIDDEN_LIST_SQL)
+        self.assertIn("'nocheh_used_at'", RESTORE_HIDDEN_SQL, 'bringing a fact back counts as a use, so it is not hidden again next day')
+
+    async def test_used_and_hide_unused_requests(self):
+        from datetime import datetime, timedelta, timezone
+        from .provenance import HIDE_UNUSED_SQL, USED_SQL, hide_unused_request, used_ids
+        self.assertEqual(used_ids({'ids': ['a'*21, 'a'*21, 'b'*21]}), ['a'*21, 'b'*21])
+        for bad in [{}, {'ids': []}, {'ids': ['x']}, {'ids': ['a'*21]*201}, {'ids': ['a'*21], 'more': 1}]:
+            with self.assertRaises(ValueError): used_ids(bad)
+        now = datetime(2026, 11, 24, tzinfo=timezone.utc)
+        before = (now - timedelta(days=180)).isoformat()
+        self.assertEqual(hide_unused_request({'before': before, 'limit': 200}, now), (now - timedelta(days=180), 200))
+        for bad in [{'before': before}, {'before': before, 'limit': 0}, {'before': before, 'limit': 501}, {'before': before, 'limit': True},
+                    {'before': '2026-01-01T00:00:00', 'limit': 1}, {'before': 'soon', 'limit': 1}, {'before': before, 'limit': 1, 'x': 1}]:
+            with self.assertRaises(ValueError): hide_unused_request(bad, now)
+        with self.assertRaisesRegex(ValueError, 'hide_unused_too_recent'):
+            hide_unused_request({'before': (now - timedelta(days=29)).isoformat(), 'limit': 1}, now)
+        self.assertIn("now()-interval '1 day'", USED_SQL, 'a fact\'s use is written at most once a day')
+        self.assertIn('deleted_at IS NULL', USED_SQL)
+        # One family: a fact and its wall copies, kept while any of them was learned, read or said again since `before`.
+        self.assertIn("COALESCE(d.internal_metadata->>'copied_from', d.id) AS family", HIDE_UNUSED_SQL)
+        self.assertIn('conclusion_source_messages', HIDE_UNUSED_SQL)
+        self.assertIn("internal_metadata->>'copied_from' IN (SELECT family FROM stale)", HIDE_UNUSED_SQL)
+        self.assertIn("'reason','unused'", HIDE_UNUSED_SQL)
+        self.assertEqual(HIDE_UNUSED_SQL.count('workspace_name=:workspace'), 2)
 
     async def test_invalid_requests_never_reach_the_store(self):
         async def load(session, limit): self.fail('invalid request reached the store')
