@@ -11,10 +11,12 @@ import {telegramAddress} from '../frontdoor/telegram.js';
 import {HttpError,object,string} from '../http.js';
 import {fillTemplate,ownerPrompts,scheduleNoticeLines,type ScheduleNoticeText} from '../prompts.js';
 import type {RuntimeCall} from '../runtime.js';
+import {memberReads} from './member-reads.js';
+import {issueScheduleGrant} from './schedules.js';
 
 /*
  * The owner's own message when a reply in their private chat set a schedule with the agent's own schedule tool (ADR-0266).
- * The scheduler captures the new schedule, then asks for this message once: code writes it from the schedule's fields,
+ * Nocheh records the new schedule from that turn, then sends this message once (ADR-0290): code writes it from its fields,
  * with Pause and Delete buttons that only the owner's press in that chat acts on. The schedule's results later come to
  * the same chat with no card each time. A member with Personal assistant on gets the same message in their own private
  * chat for a schedule they set there, and only their own press there acts on it (members' schedules).
@@ -74,10 +76,10 @@ export class ScheduleNotices {
   }
 
   /**
-   * The scheduler's request once it captured a schedule a reply set (POST /v1/scheduler/announce): the message in the
-   * owner's private chat, at most once by the schedule's id. Only a schedule in the owner's private chat gets one. A
-   * Telegram service that refuses its buttons gets the text alone; one that does not answer is not tried again, so the
-   * scheduler is never held up by it.
+   * Once Nocheh recorded a new schedule a reply set by asking (POST /v1/schedules/turn/definition, ADR-0290): the
+   * message in that chat, at most once by the schedule's id. Only a schedule in the owner's private chat or a member's
+   * own gets one. A Telegram service that refuses its buttons gets the text alone; one that does not answer is not tried
+   * again. The turn's post waits for it, so Hermes gives that post time for a guard pass and both tries.
    */
   async announce(input:unknown):Promise<{state:string}> {
     const body=object(input),scope=string(body.scope,64),profile=string(body.profile,64),job=string(body.job_id,128);
@@ -101,7 +103,8 @@ export class ScheduleNotices {
   /**
    * A press on the message, already checked to be the owner's own in their private chat, or a member's own in theirs
    * (`chat`): pause or delete that chat's schedule through the agent, as the Schedules page does. The message then shows
-   * the answer under its text and loses its buttons. Returns the answer to the press.
+   * the answer under its text and loses its buttons. Nocheh grants that one change first, as the presser's (ADR-0290).
+   * Returns the answer to the press.
    */
   async press(choice:ScheduleChoice,store:string,job:string,press:string,chat?:string):Promise<string> {
     const lines=await this.lines(),profile='nocheh-'+store,owner=chat??ownerChat(this.policy()),target=telegramAddress(owner);
@@ -112,7 +115,12 @@ export class ScheduleNotices {
       const listed=(await manage({operation:'list'})).schedules;
       const found=Array.isArray(listed)?listed.find((item:any)=>item?.profile===profile&&item?.id===job&&item?.scope===owner):undefined;
       if(!found)return lines.changed;
-      const result=await manage({operation:choice==='p'?'pause':'delete',profile,job_id:job,request_id:'press-'+press.slice(0,64)});
+      // The owner, or the member whose own chat this is; a chat that is no longer a member's changes nothing.
+      const person=chat===undefined?'owner':(await memberReads(this.control,chat,ownerChat(this.policy())))?.member;
+      if(!person)return lines.changed;
+      const operation=choice==='p'?'pause':'delete',request='press-'+press.slice(0,64);
+      await issueScheduleGrant(this.control,{profile,job_id:job,operation,person,request_id:request,scope:String(found.scope)});
+      const result=await manage({operation,profile,job_id:job,request_id:request});
       text=this.text(lines,choice==='p'&&result.schedule&&typeof result.schedule==='object'?result.schedule as Record<string,unknown>:found);
       reply=choice==='p'?lines.paused:lines.deleted;
     }catch(error){if(!(error instanceof HttpError)||error.status>=500&&error.code!=='agent_rejected')throw error;return lines.changed;}

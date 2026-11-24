@@ -113,7 +113,7 @@ export function History() {
               description="Scheduled jobs and other assistant runs, latest 50."
               className="pb-3"
               action={
-                <a className="text-[13px] text-accent-text hover:underline" href="/hermes/cron">
+                <a className="text-[13px] text-accent-text hover:underline" href="#schedules">
                   Manage schedules
                 </a>
               }

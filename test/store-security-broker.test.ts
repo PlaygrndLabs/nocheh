@@ -123,6 +123,19 @@ test('three-store broker binds original and scheduled turns, isolates generation
       answering(path,status,error);
       assert.deepEqual(await relayed(path,{title:'Synthetic',destination:'current',text:'Synthetic'}),{status,body:{error:'scoped_archive_unavailable'}},path+' '+status+' '+error);
     }
+    // A schedule set by asking (ADR-0290): the turn hears why Nocheh did not save it; any other code stays opaque.
+    const definition={scope:'123',profile:'nocheh-'+'0'.repeat(24),job_id:'a1b2c3d4e5f6',definition:{},workflow_cursor:'0'.repeat(64),workflow_sequence:1};
+    for(const [status,error] of [[403,'schedule_limit_reached'],[403,'schedule_turn_not_allowed'],[400,'schedule_cron_unsupported'],[409,'schedule_sequence_conflict']] as const) {
+      answering('/v1/schedules/turn/definition',status,error);
+      assert.deepEqual(await relayed('/v1/schedules/turn/definition',definition),{status,body:{error}},error);
+    }
+    for(const [status,error] of [[403,'fire_grant_clock'],[400,'task_reminder_limit'],[503,'schedule_limit_reached']] as const) {
+      answering('/v1/schedules/turn/definition',status,error);
+      assert.deepEqual(await relayed('/v1/schedules/turn/definition',definition),{status,body:{error:'scoped_archive_unavailable'}},error);
+    }
+    refuse=()=>null;
+    assert.deepEqual(await relayed('/v1/schedules/turn/definition',definition),{status:200,body:{ok:true}});
+    assert.deepEqual(calls.at(-1),{url:'http://archive/v1/schedules/turn/definition',body:definition});
     // The owner's ask about a member (step 4b) goes on to storage from the owner's own private turn, with the refusals its
     // tool explains; any other code stays opaque, and no other turn may ask.
     const ask={member:'Mira Test',question:'What did she say?'};

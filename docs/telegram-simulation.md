@@ -56,7 +56,7 @@ Telegram delivery outages, permissions or undocumented behavior exhaustively.
 | Sharing | Complete approved wording and whitespace, compatible historical hashes, concurrent exact receipts and expiration conflicts, atomic follow-up staging, current grant/fact checks at delivery, interrupted-handoff recovery, confirmed one-time consumption, expiry and revocation; project membership grants no access | `store-memory-followup.test.ts`, `store-memory-access.test.ts`, `store-sharing.test.ts`, `store-projects.test.ts` |
 | Knowledge organization | Exact delegated scope and capture watermark; deferred atomic application, owner review, revocation and checked undo; imported authority stays inactive | `store-knowledge-management.test.ts`, `store-owner-supervision.test.ts`, `knowledge-portability.test.ts`, `test_knowledge_tools.py` |
 | Actions and tools | Live owner authority; exact chat/topic proposal; current means the source topic; deny/revoke and deleted-topic fallback block delivery; uncertain effects never repeat | `store-telegram-actions.test.ts`, `test_telegram_simulation.py`, `store-controlled-execution.test.ts`, `test_controlled_tools.py` |
-| Scheduling and browser | Stable identities, locks, cancellation and reconnection; missed schedules do not silently replay | `store-scheduled-runs.test.ts`, `store-browser-runs.test.ts`, `test_scheduler.py` |
+| Scheduling and browser | Stable identities, locks, cancellation and reconnection; a schedule is set by asking and runs only with Nocheh's grant; missed schedules do not silently replay | `store-scheduled-runs.test.ts`, `store-browser-runs.test.ts`, `test_scheduler.py` |
 | Workflow recovery | Independent capture, bounded admission, durable native review handoff, isolated native lease recovery under the profile lock, outbox and protected completion receipts | `store-workflows.test.ts`, `workflow-store.test.ts`, `test_review_handoff.py`, `test_native_leases.py`, `test_workflow_recovery.py` |
 | Imports and portability | No historical replies; explicit learning consent; safe extraction and source identity; corrections preserved | `store-imports.test.ts`, `store-source-portability.test.ts`, `store-portable-bundle.test.ts` |
 | Provider and budgets | Scoped routes, guarded attempts, conservative durable reservations and separate reasoning limits | `services/honcho/test_meter.py`, `test_honcho_budget.py` |
@@ -143,7 +143,7 @@ denials with stale fingerprints and repeated decisions, `current` destinations,
 the owner freedom setting, which still shows a card for each post to a group,
 a fixed reply to someone who may not talk in a group, replies only when addressed in a group,
 unselected groups and members, retirement, a voice note
-transcribed before its reply that does not hold the next message, a photo read by the vision tool, an ordinary file with a caption, an owner-private schedule that fires on its
+transcribed before its reply that does not hold the next message, a photo read by the vision tool, an ordinary file with a caption, an owner-private schedule set by asking in the owner's chat that fires on its
 own cadence and sends its result there once with no card, deleted topics,
 polling 5xx (measured after the adapter restarts polling), lost send responses,
 a blocked bot, and restart. Two operations scenarios close the run: the

@@ -178,6 +178,7 @@ export const memberWords = {
   schedule_paused: 'Paused',
   schedule_running: 'Running now',
   schedule_finished: 'Finished',
+  schedule_not_saved: 'Not running: ask again in your private chat to set it',
   schedule_last_failed: 'Last run failed',
   pause: 'Pause',
   resume: 'Resume',

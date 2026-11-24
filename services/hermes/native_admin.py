@@ -150,6 +150,10 @@ class Administration:
                 from .presentation import presentation_route
                 if presentation_route(path,method):
                     return await self.app(scope,receive,send)
+                # Hermes's Cron page only reads (ADR-0290): a schedule is set by asking in a chat and changed on Nocheh's
+                # Schedules page, where Nocheh grants each change.
+                if path.startswith('/api/cron/') and method not in ('GET', 'HEAD'):
+                    return await JSONResponse({'error': 'cron_read_only', 'detail': 'cron_read_only'}, 403)(scope, receive, send)
                 selected=query.get('profile', [''])[0]
                 name, home = self.profile('' if selected=='all' and path.startswith('/api/cron/') else selected)
                 if path.startswith('/api/files') and (method, path) in {

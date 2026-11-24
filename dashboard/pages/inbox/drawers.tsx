@@ -4,7 +4,6 @@
  * the owner first saw, so a change made elsewhere is noticed, not swapped in.
  */
 import {useEffect, useState} from 'react';
-import {ArrowUpRight} from 'lucide-react';
 import {refreshResources, useResource} from '../../lib/resource';
 import type {DecisionKind} from '../../lib/supervision';
 import {Badge, Empty, LoadError, LoadingRows, Notice, Technical} from '../../ui/core';
@@ -149,8 +148,8 @@ export function RunDrawer({id, onClose}: {id: string; onClose: () => void}) {
       </Facts>
       <OriginalLink id={run.event_id} />
       {run.channel === 'scheduler' && (
-        <a className="flex items-center gap-1 text-sm text-accent-text hover:underline" href="/hermes/cron">
-          Manage schedules in the assistant console <ArrowUpRight className="size-3.5" aria-hidden />
+        <a className="text-sm text-accent-text hover:underline" href="#schedules">
+          Manage schedules
         </a>
       )}
       <Technical value={run} />

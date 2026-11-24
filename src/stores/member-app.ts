@@ -18,7 +18,7 @@ import {assertStorageActive} from './lifecycle.js';
 import {MEMBER_RECHECK_HOURS,joinedGroups,recheckMemberAppGroups} from './member-reads.js';
 import {memberTaskViews} from './member-task-views.js';
 import {reloadMembers} from './members.js';
-import {memberTimeZoneValue,setMemberTimeZone} from './schedules.js';
+import {issueScheduleGrant,memberTimeZoneValue,setMemberTimeZone} from './schedules.js';
 import type {MemberAppPrincipal,TaskRepository} from './tasks.js';
 
 /*
@@ -160,9 +160,11 @@ const utc=(value:unknown):string|null=>{
   if(typeof value!=='string'||!value)return null;
   const at=new Date(value);return Number.isNaN(at.getTime())?null:at.toISOString();
 };
-/** What the members' app shows of one schedule the agent listed: no prompt text, profile, chat or time zone. */
+/** What the members' app shows of one schedule the agent listed: no prompt text, profile, chat or time zone. One whose
+ *  last change Nocheh did not save is not running (ADR-0290). */
 function memberSchedule(item:Record<string,unknown>):MemberSchedule {
-  const state:MemberSchedule['state']=item.running===true?'running':item.state==='completed'?'finished':item.enabled===false?'paused':'scheduled';
+  const state:MemberSchedule['state']=item.running===true?'running':item.state==='completed'?'finished':item.saved===false?'not_saved':
+    item.enabled===false?'paused':'scheduled';
   return {id:String(item.id),name:typeof item.name==='string'?item.name.slice(0,200):'',schedule:typeof item.schedule==='string'?item.schedule.slice(0,200):'',
     state,next_run_at:utc(item.next_run_at),last_run_at:utc(item.last_run_at),
     last_ok:item.last_status==='success'?true:item.last_status==='error'||item.last_status==='skipped'?false:null};
@@ -175,15 +177,20 @@ async function chatScheduleList(manage:NonNullable<MemberAppServices['schedules'
 }
 const SCHEDULE_ACTIONS:Record<MemberScheduleRequest['action'],string>={pause:'pause',resume:'resume',run:'run',delete:'delete'};
 /** POST /schedules/:id: one of the member's own schedules paused, resumed, run now or deleted, as the owner's Schedules
- * page does it; the schedule must be one of their private chat's now. */
-async function changeSchedule(manage:NonNullable<MemberAppServices['schedules']>,chat:string,job:string,body:unknown):Promise<MemberScheduleResult> {
+ * page does it; the schedule must be one of their private chat's now. Nocheh grants that one change as the member's
+ * first (ADR-0290). */
+async function changeSchedule(manage:NonNullable<MemberAppServices['schedules']>,control:Pick<pg.Pool,'query'>,member:string,chat:string,job:string,body:unknown):Promise<MemberScheduleResult> {
   const request=object(body),action=string(request.action,10) as MemberScheduleRequest['action'],operation=string(request.operation_id,64);
   if(!Object.hasOwn(SCHEDULE_ACTIONS,action))throw new HttpError(400,'invalid_schedule_action');
   if(!/^[a-zA-Z0-9-]{8,64}$/.test(operation))throw new HttpError(400,'invalid_operation_id');
   const found=(await chatScheduleList(manage,chat)).find(item=>item.id===job);
   if(!found)throw refuse('scheduleGone',404);
   let result:Record<string,unknown>;
-  try{result=await manage({operation:SCHEDULE_ACTIONS[action],profile:found.profile,job_id:job,request_id:'member-'+operation});}
+  const change=SCHEDULE_ACTIONS[action] as 'pause'|'resume'|'run'|'delete',asked='member-'+operation;
+  try {
+    await issueScheduleGrant(control,{profile:String(found.profile),job_id:job,operation:change,person:member,request_id:asked,scope:chat});
+    result=await manage({operation:change,profile:found.profile,job_id:job,request_id:asked});
+  }
   catch(error){if(error instanceof HttpError&&error.status<500&&error.status!==429)throw refuse('scheduleGone',404);throw error;}
   if(action==='delete')return {schedule:null};
   const now=result.schedule&&typeof result.schedule==='object'?result.schedule as Record<string,unknown>:found;
@@ -285,7 +292,7 @@ async function handle(services:MemberAppServices,options:MemberAppOptions,req:In
       const answer:MemberTimeZone={time_zone:await setMemberTimeZone(db,identity.member,zone)};
       return json(res,200,answer);
     }
-    return json(res,200,await changeSchedule(services.schedules,identity.chat,route.schedule!,body));
+    return json(res,200,await changeSchedule(services.schedules,db,identity.member,identity.chat,route.schedule!,body));
   }
   const write=MEMBER_APP_TASK_WRITES.includes(route.name);
   const body=write?parse(raw):undefined,query=route.name==='tasks'?memberTaskQuery(url.searchParams):undefined;

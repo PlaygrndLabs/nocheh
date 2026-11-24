@@ -55,6 +55,11 @@ Nocheh is in development mode and not yet released. Everything below is built an
   card's chat, period and named Notion pages ([ADR-0283](docs/adr/0283-machine-jobs-read-only-their-card.md)), and
   watch start-up files and admin rights ([ADR-0284](docs/adr/0284-machine-jobs-watch-start-up-files-and-admin.md)); files are
   parsed by a separate reader with no network and no key ([ADR-0285](docs/adr/0285-files-are-parsed-by-a-separate-reader.md)).
+  Per-person keys, step 1: the dashboard chat page is off and Hermes reads passes without the
+  master key ([ADR-0289](docs/adr/0289-chat-page-off-and-hermes-reads-passes-without-the-master-key.md)); Nocheh
+  grants every schedule change and fire, and Hermes's Cron page is read-only
+  ([ADR-0290](docs/adr/0290-nocheh-grants-schedule-changes-and-fires.md)). Next: the agent login replaces the
+  master key in Hermes, then one-time keys per reply.
 - Dashboard: compact tables and sub-tabs on every page (table-first plan, steps 1 to 5);
   Connections, Members and Sent to apps pages.
 - Operations: daily backups, export and import, an encrypted off-site copy (off until the owner

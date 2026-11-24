@@ -81,6 +81,8 @@ test('Hermes keeps its own settings, persona, notes and schedules behind named o
     ['/internal/schedule/advance',{job_id:'j'}],['/internal/manage',{operation:'list',action:'schedules'}]]);
   // A schedule the agent no longer has keeps its code, so a press or the Schedules page can say so (ADR-0266).
   await assert.rejects(hermes(()=>Response.json({error:'cron_job_not_found'},{status:400})).plugged.manageSchedules!({operation:'pause'}),{code:'cron_job_not_found',status:400});
+  // Nocheh refused the change Hermes made, as no press granted it (ADR-0290): the page says so by its code.
+  await assert.rejects(hermes(()=>Response.json({error:'cron_change_refused'},{status:400})).plugged.manageSchedules!({operation:'pause'}),{code:'cron_change_refused',status:400});
   await assert.rejects(hermes(()=>Response.json({defaults:{'reply.owner':1}})).plugged.promptDefaults!(),{code:agentErrors.invalid});
 });
 

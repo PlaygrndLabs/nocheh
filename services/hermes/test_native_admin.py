@@ -95,6 +95,31 @@ class NativeAdminTests(unittest.TestCase):
             self.assertEqual(large.json()['error'],'body_size_limit')
         self.assertFalse((self.owner/'images').exists())
 
+    def test_cron_page_only_reads(self):
+        # Nocheh grants every schedule change (ADR-0290): Hermes's Cron page lists and shows, and every write is refused
+        # before it reaches the store or Nocheh, even with the session token.
+        from cron import jobs as native
+        from .native_cron import store
+        with store(self.owner):job=native.create_job(prompt='Brief me',schedule='every 1h',name='Fixture',deliver='telegram')
+        stored=(self.owner/'cron/jobs.json').read_bytes()
+        with patch('urllib.request.urlopen',side_effect=AssertionError('no call to Nocheh')):
+            for method,path,body in (('POST','/api/cron/jobs?profile=default',{'name':'x','prompt':'p','schedule':'every 1m'}),
+                                     ('PUT','/api/cron/jobs/'+job['id'],{'updates':{'prompt':'p'}}),
+                                     ('POST','/api/cron/jobs/'+job['id']+'/pause',{'request_id':'one'}),
+                                     ('POST','/api/cron/jobs/'+job['id']+'/resume',{'request_id':'one'}),
+                                     ('POST','/api/cron/jobs/'+job['id']+'/trigger',{'request_id':'one'}),
+                                     ('POST','/api/cron/jobs/'+job['id']+'/catch-up',{'request_id':'one'}),
+                                     ('POST','/api/cron/jobs/'+job['id']+'/cancel',{}),
+                                     ('DELETE','/api/cron/jobs/'+job['id']+'?profile=all',None),
+                                     ('PATCH','/api/cron/jobs/'+job['id'],{})):
+                self.assertEqual(self.client.request(method,path,json=body).status_code,401)
+                response=self.client.request(method,path,headers=self.headers,json=body)
+                self.assertEqual((response.status_code,response.json()),(403,{'error':'cron_read_only','detail':'cron_read_only'}),(method,path))
+        self.assertEqual((self.owner/'cron/jobs.json').read_bytes(),stored)
+        listed=self.client.get('/api/cron/jobs',headers=self.headers)
+        self.assertEqual((listed.status_code,[row['id'] for row in listed.json()]),(200,[job['id']]))
+        self.assertEqual(self.client.get('/api/cron/jobs/'+job['id'],headers=self.headers).json()['name'],'Fixture')
+
     def test_dashboard_preferences_do_not_write_runtime_profiles(self):
         before=(self.owner/'config.yaml').read_bytes()
         self.assertEqual(self.client.get('/api/dashboard/font').status_code,401)

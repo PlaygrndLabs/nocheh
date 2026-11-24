@@ -239,7 +239,7 @@ export function storageServices(stores:StorePools,options:{dataDir:string;detect
     configuration:new RuntimeConfigurationRepository(stores.control),
     browserCapture:new BrowserCaptureRepository(options.dataDir,options.policy),
     browserDelivery,
-    schedules,scheduled:new ScheduledRunRepository(access,derived,turns,options.serviceToken??'',options.agent,schedules,telegramActions),
+    schedules,scheduled:new ScheduledRunRepository(access,derived,turns,options.serviceToken??'',options.agent,schedules,telegramActions,result=>actionCommands.offer('telegram',result)),
     runtimeProfiles:new RuntimeProfileRepository(access),
     browser:new BrowserRunRepository(access,sources,derived,preparation,turns,options.serviceToken??'',options.agent,browserDelivery),
     controlledActions,controlledExecution,memoryAccess,memoryMap,

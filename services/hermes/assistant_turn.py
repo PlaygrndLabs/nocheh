@@ -88,8 +88,11 @@ def schedule_turn(body,profile,review=False,background=False,box=False,machine=F
         rules=request('/v1/schedules/turn',{})
     except Exception:return False
     if not isinstance(rules,dict) or rules.get('allowed') is not True:return False
+    # Where Nocheh records what this turn sets (ADR-0290): the chat's logical profile and the chat itself.
+    if not isinstance(rules.get('profile'),str) or not re.fullmatch(r'nocheh-[a-f0-9]{24}',rules['profile']):return False
+    if not isinstance(rules.get('scope'),str) or not 0<len(rules['scope'])<=64:return False
     from services.hermes import schedule_gate
-    schedule_gate.bind(rules.get('time_zone'),rules.get('limit'),rules.get('count'))
+    schedule_gate.bind(rules.get('time_zone'),rules.get('limit'),rules.get('count'),profile=rules['profile'],scope=rules['scope'],home=profile)
     # Hermes offers its schedule tool only in a messaging gateway's session, which this turn is.
     os.environ['HERMES_GATEWAY_SESSION']='1'
     return True
