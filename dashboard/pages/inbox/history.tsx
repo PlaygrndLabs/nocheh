@@ -15,6 +15,7 @@ import {
   actionPlace,
   actionStateLabel,
   actionSummary,
+  becauseText,
   byNewest,
   fromNow,
   fullTime,
@@ -56,7 +57,7 @@ export function History() {
           <Card>
             <CardHeader
               title="Actions"
-              description="Messages and actions you decided on, and how they turned out."
+              description="Messages and actions Nocheh ran or you decided on, why each was allowed, and how they turned out."
               className="pb-3"
             />
             {queue.error && <LoadError className="mx-5 mb-3" what="actions" onRetry={() => void refreshResources()} />}
@@ -71,7 +72,7 @@ export function History() {
             ) : (
               <HistoryTable
                 label="Actions"
-                columns={['Action', 'What', 'Where', 'Result', 'When']}
+                columns={['Action', 'What', 'Where', 'Because', 'Result', 'When']}
                 rows={actions.slice(actionPage * PAGE, (actionPage + 1) * PAGE).map(action => {
                   const [label, tone] = actionStateLabel(action);
                   const Icon = actionIcon(action.kind);
@@ -82,6 +83,7 @@ export function History() {
                     title: actionName(action.kind),
                     summary: actionSummary(action),
                     place: (action.kind === 'telegram_message' ? 'To ' : 'In ') + chat(actionPlace(action)),
+                    because: becauseText(action.because, chat),
                     state: label,
                     tone,
                     time: action.created_at,
@@ -171,6 +173,8 @@ type HistoryRow = {
   summary: string;
   /** The chat it happened in; left out for a table that has no place column. */
   place?: string;
+  /** Why it ran (ADR-0294); left out for a table that has no Because column. */
+  because?: string;
   state: string;
   tone: Tone;
   time: string;
@@ -179,6 +183,7 @@ type HistoryRow = {
 /** One kind of history as a table: what it was, a line about it, where, how it ended and when. Its name opens it. */
 function HistoryTable({label, columns, rows}: {label: string; columns: string[]; rows: HistoryRow[]}) {
   const places = columns.includes('Where');
+  const reasons = columns.includes('Because');
   return (
     <Table aria-label={label} className="border-t border-line max-sm:block [&>tbody]:max-sm:block">
       <thead className="max-sm:sr-only">
@@ -205,12 +210,23 @@ function HistoryTable({label, columns, rows}: {label: string; columns: string[];
                 {row.title}
               </a>
             </Td>
-            <Td className="max-w-0 text-[13px] text-muted sm:w-[40%] max-sm:w-full max-sm:max-w-none">
+            <Td
+              className={`max-w-0 text-[13px] text-muted max-sm:w-full max-sm:max-w-none ${reasons ? 'sm:w-[24%]' : 'sm:w-[40%]'}`}
+            >
               <span dir="auto" className="block truncate" title={row.summary}>
                 {row.summary}
               </span>
             </Td>
             {places && <Td className="text-[13px] text-muted">{row.place}</Td>}
+            {reasons && (
+              <Td
+                className={`max-w-0 text-[13px] sm:w-[28%] max-sm:w-full max-sm:max-w-none ${row.because ? '' : 'max-sm:hidden'}`}
+              >
+                <span dir="auto" className="block truncate" title={row.because}>
+                  {row.because || '—'}
+                </span>
+              </Td>
+            )}
             <Td className="text-[13px] whitespace-nowrap">
               <span className="flex items-center gap-2">
                 <Dot tone={row.tone} />

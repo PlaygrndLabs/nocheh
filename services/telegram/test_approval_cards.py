@@ -422,10 +422,13 @@ class ApprovalCardTests(unittest.IsolatedAsyncioTestCase):
                     'buttons':[[{'text':'Pause','callback':'nkp'+store+job},{'text':'Delete','callback':'nkd'+store+job}]]}
             self.assertEqual(await gateway.send_notice(notice),{'state':'done'})
             self.assertEqual([[button.callback_data for button in row] for row in sent[0][3].inline_keyboard],[['nkp'+store+job,'nkd'+store+job]])
+            # One saved paused offers Start instead of Pause (ADR-0294).
+            self.assertEqual(await gateway.send_notice({**notice,'id':'d'*64,'buttons':[[{'text':'Start','callback':'nks'+store+job},
+                {'text':'Delete','callback':'nkd'+store+job}]]}),{'state':'done'})
             for bad in ('nkx'+store+job,'nkp'+store+job[:-1],'nkp'+store.upper()+job,'nkp'+store+job+'0','nk'):
                 with self.subTest(bad),self.assertRaises(ValueError):
                     await gateway.send_notice({**notice,'id':'b'*64,'buttons':[{'text':'Pause','callback':bad}]})
-            self.assertEqual(len(sent),1)
+            self.assertEqual(len(sent),2)
 
     async def test_a_sent_notice_is_edited_in_place_and_only_that_one(self):
         from telegram.error import BadRequest, Forbidden

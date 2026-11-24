@@ -259,6 +259,27 @@ class SchedulerTests(unittest.TestCase):
         self.assertNotEqual(self.calls[-1][1]['definition']['execution_version'],version)
         self.assertEqual(self.calls[-1][1]['definition']['prompt'],'Brief me with the weather')
 
+    def test_a_turn_that_read_outside_content_saves_its_schedule_paused_and_posts_it_again(self):
+        home,job=self.asked();posted=[]
+        def steered(path,body,timeout=None):
+            # Nocheh refuses one left running (ADR-0294) and records it paused, saying held.
+            posted.append(body)
+            if body['definition']['enabled']:raise refused('schedule_start_needed',409)
+            return {'id':'s'*64,'event_id':'v'*64,'duplicate':False,'created':True,'notice':'sent','held':True}
+        answer=turn_capture(job['id'],home,home.name,'42',steered)
+        self.assertEqual((answer['held'],[body['definition']['enabled'] for body in posted]),(True,[True,False]))
+        self.assertNotEqual(posted[0]['definition']['execution_version'],posted[1]['definition']['execution_version'])
+        self.assertGreater(posted[1]['workflow_sequence'],posted[0]['workflow_sequence'])
+        stored=inspect(home)[0]
+        self.assertEqual((stored['enabled'],stored['state'],stored['nocheh_registered'],stored['prompt']),(False,'paused',True,job['prompt']))
+        # Any other refusal of the paused one still removes it, as for any new schedule Nocheh refused.
+        home,other=self.asked()
+        def refusing(path,body,timeout=None):
+            if body['definition']['enabled']:raise refused('schedule_start_needed',409)
+            raise refused('schedule_turn_not_allowed')
+        with self.assertRaises(HTTPError):turn_capture(other['id'],home,home.name,'42',refusing)
+        self.assertNotIn(other['id'],[row['id'] for row in inspect(home)])
+
     def test_a_refused_checkpoint_leaves_its_job_inert_and_holds_back_no_other(self):
         from cron import jobs as native
         home,first=self.asked();_,second=self.asked()
