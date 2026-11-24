@@ -4,14 +4,14 @@
 
 Sections, in this order:
   load     every tracked Python file compiles
-  node     every compiled Node test file, each against a freshly reset synthetic Postgres with the storage and
-           workflow fixture switches on, so the storage tests run too
+  node     every compiled Node test file, each against a freshly reset synthetic Postgres with the storage fixture
+           switch on, so the storage tests run too. Tests that need the Inngest acceptance fixture stay skipped.
   browser  the dashboard page tests in Chromium, against the same Postgres
   python   the Python unit tests of services/hermes, services/telegram, services/reader, services/honcho and test/
 
 What it needs:
   Node 26 after `npm ci`.
-  A synthetic Postgres reached through PGHOST, PGPORT, PGUSER and PGPASSWORD, started with
+  A synthetic UTF8 Postgres 18 reached through PGHOST, PGPORT, PGUSER and PGPASSWORD, started with
   `-c cluster_name=nocheh-stores-fixture`. Every database and role on it is dropped before each Node test file.
   NOCHEH_CHECK_PGPORTS="5432 5433 ..." names several such clusters on PGHOST: one worker runs on each.
   Two Python environments under data/test-env/, made by --setup with uv and git: Hermes at its pinned revision
@@ -19,7 +19,8 @@ What it needs:
   Chromium for the browser section (PLAYWRIGHT_CHROMIUM_EXECUTABLE, or Playwright's).
 
 A failure listed in test/known-failures.json is shown but does not fail the run. A listed test that passes now is
-shown too, so it can come off the list. The run fails on any other failure. Results and logs go to
+shown too, so it can come off the list, unless the entry says "flaky": true (it fails only sometimes or only in
+some environments, such as when not run as root). The run fails on any other failure. Results and logs go to
 data/test-results/<time>/.
 """
 from tools.paths import ROOT
@@ -97,6 +98,9 @@ def reset(port):
     """Empty one synthetic cluster, as tools/development/store_tests.py does between files."""
     if psql(port, 'postgres', "SELECT current_setting('cluster_name')") != 'nocheh-stores-fixture':
         raise SystemExit('The Postgres in PGHOST must be a synthetic one started with cluster_name=nocheh-stores-fixture.')
+    # As in the store image. A SQL_ASCII cluster counts bytes, not letters, and its text search drops Persian words.
+    if psql(port, 'postgres', 'SHOW server_encoding') != 'UTF8':
+        raise SystemExit(f'The Postgres on port {port} must use UTF8 (initdb -E UTF8 --locale=C.UTF-8), as the store image does.')
     for query in (DATABASES, ROLES):
         for statement in filter(None, (part.strip() for part in psql(port, 'postgres', query).split(';'))):
             psql(port, 'postgres', statement)
@@ -118,8 +122,12 @@ def node_file(name, port, logs, label, seconds=FILE_SECONDS):
     """One compiled test file against a freshly emptied cluster: its failed tests."""
     reset(port)
     environment = {**os.environ, 'PGPORT': port, 'PGDATABASE': 'nocheh', 'SERVICE_TOKEN': SERVICE_TOKEN,
-                   'NOCHEH_STORES_FIXTURE': '1', 'NOCHEH_WORKFLOW_FIXTURE': '1', 'TELEGRAM_ENABLED': 'false',
+                   'NOCHEH_STORES_FIXTURE': '1', 'TELEGRAM_ENABLED': 'false',
                    'PYTHONPATH': os.pathsep.join(filter(None, [str(ROOT), os.environ.get('PYTHONPATH')]))}
+    # The workflow fixture switch also opens tests that need the Inngest acceptance fixture (workflow-bootstrap,
+    # workflow-inspection), which this command does not start; as in ./bin/nocheh test, only database recovery gets it.
+    if name.endswith('database-recovery.test.js'):
+        environment['NOCHEH_WORKFLOW_FIXTURE'] = '1'
     stem = Path(name).name
     tap, failures = logs / (stem + '.tap'), logs / (stem + '.failed')
     try:
@@ -129,13 +137,13 @@ def node_file(name, port, logs, label, seconds=FILE_SECONDS):
     except subprocess.TimeoutExpired:
         exit_code = f'timeout after {seconds} s'
     text = tap.read_text() if tap.exists() else ''
-    counts = dict(line[2:].split(' ', 1) for line in text.splitlines() if line.startswith(('# pass ', '# fail ')))
+    counts = dict(line[2:].split(' ', 1) for line in text.splitlines() if line.startswith(('# pass ', '# fail ', '# skipped ')))
     rows = [json.loads(line) for line in failures.read_text().splitlines()] if failures.exists() else []
     found = [{'test': row['file'] + ' :: ' + row['test'], 'error': row['error']} for row in rows]
     if exit_code and not found:
         found = [{'test': name + ' :: (whole file)', 'error': f'exit {exit_code}; see {label}/{stem}.tap'}]
     say(f"  {'ok  ' if not found else 'FAIL'} {name}" + (f' ({len(found)} failed)' if found else ''))
-    return int(counts.get('pass', 0)) + int(counts.get('fail', 0)), found
+    return int(counts.get('pass', 0)) + int(counts.get('fail', 0)), int(counts.get('skipped', 0)), found
 
 
 def node_files(results, files, label, seconds=FILE_SECONDS):
@@ -160,8 +168,8 @@ def node_files(results, files, label, seconds=FILE_SECONDS):
         thread.start()
     for thread in workers:
         thread.join()
-    return {'ran': sum(count for count, _ in outcomes), 'failed': sorted((item for _, found in outcomes for item in found),
-                                                                          key=lambda item: item['test'])}
+    return {'ran': sum(count for count, _, _ in outcomes), 'skipped': sum(count for _, count, _ in outcomes),
+            'failed': sorted((item for _, _, found in outcomes for item in found), key=lambda item: item['test'])}
 
 
 def node(results, only=None):
@@ -189,7 +197,7 @@ PYTHON_SUITES = (
 def python(results, only=None):
     logs = results / 'python'
     logs.mkdir()
-    ran, failed = 0, []
+    ran, skipped, failed = 0, 0, []
     for name, interpreter, paths, selection in PYTHON_SUITES:
         if only and name not in only:
             continue
@@ -204,14 +212,15 @@ def python(results, only=None):
                 run([str(interpreter), '-m', 'tools.development.unittest_report', '--out', str(out)] + selection,
                     env=environment, stdout=log, stderr=subprocess.STDOUT)
         if not out.exists():
-            row = {'ran': 0, 'failed': [{'test': name + ' (whole suite)', 'error': f'did not finish; see python/{name}.log'}]}
+            row = {'ran': 0, 'skipped': 0, 'failed': [{'test': name + ' (whole suite)', 'error': f'did not finish; see python/{name}.log'}]}
         else:
             row = json.loads(out.read_text())
         ran += row['ran']
+        skipped += row.get('skipped', 0)
         found = [{'test': name + ' :: ' + item['test'], 'error': item['error']} for item in row['failed']]
         failed += found
         say(f"  {'ok  ' if not found else 'FAIL'} {name}: {row['ran']} tests" + (f', {len(found)} failed' if found else ''))
-    return {'ran': ran, 'failed': failed}
+    return {'ran': ran, 'skipped': skipped, 'failed': failed}
 
 
 def compare(section, row, known):
@@ -219,7 +228,8 @@ def compare(section, row, known):
     names = {item['test'] for item in row['failed']}
     return {**row, 'new': [item for item in row['failed'] if item['test'] not in listed],
             'known': [item for item in row['failed'] if item['test'] in listed],
-            'fixed': sorted(name for name in listed if name not in names)}
+            # A test listed as flaky fails only sometimes, so passing does not take it off the list.
+            'fixed': sorted(name for name, entry in listed.items() if name not in names and not entry.get('flaky'))}
 
 
 def main():
@@ -248,7 +258,8 @@ def main():
         if args.files:
             row['fixed'] = []
         summary[section] = {**row, 'seconds': round(time.monotonic() - started)}
-        say(f"   {row['ran']} ran, {len(row['new'])} new failures, {len(row['known'])} known, {len(row['fixed'])} known now pass")
+        say(f"   {row['ran']} ran, {row.get('skipped', 0)} skipped, {len(row['new'])} new failures, {len(row['known'])} known, "
+            f"{len(row['fixed'])} known now pass")
     (results / 'summary.json').write_text(json.dumps(summary, indent=1, ensure_ascii=False) + '\n')
     say('')
     for section, row in summary.items():

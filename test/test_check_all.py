@@ -23,6 +23,8 @@ class CompareTests(unittest.TestCase):
         self.assertEqual([item['test'] for item in row['known']], ['a.js :: one'])
         self.assertEqual(row['fixed'], ['a.js :: two'])
         self.assertEqual(check_all.compare('python', {'ran': 1, 'failed': []}, known)['fixed'], [])
+        flaky = {'python': {'t :: sometimes': {'reason': 'synthetic', 'since': '2026-11-24', 'flaky': True}}}
+        self.assertEqual(check_all.compare('python', {'ran': 1, 'failed': []}, flaky)['fixed'], [])
 
     def test_the_known_failures_list_names_a_reason_for_each_entry(self):
         listed = json.loads(check_all.KNOWN.read_text())

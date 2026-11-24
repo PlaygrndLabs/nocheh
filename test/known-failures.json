@@ -1,7 +1,18 @@
 {
-  "about": "Tests known to fail, by section of tools/development/check_all.py. Each entry says why and since when. A failure listed here does not fail the run; take an entry off when its test passes again.",
+  "about": "Tests known to fail, by section of tools/development/check_all.py. Each entry says why and since when. A failure listed here does not fail the run; take an entry off when its test is fixed. \"flaky\": true marks a test that fails only sometimes or only in some environments, so passing does not report it.",
   "load": {},
   "node": {},
   "browser": {},
-  "python": {}
+  "python": {
+    "hermes :: services.hermes.test_agent_turns.AgentTurnTests.test_a_shutdown_is_not_a_cancel": {
+      "reason": "Two turns started back to back in one chat can take the chat's lane in either order, because a worker thread and a scope read come before the lane; under load 'later' runs before 'slow' and the test waits forever. A product fix is pending.",
+      "since": "2026-11-24",
+      "flaky": true
+    },
+    "hermes :: services.hermes.test_machine_server.MachineServerTests.test_cleanup_finds_programs_with_lsof_and_ps_where_there_is_no_proc": {
+      "reason": "Fails when not run as root, as on GitHub: the test's stray line starts with pid 2, whose environment only root can read, so the cleanup without /proc never falls back to checking every process. A fix in the machine cleanup is pending.",
+      "since": "2026-11-24",
+      "flaky": true
+    }
+  }
 }
