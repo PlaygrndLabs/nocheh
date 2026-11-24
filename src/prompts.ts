@@ -294,13 +294,13 @@ export const sourceTexts=['said: {who} in {place}','reaction: a reaction by {who
   'turn_own: Nocheh\'s note from {place} on {date}, written while answering your own message','turn: Nocheh\'s note from {place} on {date}',
   'turn_read: Nocheh\'s note from {place} on {date}, after reading {read}','job_turn: Nocheh\'s note from a job or scheduled run in {place} on {date}, after reading {read}',
   'earlier: also an earlier note it replaced','read_message: the message it answered','read_forward: a forwarded message','read_file: a file',
-  'read_recent: recent group messages','read_reply: the message it replied to','read_archive: messages from your chats','read_web: web pages','read_notion: Notion','read_tools: tool servers',
+  'read_recent: recent group messages','read_reply: the message it replied to','read_archive: messages from your chats','read_memory: long-term memory','read_tasks: tasks other people wrote','read_web: web pages','read_notion: Notion','read_tools: tool servers',
   'read_commands: command results','read_past: past conversations','read_other: other tools','unknown: Source not recorded',
   'unavailable: Source not available right now','more: {count} more'].join('\n');
 export type SourceText='said'|'reaction'|'person_not_allowed'|'anonymous'|'forward'|'origin_person'|'origin_hidden'|'origin_channel'|'origin_group'|'origin_bot'|
   'origin_unnamed'|'file'|'file_unnamed'|'audio'|'quote'|'quote_nocheh'|'pinned'|'held'|'pinned_held'|'pinned_nocheh'|'unknown_message'|'nocheh_reply'|'nocheh_about_forward'|'nocheh_follow_up'|'nocheh_private_answer'|
   'nocheh_job_report'|'nocheh_scheduled_run'|'nocheh_approved_post'|'nocheh_unlearned'|'review_owner'|'review'|'rules'|'rules_others'|'turn_own'|'turn'|'turn_read'|'job_turn'|
-  'earlier'|'read_message'|'read_forward'|'read_file'|'read_recent'|'read_reply'|'read_archive'|'read_web'|'read_notion'|'read_tools'|'read_commands'|'read_past'|'read_other'|
+  'earlier'|'read_message'|'read_forward'|'read_file'|'read_recent'|'read_reply'|'read_archive'|'read_memory'|'read_tasks'|'read_web'|'read_notion'|'read_tools'|'read_commands'|'read_past'|'read_other'|
   'unknown'|'unavailable'|'more';
 /** The source lines, with any line the owner removed or left empty, or stored without a value it must keep, taken from
  * the default. */
