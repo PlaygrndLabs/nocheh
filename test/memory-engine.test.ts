@@ -216,7 +216,9 @@ test('facts come from the stock list with their cited writes, and uncited ones a
 test('every participant\'s facts for the owner\'s dashboard: by the stock list\'s filters, never one peer\'s facts about another (ADR-0261 step 4)',async()=>{
   const pages:Record<string,unknown>={
     '':{items:[conclusion(1,{observer_id:'bob',observed_id:'ana',source_message_ids:[id(11)]})],next_page:'p2'},
-    p2:{items:[conclusion(2,{observer_id:'ana',observed_id:'ana',source_message_ids:[id(11),id(12)]}),conclusion(3,{observer_id:'bob',observed_id:'bob'})],next_page:'p3'}};
+    p2:{items:[conclusion(2,{observer_id:'ana',observed_id:'ana',source_message_ids:[id(11),id(12)]}),conclusion(3,{observer_id:'bob',observed_id:'bob'}),
+      // A memory wall's copy of ana's fact (ADR-0286) is left out, not refused.
+      conclusion(9,{observer_id:'scope.wall-'+'a'.repeat(40),observed_id:'ana',source_message_ids:[id(11)]})],next_page:'p3'}};
   const {calls,engine}=fake((path,body)=>{
     if(path.startsWith(listPath))return pages[new URL('http://h'+path).searchParams.get('cursor')!];
     if(path.endsWith('/nocheh/provenance'))return {roots:body.conclusion_ids,limitations:[],

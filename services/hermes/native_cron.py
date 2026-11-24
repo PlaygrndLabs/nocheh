@@ -129,7 +129,9 @@ def turn_notice(job):
 def turn_capture(job_id,home,profile,scope,request):
     """A schedule the owner or a member set by asking, sent from inside their sealed turn with its pass: Nocheh records it
     for this turn's person and chat (ADR-0290), or refuses. A new schedule it refused is removed again; a changed one stays
-    inert, shown as not saved. One whose answer was lost is posted again by the scheduler loop. Raises the failure."""
+    inert, shown as not saved. One whose answer was lost is posted again by the scheduler loop. Raises the failure.
+    A turn that read outside content may not leave it running (ADR-0294): it is saved paused instead, for its person's
+    Start under Nocheh's message, and the answer says held."""
     from cron import jobs as native
     answer={}
     with store(home):
@@ -139,9 +141,15 @@ def turn_capture(job_id,home,profile,scope,request):
         if job.get('deliver','local')!='telegram':job=native.update_job(job_id,{'deliver':'telegram'})
         if not job.get('nocheh_registered') or not job.get('nocheh_definition_version') or revision(job,profile)!=job.get('nocheh_synced_revision'):
             job=native.update_job(job_id,{'nocheh_definition_version':uuid.uuid4().hex,'nocheh_registered':False})
-        notice=turn_notice(job)
-        def call(_route,body):answer.update(request('/v1/schedules/turn/definition',{**body,'notice':notice}))
-        try:sync_job(call,job,profile,scope)
+        def call(_route,body):answer.update(request('/v1/schedules/turn/definition',{**body,'notice':turn_notice(job)}))
+        try:
+            try:sync_job(call,job,profile,scope)
+            except Exception as error:
+                if refusal(error)[1]!='schedule_start_needed':raise
+                job=next((stored for stored in inspect(home) if stored['id']==job_id),job)
+                job=native.update_job(job_id,{'enabled':False,'state':'paused','nocheh_definition_version':uuid.uuid4().hex,
+                    'nocheh_registered':False,'nocheh_posting':None})
+                sync_job(call,job,profile,scope)
         except Exception as error:
             if not transient(error):
                 job=next((stored for stored in inspect(home) if stored['id']==job_id),job)
