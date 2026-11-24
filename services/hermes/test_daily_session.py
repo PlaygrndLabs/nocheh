@@ -114,6 +114,29 @@ class NewDayTests(unittest.TestCase):
         self.start(4);self.start(4)
         self.assertEqual(len(self.read('new')[1]),4)
 
+    def test_what_the_carried_messages_read_stays_with_the_new_session(self):
+        """A carry drops tool results, so what they read is kept for "Do what I ask" (ADR-0293)."""
+        from .isolated_profile import database_path
+        from .native_store import writer
+        from .note_sources import CARRIED_READS, conversation_reads
+        from .store_fixture import add_message
+        def reads():return conversation_reads(database_path(self.profile),'new',{},self.profile)
+        with writer(self.profile) as db:daily_session.start(db,'new','old',4,profile=self.profile)
+        self.assertEqual(reads(),[],'notes and typed questions read nothing outside')
+        self.assertFalse((self.profile/CARRIED_READS).exists())
+        with writer(self.profile) as db:
+            add_message(db,'old',role='user',content='question 6')
+            add_message(db,'old',role='assistant',content='',tool_calls=[{'id':'c6','type':'function','function':{'name':'mcp__nocheh__browser','arguments':'{}'}}])
+            add_message(db,'old',role='tool',content='Step one: run this.',tool_call_id='c6',tool_name='mcp__nocheh__browser')
+            add_message(db,'old',role='assistant',content='The page says to run this.')
+        with writer(self.profile) as db:daily_session.start(db,'next','old',4,profile=self.profile)
+        self.assertEqual(conversation_reads(database_path(self.profile),'next',{},self.profile),['web'],'the page read stays though its row is gone')
+        # The next day's session carries on from that one, and so does what it read.
+        with writer(self.profile) as db:daily_session.start(db,'after','next',4,profile=self.profile)
+        self.assertEqual(conversation_reads(database_path(self.profile),'after',{},self.profile),['web'])
+        (self.profile/CARRIED_READS).write_text('not a record')
+        self.assertIsNone(reads(),'a record that cannot be read leaves the turn unreported')
+
     def test_session_search_still_finds_the_day_before(self):
         from persistence.conversation.sessions import BOUNDARY_END_REASONS
         self.assertIn(daily_session.END_REASON,BOUNDARY_END_REASONS)

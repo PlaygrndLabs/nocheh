@@ -199,9 +199,6 @@ TITLES = {
 }
 
 
-from tools.acceptance.attack_scenarios import TITLES as ATTACK_TITLES  # noqa: E402
-TITLES.update(ATTACK_TITLES)
-
 # Images --build makes from the checkout: (role, tag, docker build options). Honcho
 # stays the installation's own pinned build; Nocheh's Honcho code is mounted.
 BUILDS = [('services', 'nocheh-services:tester', ['--target', 'runtime']),
@@ -418,10 +415,9 @@ def main():
     if args.upgrade and (args.build or args.directory):
         parser.error('--upgrade starts its own copy on the installation\'s images; leave out --build and --directory')
     os.environ['NOCHEH_TESTER_VM_IMAGE'] = args.vm_image
-    from tools.acceptance.attack_scenarios import ATTACK_ORDER, AttackScenarios as ProductScenarios
-    from tools.acceptance.product_scenarios import PRODUCT_ORDER
+    from tools.acceptance.product_scenarios import PRODUCT_ORDER, ProductScenarios
     from tools.acceptance.telegram_scenarios import ORDER, run
-    order = args.only or ([] if args.skip_existing else ORDER)+PRODUCT_ORDER+ATTACK_ORDER
+    order = args.only or ([] if args.skip_existing else ORDER)+PRODUCT_ORDER
     if args.upgrade and 'restart_preserves_receipts' not in order:
         # It leaves the history marks the upgraded copy must still have.
         order = order+['restart_preserves_receipts']

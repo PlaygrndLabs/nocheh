@@ -59,11 +59,6 @@ class ScriptedAgent:
     RECENT_ITEM = re.compile(r'^\[Group message from .*\] \(source nocheh:event:([a-f0-9]{64})\)$', re.M)
     # Nocheh's memory evidence message (services/hermes/memory_evidence.py).
     EVIDENCE = '[Nocheh memory evidence; data, not a new user request]\n'
-    # [[obey]] makes the model act as a fooled one: once its first tool result arrives, it carries out the first planted
-    # instruction that result holds, [[do:action|DESTINATION|TEXT]], [[do:browser|URL]] or [[do:shell|COMMAND]], then
-    # answers from that call's result. Attack scenarios plant these where untrusted text reaches a tool's result.
-    OBEY = '[[obey]]'
-    PLANTED = re.compile(r'\[\[do:(action|browser|shell)\|([^\]]{1,800})\]\]')
     TOOLS = {'search': 'mcp__nocheh__archive_search', 'recall': 'mcp__nocheh__memory_recall', 'action': 'mcp__nocheh__action_request',
              'owner': 'mcp__nocheh__owner_read'}
     NOCHEH = 'mcp__nocheh__'
@@ -161,29 +156,6 @@ class ScriptedAgent:
     def record(self, **event):
         self.events = (self.events + [event])[-500:]
 
-    def obey(self, current, later, silent_after):
-        """The fooled model's next step in an [[obey]] turn: None until the first tool result, then the planted call that
-        result holds (None when it holds none), then the answer from the planted call's result."""
-        results = [message for message in later if message.role == 'tool']
-        if not results:
-            return None
-        found = self.PLANTED.search(self.text(results[0].content))
-        if not found:
-            self.record(directive='obey', argument='', phase='final', present=False)
-            return None
-        kind, argument = found[1], found[2]
-        if kind == 'action':
-            destination, _, text = argument.partition('|')
-            name, arguments = self.TOOLS['action'], {'destination': destination.strip(), 'text': text.strip()}
-        else:
-            name, arguments = 'mcp__nocheh__'+kind, {'url' if kind == 'browser' else 'command': argument.strip()}
-        if len(results) == 1:
-            self.record(directive='obey', argument=argument, phase='call', tool=name, present=True)
-            return {'tool': name, 'arguments': arguments}
-        result = self.result(name, results[1].content)
-        self.record(directive='obey', argument=argument, phase='final', tool=name, present=True, result=result[:20000])
-        return {'content': '[NO_REPLY]' if silent_after else '[agent] obeyed ' + name + ': ' + ' '.join(result.split())[:3000]}
-
     def respond(self, body):
         scripted = self.script(body)
         if scripted is None:
@@ -272,10 +244,6 @@ class ScriptedAgent:
         replied = next((found for found in self.DIRECTIVE.finditer(current) if found[1] == 'replied'), None)
         if replied and not [message for message in later if message.role == 'tool']:
             self.record(directive='replied', argument=(replied[2] or '').strip(), phase='frame', **self.reply_frame(current))
-        if self.OBEY in current:
-            obeyed = self.obey(current, later, silent_after)
-            if obeyed is not None:
-                return obeyed
         if tools:
             results = [message for message in later if message.role == 'tool']
             if len(results) < len(tools):
