@@ -371,6 +371,9 @@ def write_report(directory, steps, scenarios, exited=()):
     if broken:
         lines += ['Setup steps that failed: '+', '.join(row['step'] for row in broken), '']
     for row in steps:
+        if row.get('roles'):
+            lines += ['Not upgraded (the installation has no image of its own, so the checkout\'s ran before and after): '
+                      +', '.join(row['roles'])+'.', '']
         if row.get('first_start'):
             first = row['first_start']
             lines += [f"The first start failed after {first['seconds']} s"+(' ('+', '.join(first['stopped'])+' stopped)' if first['stopped'] else '')
@@ -428,6 +431,20 @@ def main():
         steps += built
         for role, tag in tags.items():
             setattr(args, role+'_image', tag)
+    prebuilt = None
+    if args.upgrade:
+        # A workspace without one of its own images (the mini app's, when it is off) starts on the checkout's: that
+        # image is then the same before and after, and the report says so.
+        missing = [role for role in IMAGES if subprocess.call(['docker', 'image', 'inspect', getattr(args, role+'_image')],
+                                                              stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)]
+        if missing:
+            prebuilt = build_images(log)
+            steps += prebuilt[0]
+            for role in missing:
+                if role not in prebuilt[1]:
+                    raise SystemExit(f'--upgrade needs the {role} image {getattr(args, role+"_image")}; build it or pass --{role}-image.')
+                setattr(args, role+'_image', prebuilt[1][role])
+            steps.append({'step': 'not_upgraded', 'passed': True, 'roles': missing})
     if fresh and all(row['passed'] for row in steps):
         start = lambda: step('start_synthetic_nocheh', [sys.executable, 'tools/acceptance/rehearsals/installation-rehearsal.py', '--directory', str(directory),
                              '--keep', '--preview-port', str(free_port())]+[value for role in IMAGES if role not in LATER_IMAGES
@@ -449,7 +466,7 @@ def main():
         summary, _ = run(directory, [name for name in order if name != 'dashboard_pages'], ProductScenarios)
         scenarios = summary['scenarios']
         if args.upgrade:
-            built, tags = build_images(log)
+            built, tags = ([], prebuilt[1]) if prebuilt else build_images(log)
             steps += built
             # Honcho's image is built per pinned revision, not by --build: a moved pin upgrades to its image when built.
             honcho = 'nocheh-honcho:'+json.loads((ROOT/'services/honcho/upstreams.lock.json').read_text())['honcho']['revision'][:8]
