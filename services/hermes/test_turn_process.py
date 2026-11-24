@@ -63,6 +63,19 @@ class TurnProcessTests(unittest.IsolatedAsyncioTestCase):
                                                     'provider':'openai','api_mode':'chat_completions'}),'session',events.append,cancel,progress,labels)
                 self.assertNotIn('SERVICE_TOKEN',self.env);self.assertNotIn('TELEGRAM_BOT_TOKEN',self.env);self.assertNotIn('OPENAI_API_KEY',self.env)
                 return result,events
+    async def test_the_long_term_context_goes_back_to_the_parent_only(self):
+        # ADR-0295: the parent compares the notes a turn wrote with the context it read; the reply never carries it.
+        source='import json; print(json.dumps({"state":"done","text":"ok","memory_context":"{\\"text\\":\\"Bob said 99887766\\"}"}))'
+        with tempfile.TemporaryDirectory() as folder:
+            original=asyncio.create_subprocess_exec
+            async def spawn(*args,**kwargs):return await original(sys.executable,'-c',source,**kwargs)
+            read_back={}
+            with patch('services.hermes.turn_process.asyncio.create_subprocess_exec',spawn),patch('services.hermes.assistant_gateway.check_delivery_policy',return_value=True):
+                result=await _run_process(Path(folder),Scope('-10','42',False,'group'),{'event_id':'event','archive_credential':'scoped','text':'x','channel':'browser'},'model',
+                    SimpleNamespace(runtime=lambda:{'api_key':'k','base_url':'https://gateway.example.test/v1','provider':'openai','api_mode':'chat_completions'}),
+                    'session',None,None,None,None,read_back)
+        self.assertNotIn('memory_context',result)
+        self.assertEqual(read_back,{'memory_context':'{"text":"Bob said 99887766"}'})
     async def test_a_private_answer_says_first_where_it_was_asked_and_needs_its_pass(self):
         frame='[Private answer] The question below was asked in “Team”.'
         source=('import sys,json; body=json.load(sys.stdin); print(json.dumps({"state":"done","text":json.dumps({"text":body["text"],'

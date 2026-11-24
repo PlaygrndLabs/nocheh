@@ -29,7 +29,7 @@ TARGETS=(('memory','MEMORY.md'),('user','USER.md'))
 # A note keeps at most this many origins, its writer first; the rest are counted, and a count reads as unknown.
 ORIGINS=10
 CITES=20
-READS=('forward','file','recent','reply','archive','web','notion','tools','commands','past','other')
+READS=('forward','file','recent','reply','archive','memory','tasks','web','notion','tools','commands','past','other')
 CHANNELS=('telegram','browser','scheduler','background')
 FROM=('owner','nocheh','person','forward','file','mixed','turn','turn_read','unknown','unavailable')
 UNAVAILABLE={'from':'unavailable','label':'source not available right now'}
@@ -49,19 +49,26 @@ REF=re.compile(r'[a-f0-9]{12}')
 TOKENS=(re.compile(r'\d{6,}'),re.compile(r'[^\s@<>()"\']+@[^\s@<>()"\']+\.[^\s@<>()"\']+'),re.compile(r'https?://([^/\s:?#<>"\']+)'),
         re.compile(r'(?<![0-9a-z])(?=[0-9a-z]*[0-9])[0-9a-z]{15,}(?![0-9a-z])'))
 # What a turn's tools read, as read tokens. A search by meaning returns archived messages as they were sent, with no
-# source, so it reads other chats as the archive tools do. Only the notes and long-term memory recall are labelled
-# already, and the project's tasks and a job's own to-do list are Nocheh's own records, so they are not outside reads;
-# any other tool is. A task read storage marks other_groups is the exception (task_read).
+# source, so it reads other chats as the archive tools do. Only the notes are labelled already, and a job's own to-do
+# list is Nocheh's own record, so they are not outside reads; any other tool is. Long-term memory recall and the
+# project's tasks are outside reads only when they hold other people's words (recall_read, task_read).
 TOOL_READS={'mcp__nocheh__archive_search':'archive','mcp__nocheh__archive_read':'archive','mcp__nocheh__archive_page':'archive',
             'mcp__nocheh__memory_search':'archive','mcp__nocheh__browser':'web','mcp__nocheh__notion':'notion','mcp__nocheh__github':'tools','mcp__nocheh__gmail':'tools','mcp__nocheh__mcp':'tools',
             'mcp__nocheh__shell':'commands','session_search':'past'}
-NOT_READS=frozenset({'memory','mcp__nocheh__memory_recall','mcp__nocheh__tasks','todo_list'})
+NOT_READS=frozenset({'memory','todo_list'})
 # Every chat of a project reads its whole task list, but with "Share group chats" off a group does not share what it
 # knows with the project's other groups, so storage marks a read that shows their tasks other_groups (ADR-0276). Such a
 # read is what those chats wrote, so it reads as other chats' messages do. The mark is looked for escaped too, as a
 # result cut to fit or stored inside another holds it; task text cannot hide it, only add a look-alike that counts.
 TASKS='mcp__nocheh__tasks'
 OTHER_GROUPS=re.compile(r'\\*"other_groups\\*"\s*:\s*true')
+# Storage marks a task read others_wrote when a task it shows has a title, notes or comments someone other than the
+# owner wrote, such as a member in a group or in the members' app: their words, not the owner's.
+OTHERS_WROTE=re.compile(r'\\*"others_wrote\\*"\s*:\s*true')
+# A long-term memory recall that answers with memory's own reasoning (memory_inference) or the facts it read reads what
+# everyone in the owner's chats said; one that holds only the owner's corrections, or nothing, reads nothing outside.
+RECALL='mcp__nocheh__memory_recall'
+INFERRED=re.compile(r'\\*"kind\\*"\s*:\s*\\*"memory_inference\\*"')
 # The lines Nocheh puts in a turn's message, which stay in its session until a compaction: what earlier turns read.
 MARKERS=(('[Forwarded: ','forward'),('[Archived attachment: ','file'),('[Recent messages in this group','recent'))
 # The fixed lines src/forwarded.ts forwardLine puts before a forward of the sender's own earlier message, in the owner's
@@ -355,8 +362,15 @@ def _called(row):
 
 
 def task_read(content):
-    """The read token of a task result: other chats' words when storage marked it other_groups, else None."""
-    return 'archive' if isinstance(content,str) and OTHER_GROUPS.search(content) else None
+    """The read token of a task result: other chats' words when storage marked it other_groups, else tasks other people
+    wrote when it marked it others_wrote, else None."""
+    if not isinstance(content,str):return None
+    return 'archive' if OTHER_GROUPS.search(content) else 'tasks' if OTHERS_WROTE.search(content) else None
+
+
+def recall_read(content):
+    """The read token of a long-term memory recall: long-term memory when it holds memory's reasoning, else None."""
+    return 'memory' if isinstance(content,str) and INFERRED.search(content) else None
 
 
 def tool_read(row):
@@ -364,6 +378,7 @@ def tool_read(row):
     without a tool name, as an older schema stores it, is another tool."""
     name=row.get('tool_name')
     if name==TASKS:return task_read(row.get('content'))
+    if name==RECALL:return recall_read(row.get('content'))
     return None if name in NOT_READS else TOOL_READS.get(name,'other')
 
 
@@ -420,7 +435,7 @@ def _reply_copied(text,written):
     return SHORT_COPY<=len(plain)<RUN and any(plain in written_plain for written_plain in written[2])
 
 
-def turn_reads(database,session,last,body):
+def turn_reads(database,session,last,body,context=None):
     """What a turn read besides the message it answered, as read tokens, the memory operations it asked for, and whether
     its stored rows could be read: the forward, files and recent group messages it was given; the tools it called
     before its last memory call; the forwards, files and recent group messages earlier in its session since the last
@@ -433,7 +448,11 @@ def turn_reads(database,session,last,body):
     The message the turn's own message replies to is a read too, unless the owner typed it: Nocheh's own message
     counts, since it may carry what others said. Earlier in the session such a block counts only when what the turn
     wrote copies from its text (_replied), as other people's recent messages do, or, for a text shorter than a run,
-    holds it whole (_reply_copied)."""
+    holds it whole (_reply_copied).
+
+    The long-term memory context the turn was given before it started (`context`, as the turn's process read it) holds
+    what memory learned from everyone in the owner's chats, so it is a read too when what the turn wrote copies from it,
+    as earlier reads are."""
     from .retired_history import _columns,_read_only,_summary,memory_ops
     from .turn_process import forwarded,recent_group,reply_block
     reads=[]
@@ -458,6 +477,7 @@ def turn_reads(database,session,last,body):
     except sqlite3.Error:return reads,None,False
     ops=[op for row in new if row['role']=='assistant' for op in memory_ops(row)]
     written=_written(ops)
+    if isinstance(context,str) and _copied(context,written):add('memory')
     start=max((index+1 for index,row in enumerate(earlier) if _summary(row)),default=0)
     for row in earlier[start:]:
         content=row['content'] if isinstance(row['content'],str) else None
@@ -524,12 +544,13 @@ def turn_origin(body,reads,complete,now=None):
             'reads':[read for read in reads if read in READS][:12],'complete':bool(complete)}
 
 
-def after_turn(profile,body,session,watch,result):
+def after_turn(profile,body,session,watch,result,context=None):
     """Record the notes a turn wrote, with what it read; reads it could not read in full are incomplete. A turn whose
-    stored messages could not be read counts once, when it added or changed a note, whose label that made less exact."""
+    stored messages could not be read counts once, when it added or changed a note, whose label that made less exact.
+    `context`: the long-term memory context the turn read before it started."""
     try:
         from .isolated_profile import database_path
-        reads,ops,ok=turn_reads(database_path(profile),session,watch['last'],body)
+        reads,ops,ok=turn_reads(database_path(profile),session,watch['last'],body,context)
     except Exception:
         reads,ops,ok=[],None,False
     complete=ok and isinstance(result,dict) and result.get('state')=='done'

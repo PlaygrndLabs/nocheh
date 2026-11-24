@@ -1193,6 +1193,23 @@ for(const family of families)test(`every group and topic of a project reads and 
     const relating=await s.tasks.chatGet(bob,second.id);
     assert.deepEqual([relating.related.map((item:any)=>item.id),relating.other_groups],[[first.id],true],'a linked task of another group marks it too');
     assert.equal(relating.related[0].group_id,g1,'a linked task shows its group of the project');
+    // ADR-0295: what a member wrote is marked as theirs in every chat, the owner's private chat and brief too; the owner's
+    // own is not. A list shows no comment text, so it marks none.
+    const mine=await actor((await capture('123',123,'What is open?','Owner')).id,null,'123');
+    const wrote=await s.tasks.chatGet(mine,waits.id);
+    assert.deepEqual([wrote.others_wrote,wrote.written_by_others],[true,['title']],'a member\'s task');
+    const owned=await s.tasks.chatGet(mine,shared.id);
+    assert.deepEqual([owned.others_wrote,owned.written_by_others],[undefined,undefined],'the owner\'s own task');
+    const commented=await s.tasks.chatGet(mine,first.id);
+    assert.deepEqual([commented.others_wrote,commented.written_by_others],[true,['comments']],'a member\'s comment');
+    assert.deepEqual(commented.subtasks.find((item:any)=>item.id===below.id).written_by_others,['title'],'a member\'s subtask inside it');
+    const everything=await s.tasks.chatList(mine,{state:'all'});
+    assert.equal(everything.others_wrote,true);
+    assert.equal(everything.tasks.find((item:any)=>item.id===first.id).written_by_others,undefined);
+    assert.deepEqual(everything.tasks.find((item:any)=>item.id===waits.id).written_by_others,['title']);
+    // The owner rewriting it makes it the owner's again.
+    await s.tasks.update(owner,waits.id,{operation_id:key+':rewrite',expected_revision:await rev(waits.id),title:'Wait for the hall'});
+    assert.equal((await s.tasks.chatGet(mine,waits.id)).written_by_others,undefined);
     // A linked task labelled with a group outside the project shows no group, as the task itself does.
     const away=await s.tasks.create(owner,{operation_id:key+':away',title:'Away-'+mark,scope:p1,group:g3,related:[second.id]});
     const linkedAway=(await s.tasks.chatGet(bob,second.id)).related.find((item:any)=>item.id===away.id);

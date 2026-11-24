@@ -151,6 +151,9 @@ test('model labels: fixed words, no person names, at most 120 characters',()=>{
   assert.equal(label([turn({place:{chat:GP1},answered:'person_message',reads:['reply']})]),
     'Nocheh\'s note from a group on 2026-11-16, after reading the message it answered (another person\'s), the message it…');
   assert.equal(fromToken([turn({reads:['reply']})]),'turn_read');
+  // ADR-0295: long-term memory and tasks others wrote are someone else's words, even in the owner's private chat.
+  assert.equal(label([turn({reads:['memory','tasks']})]),'Nocheh\'s note from the owner\'s private chat on 2026-11-16, after reading long-term memory, tasks other people wrote');
+  assert.equal(fromToken([turn({reads:['tasks']})]),'turn_read');
   assert.equal(label([turn({answered:'file_by_owner'})]),'Nocheh\'s note from the owner\'s private chat on 2026-11-16, after reading a file');
   assert.equal(label([turn({job:true})]),'Nocheh\'s note from a job or scheduled run in the owner\'s private chat on 2026-11-16');
   assert.equal(label([turn({job:true,reads:['notion']})]),'Nocheh\'s note from a job or scheduled run in the owner\'s private chat on 2026-11-16, after reading Notion');
@@ -288,6 +291,7 @@ test('owner labels: the owner\'s own lines, people and chats named as reminders 
   assert.equal(ownerLabel([note(provenance(Array.from({length:8},(_,i):[number,EventClass]=>[i+1,'owner_message'])),[1]),{by:'unknown'}],words,names,keys),
     'Your own messages in your private chat; also an earlier note it replaced');
   assert.equal(ownerLabel([turn({reads:['web','past']})],words,names,keys),'Nocheh\'s note from your private chat on 2026-11-16, after reading web pages, past conversations');
+  assert.equal(ownerLabel([turn({reads:['memory','tasks']})],words,names,keys),'Nocheh\'s note from your private chat on 2026-11-16, after reading long-term memory, tasks other people wrote');
   assert.equal(ownerLabel([turn({place:{chat:GP1},reads:['reply']})],words,names,keys),`Nocheh's note from group ${q('Family')} on 2026-11-16, after reading the message it replied to`);
   assert.equal(ownerLabel([turn()],words,names,keys),'Nocheh\'s note from your private chat on 2026-11-16, written while answering your own message');
   assert.equal(ownerLabel([turn({place:{chat:GP1}})],words,names,keys),`Nocheh's note from group ${q('Family')} on 2026-11-16`);

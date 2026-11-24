@@ -66,13 +66,13 @@ async def run_process(root, scope, body, model, credentials, session_id, emit=No
             # does a member's private chat (step 4).
             from . import note_sources
             watch=None if scope.answer or scope.member or scope.member_read else await asyncio.to_thread(note_sources.before, profile, scope.space or scope.chat_id, database_path(profile), body.get('event_id'))
-            result=None
+            result=None;read_back={}
             try:
-                result=await _run_process(profile, scope, body, model, credentials, session_id, emit, cancelled, progress, watch and watch['sources'])
+                result=await _run_process(profile, scope, body, model, credentials, session_id, emit, cancelled, progress, watch and watch['sources'], read_back)
                 return result
             finally:
                 # Also after a cancelled or failed turn: its notes may have changed before it stopped.
-                if watch is not None:await asyncio.to_thread(note_sources.after_turn, profile, body, session_id, watch, result)
+                if watch is not None:await asyncio.to_thread(note_sources.after_turn, profile, body, session_id, watch, result, read_back.get('memory_context'))
         finally:
             await asyncio.to_thread((profile/'.foreground').touch)
 
@@ -230,7 +230,7 @@ def job_run(limits):
     return limits
 
 
-async def _run_process(profile, scope, body, model, credentials, session_id, emit, cancelled, progress=None, note_sources=None):
+async def _run_process(profile, scope, body, model, credentials, session_id, emit, cancelled, progress=None, note_sources=None, read_back=None):
     if cancelled and cancelled.is_set(): return {'state':'cancelled','text':'','session_id':session_id}
     # A background job run lasts until its job's hard deadline: its box commands end then, and the process a minute
     # later if nothing stopped it before. Every other turn has the usual reply time.
@@ -383,6 +383,9 @@ async def _run_process(profile, scope, body, model, credentials, session_id, emi
             # A turn that could not read long-term memory, or part of it, says so; it is counted for the owner's notice.
             from .usage import note_done, note_failed
             problem=result.pop('memory_problem',None)
+            # The long-term memory context the turn read before it started, for who wrote its notes; never passed on.
+            context=result.pop('memory_context',None)
+            if read_back is not None and isinstance(context,str):read_back['memory_context']=context
             if problem=='memory_read':await asyncio.to_thread(note_failed,'memory_read')
             elif result.get('state')=='done' and not answer and not asked and not scope.member:await asyncio.to_thread(note_done,'memory_read')
             # A job run reports Hermes's own token counts too; Nocheh prices them at the rates frozen on the job's card.

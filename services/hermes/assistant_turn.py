@@ -236,6 +236,9 @@ def install_tool_search_policy():
 RUNS=[]
 # Long-term memory this turn could not read in full, for the parent to count (memory_problem).
 PROBLEMS=[]
+# The long-term memory context a turn read, which its parent compares with the notes the turn wrote (note_sources).
+CONTEXT=[]
+CONTEXT_LIMIT=256*1024
 
 
 def conversation_result(result, session_id):
@@ -392,6 +395,7 @@ def run(body, emit=None, relay=None):
                 isinstance(part,dict) and isinstance(part.get('limitations'),list) and 'forwards_unavailable' in part['limitations'] for part in parts):
             PROBLEMS.append('memory_read')
         long_term='\nPrimary memory context (derived inferences):\n'+json.dumps(memory,ensure_ascii=False)
+        CONTEXT.append(json.dumps(memory,ensure_ascii=False)[:CONTEXT_LIMIT])
     record('memory_recall',phase);phase=perf_counter()
     session_id=body['session_id']
     history=prepare(native_store.conversation(database,session_id)) if native_store.session_row(database,session_id) else []
@@ -541,6 +545,7 @@ def main():
     measured=combine(RUNS)
     if measured:result['usage']=measured
     if PROBLEMS:result['memory_problem']=PROBLEMS[0]
+    if CONTEXT:result['memory_context']=CONTEXT[0]
     # Why it failed, as codes for the usage tracker: a run's own reason and the provider's exact error, or the code of
     # Nocheh's own refusal, such as its secret check's; else Nocheh's error.
     if result.get('state')!='done':

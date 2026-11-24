@@ -227,7 +227,11 @@ its own and a bad one drops only itself. A forum topic's opening is never a
 reply target. The `reply` read token makes a turn's notes `turn_read` when the
 replied-to message is not the owner's own typing, Nocheh's own included; earlier
 in the session only when the note copies from the block's text (a run, a
-distinctive token, or a short text held whole). A note's `ref` (the first 12 hex
+distinctive token, or a short text held whole). The `memory` read token counts
+a `memory_recall` result holding `kind: memory_inference`, and the turn's
+long-term memory context (which the turn's process hands back to its parent as
+`memory_context`, never passed on) when a note copies from it; the `tasks` token
+counts a task read storage marks `others_wrote` (ADR-0295). A note's `ref` (the first 12 hex
 of its key) is shown only when storage kept that turn's refs in `note_lookups`
 (pruned after 7 days; a failure is counted as `note_refs`); `archive_read
 {note}` opens a ref's messages only for the turn whose lookup kept it, never for

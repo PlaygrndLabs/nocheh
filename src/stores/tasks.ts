@@ -967,34 +967,55 @@ export class TaskRepository {
     return this.marked(turn,await this.held(turn,'comment',id,operation,body,await this.discuss(operation,id,body,this.chatContext(turn))));
   }
   /**
-   * A group or topic turn's answer, marked `other_groups: true` when it shows a task (listed, read, its parent,
+   * A chat turn's answer, marked so a note written after it says whose words it read.
+   * A group or topic turn's answer is marked `other_groups: true` when it shows a task (listed, read, its parent,
    * subtasks or linked tasks) labelled with a group or topic outside what that chat shares what it knows with, or a list
    * names a tag only such tasks carry. While
    * "Share group chats" is off a group learns nothing from such a read (ADR-0276); with it on the reach holds the
    * project's groups, so nothing is marked. A task with no group label never marks.
+   * In every chat, each task shown whose title or notes a person other than the owner last wrote, in a group or in the
+   * members' app, or that shows a comment a member wrote, lists those parts in `written_by_others`, and the answer is
+   * marked `others_wrote: true`: their words, never the owner's, even in the owner's private chat or brief (ADR-0295).
    */
   private async marked<T>(turn:Turn,answer:T):Promise<T> {
-    if(!turn.reach||!answer||typeof answer!=='object')return answer;
-    const shown=new Set<string>();
+    if(!answer||typeof answer!=='object')return answer;
+    const shown=new Map<string,Record<string,unknown>[]>();
     const walk=(value:unknown):void=>{
       if(Array.isArray(value)){value.forEach(walk);return;}
       if(!value||typeof value!=='object')return;
       const item=value as Record<string,unknown>;
-      if(typeof item.id==='string'&&hex.test(item.id)&&typeof item.title==='string')shown.add(item.id);
+      if(typeof item.id==='string'&&hex.test(item.id)&&typeof item.title==='string')shown.set(item.id,[...shown.get(item.id)??[],item]);
       Object.values(item).forEach(walk);
     };
     walk(answer);
+    const others=await this.othersWrote([...shown.keys()]);
+    for(const [id,items] of shown)for(const item of items) {
+      const parts=[...others.get(id)??[]].filter(part=>part!=='comments'||Array.isArray(item.comments));
+      if(parts.length)item.written_by_others=parts;
+    }
+    const wrote=[...shown.values()].some(items=>items.some(item=>Array.isArray(item.written_by_others)));
+    const marks=wrote?{others_wrote:true}:{};
+    if(!turn.reach)return wrote?{...marks,...answer}:answer;
     // A list's tags name the tags in use on the whole list: one only tasks of other groups carry is their text too.
     const listed=(answer as {tags?:unknown}).tags,tags=Array.isArray(listed)&&!('id' in answer)?listed
       .map(item=>typeof item==='string'?item:item&&typeof item==='object'?(item as {name?:unknown}).name:null).filter((item):item is string=>typeof item==='string'):[];
     if(!shown.size&&!tags.length)return answer;
     const reach=readSetParam(turn.reach),outside=(column:string)=>`${column} IS NOT NULL AND NOT ${readSetSql(column,2)}`;
-    const other=shown.size>0&&(await this.control.query(`SELECT 1 FROM owner_tasks WHERE id=ANY($1::text[]) AND ${outside('group_id')} LIMIT 1`,[[...shown],reach])).rows.length>0
+    const other=shown.size>0&&(await this.control.query(`SELECT 1 FROM owner_tasks WHERE id=ANY($1::text[]) AND ${outside('group_id')} LIMIT 1`,[[...shown.keys()],reach])).rows.length>0
       ||tags.length>0&&(await this.control.query(`SELECT 1 FROM unnest($1::text[]) w(tag) WHERE EXISTS (SELECT 1 FROM owner_tasks t,unnest(t.tags) x
         WHERE t.project_id=$3 AND t.deleted_at IS NULL AND lower(x)=lower(w.tag) AND ${outside('t.group_id')})
         AND NOT EXISTS (SELECT 1 FROM owner_tasks t,unnest(t.tags) x WHERE t.project_id=$3 AND t.deleted_at IS NULL AND lower(x)=lower(w.tag)
         AND NOT (${outside('t.group_id')})) LIMIT 1`,[tags,reach,turn.project])).rows.length>0;
-    return other?{other_groups:true,...answer}:answer;
+    return other?{other_groups:true,...marks,...answer}:wrote?{...marks,...answer}:answer;
+  }
+  /** The parts of each task someone other than the owner wrote: its title or notes, last written by a person in a group
+   *  or the members' app (owner_task_writers), and comments, when a member wrote one. */
+  private async othersWrote(ids:string[]):Promise<Map<string,Set<'title'|'notes'|'comments'>>> {
+    const found=new Map<string,Set<'title'|'notes'|'comments'>>();if(!ids.length)return found;
+    const rows=(await this.control.query(`SELECT task_id,field FROM owner_task_writers WHERE task_id=ANY($1::text[]) AND by='person' AND field IN ('title','notes')
+      UNION SELECT DISTINCT task_id,'comments' FROM owner_task_comments WHERE task_id=ANY($1::text[]) AND author->>'kind'='member'`,[ids])).rows;
+    for(const row of rows)found.set(row.task_id,(found.get(row.task_id)??new Set()).add(row.field));
+    return found;
   }
   /** An "Answer privately" answer and a member's private chat only read; they add, change and comment on none. */
   private writable(turn:Turn):Turn {
