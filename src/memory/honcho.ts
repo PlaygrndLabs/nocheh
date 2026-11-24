@@ -3,7 +3,7 @@ import {canonical} from '../archive.js';
 import {HttpError,string} from '../http.js';
 import {longFetch} from '../long-fetch.js';
 import {engineId,engineInvalid,engineRejected,engineUnavailable,type EngineCoverage,type EngineFact,type EngineFactPage,type EngineTrace,type ParticipantFact,
-  type EngineWrite,type EngineWriteInput,type ForgetStep,type MemoryEngine,type ParticipantRole} from './engine.js';
+  type EngineWrite,type EngineWriteInput,type ForgetStep,type HiddenFact,type MemoryEngine,type ParticipantRole} from './engine.js';
 
 /** GET without a body, POST with one. DELETE treats an already absent resource as deleted. `key` replaces the main key
  *  for this one call: a wall's key (ADR-0286). */
@@ -220,6 +220,23 @@ export class HonchoEngine implements MemoryEngine {
     if(!found.ids.length){await this.call(this.base(space)+'/sessions/'+session,undefined,'DELETE');return {done:true,removed:0};}
     for(const conclusion of found.ids)await this.call(this.base(space)+'/conclusions/'+conclusion,undefined,'DELETE');
     return {done:false,removed:found.ids.length};
+  }
+  async hiddenFacts(space:string,options:{after:string|null;size:number}) {
+    const found=await this.call(this.base(space)+'/nocheh/hidden?'+new URLSearchParams({size:String(options.size),...(options.after?{after:options.after}:{})}));
+    if(!found||!Array.isArray(found.items)||found.items.length>options.size||!(found.next===null||(typeof found.next==='string'&&found.next.length<=80)))throw new HttpError(502,'invalid_honcho_hidden');
+    const facts:HiddenFact[]=found.items.map((item:any)=>{
+      if(!nativeId(item?.id)||typeof item.content!=='string'||item.content.length>65535||typeof item.observed!=='string'||typeof item.observer!=='string'
+        ||!['replaced','unused'].includes(item.reason)||!(item.copied_from===null||nativeId(item.copied_from)))throw new HttpError(502,'invalid_honcho_hidden');
+      return {id:item.id,content:item.content,participant:item.observed,wall:item.observer.startsWith('scope.'),copyOf:item.copied_from??null,
+        reason:item.reason,hiddenAt:typeof item.hidden_at==='string'?item.hidden_at:null,createdAt:String(item.created_at)};
+    });
+    return {facts,next:found.next as string|null};
+  }
+  async restoreFacts(space:string,ids:readonly string[]) {
+    if(!ids.length||ids.length>50||ids.some(id=>!nativeId(id)))throw new HttpError(400,'invalid_restore_request');
+    const found=await this.call(this.base(space)+'/nocheh/hidden/restore',{ids});
+    if(!Array.isArray(found?.restored)||found.restored.some((id:unknown)=>!nativeId(id)))throw new HttpError(502,'invalid_honcho_restore');
+    return found.restored as string[];
   }
   /** Honcho deletes a workspace only once its sessions are gone. */
   async forgetSpace(space:string):Promise<ForgetStep> {

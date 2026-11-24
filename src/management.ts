@@ -331,7 +331,7 @@ export async function startManagement() {
       if(/^\/tools\/actions\/[a-f0-9]{64}$/.test(route) && req.method==='GET')return json(res,200,await python({operation:'tools.manage',action:route.slice(7)}));
       if(req.method==='POST' && ['/tools/decide','/tools/telegram-decision','/tools/resolve','/tools/telegram-resolve','/tools/grant','/tools/revoke'].includes(route))return json(res,200,await python({operation:'tools.manage',action:route.slice(7),request:await readJson(req)}));
       if (req.method === 'GET' && route === '/runtime') return json(res,200,await archive('/v1/runtime'));
-      if(['/memory/longterm','/memory/longterm/rebuild','/memory/longterm/retry-failed','/memory/longterm/fresh-start','/memory/spaces','/memory/shares','/memory/shares/revoke','/memory/reviews','/memory/reviews/control','/memory/recall','/memory/preview','/memory/facts','/memory/longterm/coverage','/memory/originals','/memory/message-facts'].includes(route) && ['GET','POST'].includes(req.method??'')) {
+      if(['/memory/longterm','/memory/longterm/rebuild','/memory/longterm/retry-failed','/memory/longterm/fresh-start','/memory/spaces','/memory/shares','/memory/shares/revoke','/memory/reviews','/memory/reviews/control','/memory/recall','/memory/preview','/memory/facts','/memory/longterm/coverage','/memory/originals','/memory/message-facts','/memory/hidden','/memory/hidden/restore'].includes(route) && ['GET','POST'].includes(req.method??'')) {
         return json(res,200,await python({operation:'memory.api',path:'/v1'+route+url.search,
           ...(req.method==='POST'?{body:object(await readJson(req))}:{})}));
       }

@@ -471,6 +471,8 @@ export function storageServer(s:StorageServices,config:Settings,call:RuntimeCall
     if(req.method==='GET'&&path==='/v1/memory/longterm/coverage')return json(res,200,await s.memoryDashboard.coverage(principal));
     if(req.method==='GET'&&path==='/v1/memory/facts')return json(res,200,await s.memoryDashboard.facts(principal,{chat:url.searchParams.get('chat')??'',
       person:url.searchParams.get('person')??'',after:url.searchParams.get('after')??''}));
+    if(req.method==='GET'&&path==='/v1/memory/hidden')return json(res,200,await s.memoryDashboard.hidden(principal,url.searchParams.get('after')??''));
+    if(req.method==='POST'&&path==='/v1/memory/hidden/restore')return json(res,200,await s.memoryDashboard.restore(principal,await readJson(req)));
     if(req.method==='GET'&&path==='/v1/memory/originals')return json(res,200,await s.originals.lookup(principal,url.searchParams.getAll('id')));
     // A message's facts are asked of long-term memory itself, so they sit outside Messages' live paths (/events/).
     if(req.method==='GET'&&path==='/v1/memory/message-facts')return json(res,200,await s.memoryDashboard.learned(principal,url.searchParams.get('id')??''));
