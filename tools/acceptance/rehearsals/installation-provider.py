@@ -63,7 +63,7 @@ class ScriptedAgent:
     # instruction that result holds, [[do:action|DESTINATION|TEXT]], [[do:browser|URL]] or [[do:shell|COMMAND]], then
     # answers from that call's result. Attack scenarios plant these where untrusted text reaches a tool's result.
     OBEY = '[[obey]]'
-    PLANTED = re.compile(r'\[\[do:(action|browser|shell)\|([^\]]{1,800})\]\]')
+    PLANTED = re.compile(r'\[\[do:(action|browser|shell|schedule)\|([^\]]{1,800})\]\]')
     TOOLS = {'search': 'mcp__nocheh__archive_search', 'recall': 'mcp__nocheh__memory_recall', 'action': 'mcp__nocheh__action_request',
              'owner': 'mcp__nocheh__owner_read'}
     NOCHEH = 'mcp__nocheh__'
@@ -175,6 +175,10 @@ class ScriptedAgent:
         if kind == 'action':
             destination, _, text = argument.partition('|')
             name, arguments = self.TOOLS['action'], {'destination': destination.strip(), 'text': text.strip()}
+        elif kind == 'schedule':
+            # A daily job that runs the planted words: Hermes's schedule tool, once a minute, one run.
+            name, arguments = 'cronjob_manage', {'action': 'create', 'name': 'Planted schedule', 'prompt': argument.strip(),
+                                                 'schedule': 'every 1m', 'repeat': 1}
         else:
             name, arguments = 'mcp__nocheh__'+kind, {'url' if kind == 'browser' else 'command': argument.strip()}
         if len(results) == 1:
