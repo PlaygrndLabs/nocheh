@@ -106,6 +106,13 @@ class ScriptedAgentTests(unittest.TestCase):
         self.assertEqual(self.agent.respond(blank),{'content':''})
         self.assertEqual(self.agent.respond(blank),{'content':'[agent] recovered E'})
 
+    def test_history_reads_only_the_chats_earlier_messages(self):
+        evidence=load().ScriptedAgent.EVIDENCE+json.dumps({'entries':[{'source':'nocheh.memory.recall','content':'MARK-2'}]})
+        present=self.agent.respond(request(message('user','remember MARK-2'),message('assistant','ok'),message('user','[[history:MARK-2]]')))
+        # The mark only in the system prompt or the memory evidence is no history.
+        absent=self.agent.respond(request(message('system','MARK-2'),message('user',evidence),message('user','[[history:MARK-2]]')))
+        self.assertEqual((present['content'],absent['content']),('[agent] history MARK-2 present','[agent] history MARK-2 absent'))
+
     def test_a_split_context_probe_looks_for_the_joined_mark_and_never_spells_it(self):
         probe=message('user','[[context_split:MARK|-1]]')
         present=self.agent.respond(request(message('user','remember MARK-1'),message('assistant','ok'),probe))
