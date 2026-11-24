@@ -18,7 +18,8 @@ Nocheh is in development mode and not yet released. Everything below is built an
   behind the memory socket; Nocheh's own `nocheh-telegram` service holds the bot; Inngest runs
   durable workflows; data tools reach the agent over Nocheh's MCP server.
 - Chats: groups reply only when addressed and capture every message and file from everyone
-  ([ADR-0264](docs/adr/0264-groups-are-read-whole-from-everyone.md)); held messages are all answered; reactions show progress.
+  ([ADR-0264](docs/adr/0264-groups-are-read-whole-from-everyone.md)); held messages are all answered; reactions show progress. A message
+  sent while the agent works joins its running turn ([ADR-0291](docs/adr/0291-a-message-joins-the-running-turn-in-its-chat.md)).
 - Members: owner-added members use their joined groups and their own private chat; in a group
   Nocheh answers from that group only; the mini app is English only (members steps 1 to 5,
   [ADR-0242](docs/adr/0242-private-chats-stay-out-of-group-sharing.md) to [ADR-0265](docs/adr/0265-member-mini-app.md)).
@@ -80,6 +81,8 @@ Checks and follow-ups:
   script policy from Report-Only to enforced in one commit. Later: one shared name cleaner for
   cards, forwards and recall labels, and a notice when an off-site restore check fails.
 - Development startup order: a full tester run of `project_groups_stay_apart` alone.
+- Talk while it works ([ADR-0291](docs/adr/0291-a-message-joins-the-running-turn-in-its-chat.md)): a live check on the owner's install, two messages
+  in a row while the agent uses a tool, after the merge.
 - A project's tasks are one list ([ADR-0276](docs/adr/0276-a-projects-tasks-are-one-list.md)): a full tester run of
   `project_groups_stay_apart`, `member_private_chat_reads_joined_groups`, `member_app_tasks`,
   `member_app_drops_a_left_group` and `member_app_never_leaks`.

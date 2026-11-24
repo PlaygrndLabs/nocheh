@@ -443,7 +443,7 @@ export class KnowledgeManagementRepository {
   if(run)return run.state==='done'?'ready':['failed','cancelled','ambiguous'].includes(run.state)?'cancelled':'waiting';
   const dispatch=(await this.stores.control.query("SELECT state,error_code FROM dispatches WHERE source_reference->>'id'=$1 ORDER BY created_at DESC LIMIT 1",[row.source_reference.id])).rows[0];
   if(!dispatch)return 'waiting';
-  return dispatch.state==='done'||dispatch.state==='suppressed'&&dispatch.error_code==='intentional_silence'?'ready':['failed','cancelled','ambiguous','suppressed'].includes(dispatch.state)?'cancelled':'waiting';
+  return dispatch.state==='done'||dispatch.state==='suppressed'&&['intentional_silence','joined_turn'].includes(dispatch.error_code)?'ready':['failed','cancelled','ambiguous','suppressed'].includes(dispatch.state)?'cancelled':'waiting';
  }
 
  private async outcome(db:Pick<pg.PoolClient,'query'>,identity:string,state:string,reason:string|null=null,result?:unknown){

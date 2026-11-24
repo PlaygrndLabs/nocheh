@@ -713,7 +713,7 @@ class HandlerTests(unittest.TestCase):
         self.server.image=self.IMAGE;self.server.network='nocheh-agent';self.server.host_profiles='/owned/profiles';self.server.box_limit=2
         threading.Thread(target=self.server.serve_forever,daemon=True).start()
         self.addCleanup(self.server.server_close);self.addCleanup(self.server.shutdown)
-        def attach(identifier,body):
+        def attach(identifier,body,inlet=None):
             credential=body['archive_credential'];self.attached.append(credential);self.order.append('attach')
             if credential=='first':self.release.wait(5)
             if credential=='dropped':
@@ -780,6 +780,32 @@ class HandlerTests(unittest.TestCase):
     def turn_specs(self):return [body for method,path,body in self.docker.calls if path.startswith('/containers/create?name=nocheh-turn-')]
 
     def plain(self):return launcher.container_spec(self.PROFILE,'/owned/profiles',self.IMAGE,'nocheh-agent',1000,1000)
+
+    def test_a_message_joins_only_its_own_running_turn(self):
+        self.bind('first');self.release.clear();nonce='d'*32;inlets=[]
+        def turn():
+            connection=http.client.HTTPConnection('127.0.0.1',self.server.server_address[1],timeout=10)
+            body=json.dumps({**json.loads(self.body('first')),'steer':True}).encode()
+            connection.request('POST','/v1/turn',body=body,headers={'Authorization':'Bearer '+'s'*32,'Content-Type':'application/json','X-Nocheh-Turn':nonce})
+            response=connection.getresponse();response.read();connection.close()
+        def steer(value,token='s'*32):
+            connection=http.client.HTTPConnection('127.0.0.1',self.server.server_address[1],timeout=10)
+            connection.request('POST','/v1/turn/steer',body=json.dumps({'archive_credential':'first','nonce':nonce,'steer':'Joined','ticket':'1'*64,**value}).encode(),
+                               headers={'Authorization':'Bearer '+token,'Content-Type':'application/json'})
+            response=connection.getresponse();response.read();connection.close();return response.status
+        running=threading.Thread(target=turn);running.start()
+        for _ in range(500):
+            if self.attached:break
+            time.sleep(.01)
+        inlet=launcher.INLETS[self.PROFILE]
+        self.assertEqual(steer({}),204)
+        self.assertEqual(inlet.waiting,[b'{"steer": "Joined", "ticket": "'+b'1'*64+b'"}\n'],'it waits for the container in the turn\'s inlet')
+        self.assertEqual(steer({'nonce':'e'*32}),409,'a message for another turn of the same chat is refused')
+        self.assertEqual(steer({'ticket':'short'}),400)
+        self.assertEqual(steer({},'t'*32),403)
+        self.release.set();running.join(5);self.settled()
+        self.assertEqual((launcher.INLETS,inlet.closed),({},True))
+        self.assertEqual(steer({}),409,'nothing joins a turn that ended')
 
     def test_a_box_step_mounts_its_prepared_box(self):
         self.bind('first',entry=box())

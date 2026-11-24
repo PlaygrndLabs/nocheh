@@ -1,5 +1,6 @@
 """Common isolated Hermes turn bootstrap for Telegram and browser transports."""
 import asyncio
+import contextlib
 import fcntl
 import json
 import math
@@ -32,7 +33,7 @@ def scheduled_preferences(profile,body):
     return values
 
 
-async def run_process(root, scope, body, model, credentials, session_id, emit=None, cancelled=None, prepared_profile=None, progress=None):
+async def run_process(root, scope, body, model, credentials, session_id, emit=None, cancelled=None, prepared_profile=None, progress=None, steering=None):
     from .assistant_gateway import prepare_profile
     from .scopes import Scopes
     import base64
@@ -68,7 +69,7 @@ async def run_process(root, scope, body, model, credentials, session_id, emit=No
             watch=None if scope.answer or scope.member or scope.member_read else await asyncio.to_thread(note_sources.before, profile, scope.space or scope.chat_id, database_path(profile), body.get('event_id'))
             result=None
             try:
-                result=await _run_process(profile, scope, body, model, credentials, session_id, emit, cancelled, progress, watch and watch['sources'])
+                result=await _run_process(profile, scope, body, model, credentials, session_id, emit, cancelled, progress, watch and watch['sources'], steering)
                 return result
             finally:
                 # Also after a cancelled or failed turn: its notes may have changed before it stopped.
@@ -230,21 +231,9 @@ def job_run(limits):
     return limits
 
 
-async def _run_process(profile, scope, body, model, credentials, session_id, emit, cancelled, progress=None, note_sources=None):
-    if cancelled and cancelled.is_set(): return {'state':'cancelled','text':'','session_id':session_id}
-    # A background job run lasts until its job's hard deadline: its box commands end then, and the process a minute
-    # later if nothing stopped it before. Every other turn has the usual reply time.
-    background = job_run(body.get('background')) if body.get('channel')=='background' else None
-    # A private answer's pass and its framed question come together, or the turn does not run.
-    answer = private_answer(body.get('private_answer')) if scope.answer else None
-    if answer is None and body.get('private_answer') is not None: raise ValueError('invalid_private_answer')
-    if answer: answer_receipt(profile, answer)
-    # The owner's ask about a member: its pass and its ask come together, and it is never a private answer too.
-    asked = member_read(body.get('member_read')) if scope.member_read else None
-    if (asked is None) != (body.get('member_read') is None) or asked and (answer or asked['ask'] != scope.member_read): raise ValueError('invalid_member_read')
-    if asked: ask_receipt(profile)
-    if background is not None and background['hard_deadline'] <= time.time():
-        return {'state':'failed','error_code':'managed_execution_failed','text':'','session_id':session_id}
+def message_text(body, scope, answer=None):
+    """The turn's message as the model reads it, with Nocheh's own lines around it, and the text its memory query uses.
+    A message that joins a running turn (steering.py) reaches the agent the same way."""
     text = body.get('text') or ''
     if body.get('transcripts'):
         text += '\n\n[Derived voice transcript; original audio is separately archived]\n' + '\n'.join(body['transcripts'])
@@ -296,6 +285,25 @@ async def _run_process(profile, scope, body, model, credentials, session_id, emi
     text += '\n\n[Archive source: nocheh:event:' + body['event_id'] + ']'
     # The question is a source of a private answer too: retiring it withholds the answer's history.
     if answer: text += '\n[Archive source: nocheh:event:' + answer['question_event'] + ']'
+    return text, memory_query
+
+
+async def _run_process(profile, scope, body, model, credentials, session_id, emit, cancelled, progress=None, note_sources=None, steering=None):
+    if cancelled and cancelled.is_set(): return {'state':'cancelled','text':'','session_id':session_id}
+    # A background job run lasts until its job's hard deadline: its box commands end then, and the process a minute
+    # later if nothing stopped it before. Every other turn has the usual reply time.
+    background = job_run(body.get('background')) if body.get('channel')=='background' else None
+    # A private answer's pass and its framed question come together, or the turn does not run.
+    answer = private_answer(body.get('private_answer')) if scope.answer else None
+    if answer is None and body.get('private_answer') is not None: raise ValueError('invalid_private_answer')
+    if answer: answer_receipt(profile, answer)
+    # The owner's ask about a member: its pass and its ask come together, and it is never a private answer too.
+    asked = member_read(body.get('member_read')) if scope.member_read else None
+    if (asked is None) != (body.get('member_read') is None) or asked and (answer or asked['ask'] != scope.member_read): raise ValueError('invalid_member_read')
+    if asked: ask_receipt(profile)
+    if background is not None and background['hard_deadline'] <= time.time():
+        return {'state':'failed','error_code':'managed_execution_failed','text':'','session_id':session_id}
+    text, memory_query = message_text(body, scope, answer)
     transport = credentials.runtime()
     request = {'text':text, 'source_text':body.get('text') or '', 'channel':body.get('channel','telegram'),
                'model':model, 'memory_query':memory_query, 'session_id':session_id, 'owner':scope.owner, 'chat_id':scope.chat_id,
@@ -311,6 +319,9 @@ async def _run_process(profile, scope, body, model, credentials, session_id, emi
                'note_sources':note_sources or {}}
     if body.get('channel')=='scheduler':
         request['preferences']=scheduled_preferences(profile,body)
+    if steering is not None:
+        # Later messages in this chat may join the turn while it runs (steering.py): its stdin stays open for them.
+        request['steer']=True
     if background:
         # A job run: its iteration backstop, its time budget and what its cost notice needs come from the job,
         # and it reports its progress while it works. A box run's tools run in the job's sealed box, a machine run's
@@ -353,7 +364,11 @@ async def _run_process(profile, scope, body, model, credentials, session_id, emi
             await asyncio.sleep(.1)
     watcher = asyncio.create_task(stop_when_cancelled())
     async def collect():
-        process.stdin.write(canonical(request));await process.stdin.drain();process.stdin.close()
+        if steering is None:
+            process.stdin.write(canonical(request));await process.stdin.drain();process.stdin.close()
+        else:
+            process.stdin.write(canonical(request)+b'\n');await process.stdin.drain()
+            steering.attach(process.stdin.write)
         result = None;size = 0
         async for line in process.stdout:
             size += len(line)
@@ -404,6 +419,9 @@ async def _run_process(profile, scope, body, model, credentials, session_id, emi
         raise
     finally:
         watcher.cancel()
+        if steering is not None:
+            steering.write=None
+            with contextlib.suppress(Exception): process.stdin.close()
         if process.returncode is None: process.kill();await process.wait()
         try: await watcher
         except asyncio.CancelledError: pass

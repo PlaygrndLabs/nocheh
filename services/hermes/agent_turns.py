@@ -15,6 +15,7 @@ from .assistant_gateway import TURN_CAPACITY,continuation_id,native_turn,render_
 from .async_runs import CLOSED,AsyncRuns,identity
 from services.durable import canonical,digest,immutable_file
 from .scopes import Scopes,check_claims
+from .steering import Steering
 from .subscription import ProviderNotConfigured
 from .timing import safe
 
@@ -77,12 +78,12 @@ class AgentTurns:
         # Not spool/async-runs: the same Telegram attempt has the same run id on both runners.
         self.directory=Path(spool)/'agent-turns'
         self.runs=AsyncRuns(self.directory,self._execute,self._saved,self._arrived)
-        self.loop=self.thread=self.capacity=self.order=None;self.lanes={}
+        self.loop=self.thread=self.capacity=self.order=None;self.lanes={};self.steering={};self.offers={}
 
     def open(self):
         # One loop for every turn, so arrival order, lanes and capacity need no thread locks.
         loop=asyncio.new_event_loop();running=threading.Event();loop.call_soon(running.set)
-        self.capacity=asyncio.Semaphore(self.size);self.order=Arrivals();self.lanes={}
+        self.capacity=asyncio.Semaphore(self.size);self.order=Arrivals();self.lanes={};self.steering={};self.offers={}
         self.thread=threading.Thread(target=loop.run_forever,name='nocheh-agent',daemon=True);self.thread.start()
         running.wait(5);self.loop=loop
 
@@ -210,39 +211,84 @@ class AgentTurns:
         # running private turn therefore holds no group, so the owner's and other members' turns there go on; Nocheh
         # still sends a group's replies in arrival order. One order for every turn, so no two turns wait on each other.
         lane,space=claims.get('lane'),scope.space or scope.chat_id
-        async with self._lane('lane:'+lane if lane else space,arrival):
+        # Talk while it works (ADR-0291): a plain message from the same person in the same conversation joins the turn
+        # running in its first lane, and the agent answers both in one reply; one the agent did not read runs on its own.
+        steer=self._steer(scope,claims,body,answer,member_read)
+        async with self._lane('lane:'+lane if lane else space,arrival,steer) as (joined,steering):
+            if joined:return {'state':'suppressed','error_code':'joined_turn'}
             async with self._lane(space) if lane else contextlib.nullcontext():
                 async with self.capacity:
                     if cancelled.is_set():return {'state':'cancelled'}
-                    return await self._run(scope,body,progress,cancelled)
+                    return await self._run(scope,body,progress,cancelled,steering)
+
+    @staticmethod
+    def _steer(scope,claims,body,answer,member_read):
+        """Who a turn is, for joining (ADR-0291): its whole checked scope and its lane, so a message joins only a turn of
+        the same person in the same conversation with the same rights; and, when it may join one, its ticket and its text
+        as the agent reads a message. Only plain Telegram messages take part: never a private answer, an ask about a
+        member, an approval's follow-up or a fixed reply. A message with a photo, or one of the questions a turn answers
+        with a fixed reply, may still be joined but never joins (the agent reads only the text of a joined message)."""
+        if (body.get('channel','telegram')!='telegram' or answer or member_read is not None or body.get('continuation') is not None
+                or body.get('control_reply') is not None):return None
+        from .assistant_turn import exact_predecessor_question,retired_content_question
+        from .turn_process import message_text
+        who=(scope,claims.get('lane'))
+        if (any(isinstance(file,dict) and file.get('kind')=='image' for file in body.get('files') or [])
+                or exact_predecessor_question(body.get('text')) or retired_content_question(body.get('text'))):return (who,None,None)
+        try:text=message_text(body,scope)[0]
+        except Exception:return (who,None,None)
+        return (who,identity(body),text)
+
+    def _join(self,key,line,steer):
+        """Offer a turn to the one running under `key` when it is the same person's, and every turn waiting before it
+        was offered to that one too, so replies keep arrival order. The Steering it was offered to, or None."""
+        who,ticket,text=steer
+        running=self.steering.get(key)
+        if ticket is None or running is None or running.identity!=who or not line:return None
+        if any(self.offers.get(waiting) is not running for waiting in list(line)[1:]):return None
+        return running if running.offer(ticket,text) else None
 
     @contextlib.asynccontextmanager
-    async def _lane(self,key,arrival=None):
+    async def _lane(self,key,arrival=None,steer=None):
         """One turn at a time under `key`, in the order turns join it; an idle key leaves nothing behind. Space keys are Nocheh
         chat ids and member keys start with `lane:`, so the two never meet. A turn's first lane takes its `arrival`: the turn
         joins once every earlier arrival in its lines has joined its own, and the next may join only after it has, as no
-        await separates joining from giving up its place."""
+        await separates joining from giving up its place. With `steer`, the turn may join the one running there (its
+        message goes to that turn's agent), and yields whether it did, with its own Steering for later turns."""
         if arrival:await arrival[0].first(arrival[1])
         line=self.lanes.setdefault(key,collections.deque())
         turn=asyncio.get_running_loop().create_future()
+        offered=self._join(key,line,steer) if steer else None
         if not line:turn.set_result(None)
-        line.append(turn)
+        line.append(turn);self.offers[turn]=offered
         if arrival:arrival[0].leave(arrival[1])
+        steering=None
         try:
             await turn
-            yield
+            joined=offered is not None and steer[1] in offered.joined
+            if steer and not joined:steering=self.steering[key]=Steering(steer[0])
+            yield joined,steering
         finally:
+            self.offers.pop(turn,None)
+            if steering is not None:
+                # A turn that ended without its result (an error) was joined by nothing.
+                if not steering.closed:steering.close()
+                if self.steering.get(key) is steering:del self.steering[key]
             first=line[0] is turn;line.remove(turn)
             if not line:
                 if self.lanes.get(key) is line:del self.lanes[key]
             elif first and not line[0].done():line[0].set_result(None)
 
-    async def _run(self,scope,body,progress,cancelled):
+    async def _run(self,scope,body,progress,cancelled,steering=None):
         agent=None
         try:
             progress('assistant')
-            agent=await self.turn(self.root,scope,body,self.model,await asyncio.to_thread(self.credentials),cancelled=cancelled)
+            extra={'steering':steering} if steering is not None else {}
+            agent=await self.turn(self.root,scope,body,self.model,await asyncio.to_thread(self.credentials),cancelled=cancelled,**extra)
             result=outcome(agent,cancelled)
+            # The messages the agent read while it worked are answered by this turn's reply, or by its silence; any other
+            # end answers none of them, and each runs on its own.
+            if steering is not None:steering.close(agent.get('joined',()) if result['state']=='done' or result.get('error_code')=='intentional_silence' else ())
         except Exception as error:
             result={'state':'failed','error_code':'provider_not_configured' if isinstance(error,ProviderNotConfigured) else 'assistant_runtime_unavailable'}
             if result['error_code']=='assistant_runtime_unavailable':

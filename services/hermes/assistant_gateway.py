@@ -97,7 +97,7 @@ def prepare_profile(root,scope,model):
     return profile
 
 
-async def native_turn(root,scope,body,model,credentials,cancelled=None):
+async def native_turn(root,scope,body,model,credentials,cancelled=None,steering=None):
     profile=await asyncio.to_thread(prepare_profile,root,scope,model)
     topic=topic_id(body['payload']['message'])
     thread='main' if topic is None else str(topic)
@@ -116,7 +116,7 @@ async def native_turn(root,scope,body,model,credentials,cancelled=None):
             with writer(profile) as db:daily_session.start(db,session_id,previous,carry,body.get('channel','telegram'))
         await asyncio.to_thread(open_day)
     from .turn_process import run_process
-    result = await run_process(root, scope, body, model, credentials, session_id,cancelled=cancelled,prepared_profile=profile)
+    result = await run_process(root, scope, body, model, credentials, session_id,cancelled=cancelled,prepared_profile=profile,steering=steering)
     if result.get('state')=='done':
         def save_cursor():
             temporary=cursor.with_suffix('.tmp')

@@ -107,7 +107,40 @@ def schedule_store(binding,boxed,machine,root=Path('/profiles')):
     if home.is_symlink() or store.is_symlink() or not store.is_dir() or store.resolve().parent!=home.resolve() or home.resolve().parent!=root.resolve():return None
     return logical
 
-def attach(identifier,body):
+class Inlet:
+    """Messages that join a running turn (ADR-0291), for its container's stdin after the request, in the order they came.
+    Ones that come before the turn's container is attached wait for it; after the turn, none is taken."""
+    def __init__(self,nonce):self.nonce,self.lock,self.sock,self.waiting,self.closed=nonce,threading.Lock(),None,[],False
+
+    def send(self,line):
+        with self.lock:
+            if self.closed:return False
+            if self.sock is None:self.waiting.append(line);return True
+            try:self.sock.sendall(line);return True
+            except OSError:self.closed=True;return False
+
+    def connect(self,sock):
+        with self.lock:
+            if self.closed:return
+            self.sock=sock
+            try:
+                for line in self.waiting:sock.sendall(line)
+            except OSError:self.closed=True
+            self.waiting=[]
+
+    def close(self):
+        with self.lock:self.closed,self.sock,self.waiting=True,None,[]
+
+# The open turn of each profile that takes joining messages, by profile; one turn runs per profile at a time.
+INLETS={}
+
+def steer_line(value):
+    """A joining message's line as the turn reads it, or None when it is malformed."""
+    if (not isinstance(value,dict) or not isinstance(value.get('steer'),str) or not value['steer'].strip()
+            or not isinstance(value.get('ticket'),str) or not re.fullmatch(r'[a-f0-9]{64}',value['ticket'])):return None
+    return json.dumps({'steer':value['steer'],'ticket':value['ticket']},ensure_ascii=False).encode()+b'\n'
+
+def attach(identifier,body,inlet=None):
     client=DockerConnection()
     try:
         client.request('POST','/v1.41/containers/'+identifier+'/attach?stream=1&stdin=1&stdout=1&stderr=0',
@@ -115,7 +148,10 @@ def attach(identifier,body):
         response=client.getresponse()
         if response.status!=101:raise RuntimeError('container_attach_failed')
         docker('POST','/containers/'+identifier+'/start')
-        client.sock.sendall(json.dumps(body,ensure_ascii=False).encode());client.sock.shutdown(socket.SHUT_WR)
+        client.sock.sendall(json.dumps(body,ensure_ascii=False).encode())
+        # A turn that takes joining messages keeps its stdin open for them; any other ends it after the request.
+        if inlet is None:client.sock.shutdown(socket.SHUT_WR)
+        else:client.sock.sendall(b'\n');inlet.connect(client.sock)
         size=0
         while header:=response.fp.read(8):
             if len(header)!=8 or header[0]!=1:raise RuntimeError('container_output_invalid')
@@ -577,12 +613,30 @@ class Handler(BaseHTTPRequestHandler):
     def do_GET(self):
         if self.path!='/health':self.send_error(404);return
         self.send_response(200);self.end_headers();self.wfile.write(b'{"ok":true,"service":"security-launcher"}')
+    def steer(self):
+        """A message that joins the running turn of the pass's profile (ADR-0291), for that turn only: the turn's nonce must
+        match. Refused when no such turn runs, and its message then runs on its own."""
+        try:
+            length=int(self.headers.get('Content-Length','0'))
+            if not 0<length<=2*1024*1024+65536:raise ValueError('steer_size_limit')
+            value=json.loads(self.rfile.read(length));line=steer_line(value)
+            if line is None or not isinstance(value.get('nonce'),str):raise ValueError('invalid_steer')
+            request=Request(security_url()+'/v1/security/binding',headers={'Authorization':'Bearer '+value['archive_credential']})
+            with build_opener(ProxyHandler({})).open(request,timeout=30) as response:profile=json.load(response)['profile']
+            with ACTIVE_LOCK:inlet=INLETS.get(profile)
+            if inlet is None or not hmac.compare_digest(inlet.nonce.encode(),value['nonce'].encode()) or not inlet.send(line):
+                self.send_error(409);return
+        except Exception:
+            self.send_error(400);return
+        self.send_response(204);self.end_headers()
+
     def do_POST(self):
         secret=os.environ['SERVICE_TOKEN']
-        if self.path!='/v1/turn' or not hmac.compare_digest(self.headers.get('Authorization','').encode(),('Bearer '+secret).encode()):
+        if self.path not in ('/v1/turn','/v1/turn/steer') or not hmac.compare_digest(self.headers.get('Authorization','').encode(),('Bearer '+secret).encode()):
             self.send_error(403);return
+        if self.path=='/v1/turn/steer':self.steer();return
         if not SLOTS.acquire(blocking=False):self.send_error(503);return
-        identifier=None;profile=None;reserved=False;job=None;closed=threading.Event();killed=threading.Event();started=time.monotonic()
+        identifier=None;profile=None;reserved=False;job=None;closed=threading.Event();killed=threading.Event();started=time.monotonic();inlet=None
         try:
             length=int(self.headers.get('Content-Length','0'))
             if not 0<length<=2*1024*1024:raise ValueError('turn_size_limit')
@@ -600,6 +654,8 @@ class Handler(BaseHTTPRequestHandler):
                     if box_labels(binding['box'])['nocheh.box.job'] in BOX_JOBS:raise ValueError('job_busy')
                     job=binding['box']['job'];BOX_JOBS.add(job)
                 ACTIVE.add(profile);reserved=True
+                nonce=self.headers.get('X-Nocheh-Turn','')
+                if body.get('steer') is True and re.fullmatch(r'[a-f0-9]{32}',nonce):inlet=INLETS[profile]=Inlet(nonce)
             if body.get('model')!=binding['model'] or body.get('owner')!=binding['owner'] or body.get('chat_id')!=binding['scope']:raise ValueError('turn_binding_mismatch')
             from .security_transport import scoped_transport
             body.update(scoped_transport(credential,body['api_mode']))
@@ -631,7 +687,7 @@ class Handler(BaseHTTPRequestHandler):
                         return
             watcher=threading.Thread(target=watch,daemon=True);watcher.start()
             tail=bytearray()
-            for content in attach(identifier,body):
+            for content in attach(identifier,body,inlet):
                 self.wfile.write(content);self.wfile.flush()
                 if box:
                     # Only the output's last line is kept: the turn's result.
@@ -647,6 +703,10 @@ class Handler(BaseHTTPRequestHandler):
                 try:docker('DELETE','/containers/'+identifier+'?force=true')
                 except Exception:pass
                 with ACTIVE_LOCK:CONTAINERS.discard(identifier)
+            if inlet is not None:
+                inlet.close()
+                with ACTIVE_LOCK:
+                    if INLETS.get(profile) is inlet:del INLETS[profile]
             if reserved:
                 with ACTIVE_LOCK:ACTIVE.discard(profile);BOX_JOBS.discard(job)
             SLOTS.release();self.close_connection=True
