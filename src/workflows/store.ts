@@ -205,6 +205,30 @@ export async function publishOutbox(pool:pg.Pool,send:(event:WorkflowEvent)=>Pro
   return published;
 }
 
+/**
+ * Arms again the waiting workflows of these families: each gets a new dispatch, so a new run asks again when it is due.
+ * Inngest keeps a waiting run's sleep in its own state; a restart that loses that state leaves the row waiting with no run
+ * to wake it, and a schedule then never fires again. With `overdue` null every waiting row is armed again, as at startup;
+ * otherwise only rows whose next attempt passed that long ago untouched. Only rows Inngest received are touched (the
+ * outbox still owns the rest), never one leased now. The old dispatch's run, if it still wakes, finds a newer dispatch and
+ * stops. Returns how many rows were armed again.
+ */
+export async function rearmWaiting(pool:pg.Pool,kinds:readonly WorkflowFamily[],overdue:string|null,limit=100):Promise<number> {
+  const client=await pool.connect();
+  try {
+    await client.query('BEGIN');
+    const rows=(await client.query(`UPDATE workflow_registry w SET dispatch=w.dispatch+1,revision=w.revision+1,updated_at=now()
+      WHERE w.id IN (SELECT c.id FROM workflow_registry c JOIN workflow_owners f ON f.family=c.family
+        WHERE c.family=ANY($1::text[]) AND c.state='waiting' AND (c.lease_until IS NULL OR c.lease_until<now()) AND f.owner='inngest' AND f.admission
+        AND ($2::interval IS NULL OR c.next_attempt<now()-$2::interval AND c.updated_at<now()-$2::interval)
+        AND EXISTS(SELECT 1 FROM workflow_runs r WHERE r.workflow_id=c.id AND r.dispatch=c.dispatch)
+        ORDER BY c.next_attempt NULLS FIRST,c.id LIMIT $3 FOR UPDATE OF c SKIP LOCKED)
+      RETURNING w.id,w.dispatch`,[kinds,overdue,limit])).rows;
+    for(const row of rows)await client.query('INSERT INTO workflow_outbox(id,workflow_id,dispatch) VALUES($1,$2,$3) ON CONFLICT DO NOTHING',[hash(row.id+':'+row.dispatch),row.id,row.dispatch]);
+    await client.query('COMMIT');return rows.length;
+  }catch(error){await client.query('ROLLBACK');throw error;}finally{client.release();}
+}
+
 export async function claimWorkflow(client:pg.PoolClient,id:string,dispatch:number,runId:string,epoch:number) {
   if(!/^[a-f0-9]{64}$/.test(id)||!/^[-a-zA-Z0-9_]{1,100}$/.test(runId))throw new HttpError(400,'invalid_workflow_identity');
   const row=(await client.query('SELECT * FROM workflow_registry WHERE id=$1',[id])).rows[0];

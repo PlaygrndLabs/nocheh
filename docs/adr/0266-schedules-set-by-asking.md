@@ -69,6 +69,12 @@ is not what Nocheh runs: Nocheh keeps the bot, the sealed runs and the archive.
    owner's read views (chats, projects, people, memory map), as a morning brief
    needs, and changes none. A group's schedule run reads neither.
 
+9. **A lost wait is armed again.** A schedule waits in Inngest until its next run. A full
+   restart once lost that wait (2026-11-23), and the schedule would never have run again.
+   Storage's worker arms each waiting schedule again once at startup, and again whenever one
+   is two minutes overdue with no word from Inngest: a new dispatch, so the old run, if it
+   still wakes, stops. A run armed again after its time counts as missed, as after any outage.
+
 ## Consequences
 
 - The owner sets, changes and removes schedules by asking; nothing new runs
