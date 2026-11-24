@@ -13,7 +13,7 @@ import type {StorageServices} from './services.js';
 
 export function startStorageCapture(s:StorageServices,config:Settings,interval=1000) {
   const status:Record<string,string>={capture:'starting',sends:'starting',reconciliation:'starting',guards:'starting',outbox:'starting',heartbeat:'starting',timings:'starting',reminders:'starting',imports:'starting',voices:'starting',machines:'starting',answers:'starting',members:'starting',adds:'starting'};
-  let publisher:ReturnType<typeof workflowClient>|undefined,configured=false,staleSourcesReconciled=false,strandedRequested=false,schedulesArmed=false,lostChecked=0,started=new Date(),timingsExpired=0,sendsExpired=0,remindersChecked=0,importsChecked=0,voicesChecked=0,machinesChecked=0,answersExpired=0,membersChecked=0,addsChecked=0;
+  let publisher:ReturnType<typeof workflowClient>|undefined,configured=false,staleSourcesReconciled=false,strandedRequested=false,schedulesArmed=false,schedulesRevived=false,reviveLogged=false,lostChecked=0,started=new Date(),timingsExpired=0,sendsExpired=0,remindersChecked=0,importsChecked=0,voicesChecked=0,machinesChecked=0,answersExpired=0,membersChecked=0,addsChecked=0;
   const jobs:Record<string,()=>Promise<unknown>>={
     capture:()=>drainSourceSpool(s.capture,config.dataDir),
     // The front doors' send records, in their own stage so an outage here never holds up source capture.
@@ -34,7 +34,10 @@ export function startStorageCapture(s:StorageServices,config:Settings,interval=1
       // A schedule waits in Inngest until its next run. A full restart can lose that wait, and the schedule would never run
       // again, so each waiting schedule is armed again once at startup, and one whose run is two minutes overdue with no
       // word from Inngest is armed again. A schedule a Run now left with no open run starts again at startup (ADR-0266).
-      if(!schedulesArmed){await reviveSchedules(s.stores.control);schedulesArmed=(await rearmWaiting(s.stores.control,['schedules'],null))<100;}
+      // A repair that fails never holds up publishing: it is logged once and tried again on the next pass.
+      if(!schedulesRevived)try{await reviveSchedules(s.stores.control);schedulesRevived=true;}
+      catch(error){if(!reviveLogged)console.error(JSON.stringify({event:'schedule_revive_failed',code:(error as {code?:unknown})?.code}));reviveLogged=true;}
+      if(!schedulesArmed)schedulesArmed=(await rearmWaiting(s.stores.control,['schedules'],null))<100;
       if(Date.now()-lostChecked>=60000){lostChecked=Date.now();await rearmWaiting(s.stores.control,['schedules'],'2 minutes');}
       publisher??=workflowClient('pipeline');await publishOutbox(s.stores.control,event=>publisher!.send(event));
     },

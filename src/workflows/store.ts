@@ -77,6 +77,14 @@ export async function requestWorkflow(client:pg.PoolClient,family:WorkflowFamily
   return id;
 }
 
+/** Requests a workflow whose job id can come back after it closed, as a schedule's cursor does after a Run now: with no
+ * open row for the job id, a new generation runs it; with one, nothing changes. Call on the domain mutation's client. */
+export async function requestOpenWorkflow(client:pg.PoolClient,family:WorkflowFamily,jobId:string):Promise<string|null> {
+  const rows=(await client.query('SELECT state,generation FROM workflow_registry WHERE family=$1 AND job_id=$2 AND version=1',[family,jobId])).rows;
+  if(rows.some(row=>!(closedStates as readonly string[]).includes(row.state)))return null;
+  return requestWorkflow(client,family,jobId,rows.reduce((top,row)=>Math.max(top,Number(row.generation)),0)+1);
+}
+
 /** A touch may race a running source workflow: it can return to waiting
  * after the touch skipped all idle predecessors. Retire only idle predecessors;
  * never rewrite a leased execution or its durable effect receipt. */
