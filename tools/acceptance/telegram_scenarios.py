@@ -980,7 +980,8 @@ class Scenarios:
     def voice_is_transcribed(self):
         # A voice note keeps its original bytes, is transcribed by Hermes's
         # transcriber through the Voice notes route, and its reply waits for it.
-        _, event_id = self.voice(b'OggS\x00\x02synthetic voice note\n\xff'*4)
+        # A real recording: the file reader decodes it before it is transcribed (ADR-0285).
+        _, event_id = self.voice(synthetic_wav(2))
         row = self.finished(event_id, seconds=300)
         self.gate('voice_dispatch_closed', row['state'] in ('done', 'suppressed'), state=row['state'], error=row['error'])
         transcript = self.f.query('nocheh_derived', "SELECT count(*) FROM derived_artifacts WHERE kind='transcript' AND event_id='"+event_id+"'"
