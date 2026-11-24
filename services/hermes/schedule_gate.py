@@ -28,7 +28,7 @@ ZONE_REFUSED="{zone} is not a time zone name. Use one such as Europe/Berlin, or 
 LIMIT="This chat already has {count} schedules, the most allowed. Remove one first."
 # What a schedule Nocheh saved paused says instead of its note (ADR-0294).
 HELD=("Nocheh saved this schedule paused, because this reply read something from outside the chat, such as a web page, an "
-    "email, a file or a forwarded message. It does not run until they check what it does in Nocheh's message about it and press "
+    "email, a file, a forwarded message or a search of past messages. It does not run until they check what it does in Nocheh's message about it and press "
     "Start there. Tell them so in one short sentence.")
 # What a schedule Nocheh did not record says instead of its note: it stays in the store but never runs.
 LIMIT_NOW="This chat already has the most schedules allowed. Remove one first."
