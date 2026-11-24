@@ -161,6 +161,20 @@ class TurnProcessTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(events,['hello']);self.assertEqual(result['state'],'done')
         with self.assertRaisesRegex(RuntimeError,'assistant_process_failed'):
             await self.execute('import sys; sys.stdin.read(); sys.exit(1)')
+    async def test_messages_that_join_the_turn_follow_its_request_on_stdin(self):
+        from .steering import Steering
+        steering=Steering('who');steering.offer('1'*64,'Joined message')
+        source=('import sys,json; request=json.loads(sys.stdin.buffer.readline()); joined=json.loads(sys.stdin.buffer.readline());'
+                ' print(json.dumps({"state":"done","text":"hello","steer":request.get("steer"),"seen":joined["steer"],"joined":[joined["ticket"]]}))')
+        with tempfile.TemporaryDirectory() as folder,patch('services.hermes.assistant_gateway.check_delivery_policy',return_value=True):
+            original=asyncio.create_subprocess_exec
+            async def spawn(*args,**kwargs):return await original(sys.executable,'-c',source,**kwargs)
+            with patch('services.hermes.turn_process.asyncio.create_subprocess_exec',spawn):
+                result=await _run_process(Path(folder),Scope('-10','42',False,'group'),{'event_id':'event','archive_credential':'scoped','text':'original','channel':'telegram'},
+                    'model',SimpleNamespace(runtime=lambda:{'api_key':'ephemeral','base_url':'https://gateway.example.test/v1','provider':'openai','api_mode':'chat_completions'}),
+                    'session',None,None,steering=steering)
+        self.assertEqual((result['steer'],result['seen'],result['joined']),(True,'Joined message',['1'*64]))
+        self.assertIsNone(steering.write,'nothing more goes to a turn that ended')
     async def test_a_failed_turn_counts_the_providers_exact_error_and_keeps_it_out_of_the_result(self):
         with patch('services.hermes.usage.record') as record:
             result,_=await self.execute('import sys,json; sys.stdin.read(); print(json.dumps({"state":"failed","error_code":"assistant_runtime_unavailable",'
