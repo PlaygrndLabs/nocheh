@@ -70,10 +70,15 @@ is not what Nocheh runs: Nocheh keeps the bot, the sealed runs and the archive.
    needs, and changes none. A group's schedule run reads neither.
 
 9. **A lost wait is armed again.** A schedule waits in Inngest until its next run. A full
-   restart once lost that wait (2026-11-23), and the schedule would never have run again.
+   restart can lose that wait, and the schedule would then never run again.
    Storage's worker arms each waiting schedule again once at startup, and again whenever one
    is two minutes overdue with no word from Inngest: a new dispatch, so the old run, if it
    still wakes, stops. A run armed again after its time counts as missed, as after any outage.
+10. **Run now never leaves a schedule without its run.** Run now moves a schedule's cursor
+   away and back to the same one (pending, running, then idle with the same next run), and
+   the cursor's earlier run was already closed as superseded, so the schedule never woke
+   again (2026-11-24). A cursor whose run is closed now gets a new generation. At startup,
+   storage's worker starts again any schedule whose current cursor has only a superseded run.
 
 ## Consequences
 
