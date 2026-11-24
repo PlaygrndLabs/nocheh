@@ -85,7 +85,11 @@ test('a one-time key is minted with its row, reused for the same reply, checked 
     const expiring=await audience.turn(token,owner,event,Date.now()+60000,{kind:'turn',subject:event,attempt:3,person:'owner'});
     await stores.control.query("UPDATE one_time_keys SET expires_at=now()-interval '1 second' WHERE jti=$1",[passClaims(expiring).jti]);
     await assert.rejects(keys.assertOpen(reader({headers:{authorization:'Bearer '+expiring}} as IncomingMessage,token)),{status:409,code:'one_time_key_closed'});
-    await assert.rejects(audience.turn(token,owner,event,later(),{kind:'turn',subject:event,attempt:3,person:'owner'}),{code:'one_time_key_closed'});
+    // Signed again for its own attempt, an expired key opens anew, so the reply can still settle; the copy signed before
+    // still ends at its own signed expiry.
+    const renewed=await audience.turn(token,owner,event,later(),{kind:'turn',subject:event,attempt:3,person:'owner'});
+    assert.equal(passClaims(renewed).jti,passClaims(expiring).jti);
+    await keys.assertOpen(reader({headers:{authorization:'Bearer '+renewed}} as IncomingMessage,token));
 
     // No person, no pass; a person that does not fit the pass, or another agent, gets none either.
     const fresh=digest(key+':fresh');

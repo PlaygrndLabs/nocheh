@@ -516,10 +516,11 @@ export class NativeReviewRepository {
       await db.query(`UPDATE native_review_jobs SET state='running',error_code=NULL,updated_at=now(),next_attempt=now()+CASE WHEN $2
         THEN least(interval '60 seconds',greatest(interval '5 seconds',(next_attempt-updated_at)*2)) ELSE interval '5 seconds' END WHERE id=$1`,[id,uncertain]);return 'running';
     } finally {
-      // A review that is not running any more has no open key (ADR-0301): done, failed, waiting again or unconfirmed.
+      // A review that is not running any more has no open key (ADR-0301): done, failed or waiting again. An unconfirmed
+      // (ambiguous) review may still run in the agent, so its key stays open until it settles or expires.
       try {
         if(locked)await db.query(`UPDATE one_time_keys SET closed_at=now(),closed_reason='review_finished' WHERE kind='review' AND subject=$1 AND closed_at IS NULL
-          AND NOT EXISTS(SELECT 1 FROM native_review_jobs WHERE id=$1 AND state='running')`,[id]);
+          AND NOT EXISTS(SELECT 1 FROM native_review_jobs WHERE id=$1 AND state IN ('running','ambiguous'))`,[id]);
       } finally {await releaseOperation(db,async()=>{if(locked)await db.query('SELECT pg_advisory_unlock(803359)');if(fenced)await leaveFamily(db,'memory_review');});}
     }
   }

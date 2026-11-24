@@ -36,8 +36,10 @@ as the owner in storage; only Hermes withheld their data tools.
 3. **Each key has a row.** `one_time_keys` (jti, kind, subject, attempt, person, agent, event_id, created, expires,
    closed_at, closed_reason) gets one row per reply or run attempt, keyed by (kind, subject, attempt): every pass signed
    again for the same attempt (each presence renewal, the delivery) carries the same jti, so closing the row ends the
-   agent's copy, the bot's copy and the delivery copy at once. A closed or expired row is never opened again (409
-   `one_time_key_closed`), nor opened for another person, agent or event (409 `one_time_key_conflict`). A review's and a
+   agent's copy, the bot's copy and the delivery copy at once. A closed row is never opened again (409
+   `one_time_key_closed`), nor opened for another person, agent or event (409 `one_time_key_conflict`). A row that only
+   expired, because Nocheh signed nothing for it a while (paused, down, a guard change pending), is signed again for
+   its own attempt, so its reply or run can still settle; every copy signed before ends at its own signed expiry. A review's and a
    filter's attempt carry a fresh random part, since each call is its own key. Rows stay 30 days after they close or
    expire, for the Keys list; they hold no secret.
 4. **Every request checks the key.** Storage and the security broker check the row before anything else is done for a

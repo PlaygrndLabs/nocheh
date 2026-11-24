@@ -58,9 +58,11 @@ export class OneTimeKeyRepository {
   constructor(readonly control:Queryable){}
   /**
    * The key for one reply or run: a new row, or the open row already minted for the same kind, subject and attempt with
-   * the same person, agent and event, whose expiry moves to the later of the two. Its jti is returned. A row that closed or
-   * expired is never opened again (409 one_time_key_closed); one that names another person, agent or event refuses the
-   * mint (409 one_time_key_conflict).
+   * the same person, agent and event, whose expiry moves to the later of the two. Its jti is returned. A row that closed
+   * is never opened again (409 one_time_key_closed); one that names another person, agent or event refuses the mint (409
+   * one_time_key_conflict). A row that only expired, because Nocheh signed nothing for it a while (paused, down, a guard
+   * change pending), is signed again for its own attempt: every copy signed before still ends at its own signed expiry,
+   * and the reply or run can still settle.
    */
   async mint(input:KeyMint):Promise<string> {
     if(!keyKinds.includes(input.kind)||!input.subject||input.subject.length>200||!input.attempt||input.attempt.length>100||!personClaim(input.person)||
@@ -71,13 +73,13 @@ export class OneTimeKeyRepository {
     const row=(await this.control.query<{jti:string}>(`INSERT INTO one_time_keys(jti,kind,subject,attempt,person,agent,event_id,expires_at)
       VALUES($1,$2,$3,$4,$5,$6,$7,to_timestamp($8::float8/1000))
       ON CONFLICT(kind,subject,attempt) DO UPDATE SET expires_at=GREATEST(one_time_keys.expires_at,EXCLUDED.expires_at)
-      WHERE one_time_keys.closed_at IS NULL AND one_time_keys.expires_at>now() AND one_time_keys.person=EXCLUDED.person
+      WHERE one_time_keys.closed_at IS NULL AND one_time_keys.person=EXCLUDED.person
         AND one_time_keys.agent=EXCLUDED.agent AND one_time_keys.event_id=EXCLUDED.event_id
       RETURNING jti`,[jti,input.kind,input.subject,input.attempt,input.person,input.agent,input.event,input.expires])).rows[0];
     if(row)return row.jti;
-    const held=(await this.control.query('SELECT closed_at,expires_at<=now() AS expired FROM one_time_keys WHERE kind=$1 AND subject=$2 AND attempt=$3',
+    const held=(await this.control.query('SELECT closed_at FROM one_time_keys WHERE kind=$1 AND subject=$2 AND attempt=$3',
       [input.kind,input.subject,input.attempt])).rows[0];
-    throw new HttpError(409,held&&(held.closed_at||held.expired)?'one_time_key_closed':'one_time_key_conflict');
+    throw new HttpError(409,held?.closed_at?'one_time_key_closed':'one_time_key_conflict');
   }
   /**
    * The pass's key is open: its row exists with the pass's person, agent, kind and event (401 one_time_key_unknown

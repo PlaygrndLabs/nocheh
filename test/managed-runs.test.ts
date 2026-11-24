@@ -47,9 +47,8 @@ test('real PostgreSQL: browser originals, files, scoped claims and idempotent re
     const claims=await Promise.all([claimRun(pool,config,claim,undefined,{owner:'inngest',epoch:1}),claimRun(pool,config,claim,undefined,{owner:'inngest',epoch:1})]);
     const won=claims.find(c=>c.claimed)!;
     assert.equal(claims.filter(c=>c.claimed).length,1);assert.equal(won.text,text);
-    const principal=reader({headers:{authorization:'Bearer '+won.archive_credential}} as IncomingMessage,config.token);
-    assert.equal(principal.scope,'-10');assert.equal(principal.admin,false);assert.equal(principal.turnEvent,first.event_id);
-    assert.equal(principal.space,'-10');assert.equal(principal.revision,1);
+    // This older claim path signs a pass with no one-time key, which no reader accepts any more (ADR-0301).
+    assert.throws(()=>reader({headers:{authorization:'Bearer '+won.archive_credential}} as IncomingMessage,config.token),{status:401});
     await assert.rejects(finishRun(pool,{...claim,actor:'wrong',state:'done',text:'answer',session:'session-one'}),/run_actor_mismatch/);
     const result={...claim,state:'done',text:'Generated answer',session:'session-one'};
     await finishRun(pool,result);assert.equal((await finishRun(pool,result)).duplicate,true);
