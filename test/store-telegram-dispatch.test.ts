@@ -331,6 +331,56 @@ test('conversation messages start in Telegram update order while an earlier mess
   }finally{await stores.close();await rm(root,{recursive:true,force:true});}
 });
 
+test('a later message waits for an earlier one whose start the agent did not take',
+ {skip:process.env.NOCHEH_STORES_FIXTURE!=='1',timeout:180000},async()=>{
+  const config:pg.PoolConfig={host:process.env.PGHOST!,user:'nocheh',database:'nocheh',password:process.env.PGPASSWORD!};
+  const check=new pg.Client(config);await check.connect();try{assert.equal((await check.query("SELECT current_setting('cluster_name') AS name")).rows[0].name,'nocheh-stores-fixture');}finally{await check.end();}
+  const passwords={archive:digest('archive-fixture'),derived:digest('derived-fixture'),control:digest('control-fixture')};await initializeStoreDatabases(config,passwords);
+  const stores=connectStores(config,passwords),root=await mkdtemp(join(tmpdir(),'nocheh-launch-')),base=Date.now(),group='-'+base,token=digest('launch:'+base);
+  const policy={enabled:true,owner_id:'123',group_ids:[group]},started:string[]=[],refuse=new Set<string>(),lost=new Set<string>();let serial=base;
+  const runtime:FakeCall=async(operation,input)=>{
+    if(operation==='guard.detect')return {literals:[]};
+    const event=String(input.event_id);
+    // The agent is restarting: it refuses the start, or has lost a turn it took.
+    if(operation==='run.resume')return {state:started.includes(event)&&!lost.has(event)?'running':'not_found',stage:'assistant'};
+    assert.equal(operation,'run.start');
+    if(refuse.has(event))throw new HttpError(503,'agent_not_ready');
+    started.push(event);return lost.has(event)?{state:'running',stage:'assistant'}:{state:'done',stage:'delivery'};
+  };
+  const services=fixtureServices(stores,{dataDir:root,detectorVersion:'fixture',serviceToken:token,policy:()=>policy,runtime,memoryEngine:honchoEngine(async()=>{throw Error('no memory providers');})});
+  const authority=(family:string)=>stores.control.query('SELECT epoch FROM workflow_owners WHERE family=$1',[family]).then(r=>({owner:'inngest' as const,epoch:Number(r.rows[0].epoch)}));
+  const capture=async(text:string)=>{
+    const update=++serial,message={message_id:update,date:1700000000,chat:{id:Number(group),type:'group'},from:{id:123,is_bot:false,first_name:'Owner'},text};
+    return (await services.capture.capture({version:1,key:`telegram:123456:update:${update}`,origin:'live',kind:'telegram_update',bot_id:'123456',scope:group,
+      source_id:String(update),revision:'1',occurred_at:null,text,payload:{update_id:update,message}})).source.reference.id;
+  };
+  const prepare=async(id:string)=>services.preparation.run(id,async()=>{throw Error('unexpected download');},'fixture',services.detect,await authority('preparation'));
+  const run=async(id:string)=>services.telegram.run(id,await authority('telegram'));
+  const due=(id:string)=>stores.control.query('UPDATE dispatches SET next_attempt=now() WHERE event_id=$1',[id]);
+  try {
+    await services.guards.reconcile();await services.guards.setMode('on');
+    // The earlier message is marked running, but the agent refused its start.
+    const first=await capture('First message'),second=await capture('Second message');await prepare(first);await prepare(second);
+    refuse.add(first);assert.equal((await run(first)).state,'running');assert.deepEqual(started,[]);
+    assert.equal((await run(second)).state,'waiting','a later message waits while the agent does not have the earlier one');
+    assert.deepEqual(started,[]);
+    refuse.delete(first);await due(first);
+    assert.equal((await run(first)).state,'completed');assert.equal((await run(second)).state,'completed');
+    assert.deepEqual(started,[first,second]);
+    // Both were with the agent, and a restart lost them: the earlier one starts again first.
+    const third=await capture('Third message'),fourth=await capture('Fourth message');await prepare(third);await prepare(fourth);
+    lost.add(third);lost.add(fourth);
+    assert.equal((await run(third)).state,'running');assert.equal((await run(fourth)).state,'running');
+    assert.deepEqual(started.slice(2),[third,fourth]);
+    refuse.add(third);await due(third);await due(fourth);
+    assert.equal((await run(third)).state,'running','its new start is refused too');
+    assert.equal((await run(fourth)).state,'running');assert.deepEqual(started.slice(2),[third,fourth],'the later one waits to start again');
+    refuse.delete(third);await due(third);await due(fourth);
+    assert.equal((await run(third)).state,'running');assert.equal((await run(fourth)).state,'running');
+    assert.deepEqual(started.slice(2),[third,fourth,third,fourth]);
+  }finally{await stores.close();await rm(root,{recursive:true,force:true});}
+});
+
 test('an album gets one turn with every part, answered on its first part',
  {skip:process.env.NOCHEH_STORES_FIXTURE!=='1',timeout:180000},async()=>{
   const config:pg.PoolConfig={host:process.env.PGHOST!,user:'nocheh',database:'nocheh',password:process.env.PGPASSWORD!};
