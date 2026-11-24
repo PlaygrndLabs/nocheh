@@ -769,7 +769,7 @@ services:
       TELEGRAM_TYPING: ${TELEGRAM_TYPING:-true}
       TELEGRAM_REACTIONS: ${TELEGRAM_REACTIONS:-true}
       # Messages Nocheh starts on its own arrive silently in these hours of each person's own time zone; empty is off.
-      NOCHEH_QUIET_HOURS: ${NOCHEH_QUIET_HOURS-23:00-07:00}
+      NOCHEH_QUIET_HOURS: ${NOCHEH_QUIET_HOURS:-}
       # Empty connects directly.
       TELEGRAM_PROXY: ${TELEGRAM_PROXY:-}
       # The same owner setting as Hermes's: it prunes the bot's finished delivery journals.
