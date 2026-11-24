@@ -59,7 +59,9 @@ Nocheh is in development mode and not yet released. Everything below is built an
   master key ([ADR-0289](docs/adr/0289-chat-page-off-and-hermes-reads-passes-without-the-master-key.md)); Nocheh
   grants every schedule change and fire, and Hermes's Cron page is read-only
   ([ADR-0290](docs/adr/0290-nocheh-grants-schedule-changes-and-fires.md)). Next: the agent login replaces the
-  master key in Hermes, then one-time keys per reply.
+  master key in Hermes, then one-time keys per reply. A group's tools permission runs only what
+  carries no data, within ten reads a message; the rest asks
+  ([ADR-0291](docs/adr/0291-group-tools-run-only-what-carries-no-data.md)).
 - Dashboard: compact tables and sub-tabs on every page (table-first plan, steps 1 to 5);
   Connections, Members and Sent to apps pages.
 - Operations: daily backups, export and import, an encrypted off-site copy (off until the owner

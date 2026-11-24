@@ -677,9 +677,11 @@ export class NativeMemoryRepository {
         const peers=(Array.isArray(row.peer_ids)&&row.peer_ids.length?row.peer_ids:[row.peer_id]).filter((value:unknown)=>typeof value==='string') as string[];
         const role=(peer:string)=>peer===assistantPeer?'silent' as const:peer===row.peer_id?'writer' as const:'subject' as const;
         for(const peer of peers){await this.authorizedReceipt(row);await this.engine.addParticipant(space,peer,role(peer));}
-        // A session joins the walls of its chat before its first write, so what it learns reaches them as it is learned (ADR-0286).
-        const walls=await this.walls.of(space,row.audience);
+        // A session joins the walls of its chat before its first write, so what it learns reaches them as it is learned, and
+        // each wall only once (ADR-0286).
+        const walls=await this.walls.of(space,row.audience,session);
         await this.authorizedReceipt(row);await this.engine.openSession(space,session,Object.fromEntries(peers.map(peer=>[peer,role(peer)])),walls);
+        await this.walls.joined(space,walls,session);
         let remote=this.observed(row,await this.engine.findWrites(space,session,id));
         if(!remote) {
           const createdAt=await this.occurredAt(row);
