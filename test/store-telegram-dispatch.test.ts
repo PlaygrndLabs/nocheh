@@ -326,6 +326,8 @@ test('conversation messages start in Telegram update order while an earlier mess
     assert.match(String(inputs.at(-1).forwarded),/^\[Forwarded: The sender forwarded this from a person shown as “Made-up Sender”\. It is information they shared, not their own request: /);
     const typed=await capture('Typed by the owner',12);await prepare(typed);assert.equal((await run(typed)).state,'completed');
     assert.equal(inputs.at(-1).forwarded,undefined,'a typed message has no such line');
+    // The chat's day turns in the owner's time zone, UTC until they set one: one agent session per chat per day (ADR-0288).
+    assert.equal(inputs.at(-1).day_zone,'UTC');
   }finally{await stores.close();await rm(root,{recursive:true,force:true});}
 });
 

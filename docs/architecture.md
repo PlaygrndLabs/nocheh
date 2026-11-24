@@ -15,7 +15,7 @@ Nocheh is the permanent part. Everything else connects to it through a socket: a
 ```mermaid
 flowchart LR
   TG["Telegram"] --> CORE
-  WEB["Dashboard chat"] --> CORE
+  NEXT["Nocheh's own chat page, later"] -.-> CORE
   CORE["Nocheh: archive, files, sharing rules, approvals, secret check"]
   CORE -- "agent socket" --> AGENT["Agent: Hermes today"]
   AGENT -- "data socket (MCP)" --> CORE
@@ -28,7 +28,7 @@ flowchart LR
 | Data socket | The agent reads the archive, memory, tasks and Notion, and asks to act, through Nocheh's tools served over MCP. Every call passes the same checks, so a chat gets only what it may see | Nocheh's `/mcp`, 18 tools | Live |
 | Memory socket | Nocheh feeds long-term memory and asks it questions. The agent never talks to the engine | Honcho | Live |
 | Agent socket | Nocheh starts, follows and cancels each turn on the agent that is plugged in, one agent at a time, and reaches the agent's own settings, role and skills, notes and schedules only through it. A page for a feature the agent lacks says so | Hermes | Live |
-| Front doors | Where you talk to Nocheh | Telegram, through Nocheh's own bot service, and Chat in the dashboard, which opens Hermes's own chat page for now | Telegram live; Nocheh's own chat page is next |
+| Front doors | Where you talk to Nocheh | Telegram, through Nocheh's own bot service. The dashboard has no chat page until Nocheh has its own; Hermes's chat page is off ([ADR-0289](adr/0289-chat-page-off-and-hermes-reads-passes-without-the-master-key.md)) | Telegram live; Nocheh's own chat page is next |
 
 Hermes still does more than reason. It also reads files and voice notes, makes the secret check's model call, holds the model provider keys and runs schedules. These move into Nocheh step by step; see [What's next](#whats-next). Each chat's role, skills and notes are kept in its Hermes profile, and Nocheh reaches them through the agent socket.
 

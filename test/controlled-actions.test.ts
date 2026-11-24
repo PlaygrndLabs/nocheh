@@ -6,6 +6,8 @@ import {initialize} from '../src/database.js';
 import {ingest,digest,type Envelope} from '../src/archive.js';
 import {proposeControlled,controlledAction,claimControlled,finishControlled,decideControlled,grantPermission,revokePermission,actionArguments} from '../src/controlled-actions.js';
 import {controlReply} from '../src/actions.js';
+import {installChatsForTest} from '../src/chats.js';
+import {policyDirectory} from './fixture-groups.js';
 
 test('controlled arguments reject ambient capabilities and unsafe URL syntax',()=>{
   for(const args of [{url:'http://example.com'},{url:'https://user:pass@example.com'},{url:'https://example.com:8780'},{url:'https://example.com',headers:{Authorization:'secret'}}])assert.throws(()=>actionArguments('browser',args));
@@ -23,6 +25,8 @@ test('real PostgreSQL: exact approvals, owner decisions, bounded/revoked grants 
   const owner={scope:null,admin:true};
   const source:Envelope={version:1,key:'controlled:source',channel:'browser',origin:'live',kind:'browser_input',bot_id:'nocheh',scope:'-20',source_id:'1',revision:'0',occurred_at:null,text:'Original\0\r\n',payload:{profile:'nocheh-'+digest('-20').slice(0,24),text:'Original\0\r\n'}};
   const proposal={kind:'shell',arguments:{command:'printf synthetic'}};
+  // The chats the commands come from, as the seeder makes their rows from the policy (ADR-0252).
+  let restoreChats=()=>{};
   try {
     await initialize(pool);const event=await ingest(pool,source),principal={scope:'-20',admin:false,turnEvent:event.id};
     await assert.rejects(proposeControlled(pool,{scope:'-20',admin:false},proposal),{code:'assistant_turn_required'});
@@ -34,6 +38,7 @@ test('real PostgreSQL: exact approvals, owner decisions, bounded/revoked grants 
     await assert.rejects(decideControlled(pool,principal,{id:first.id,fingerprint:row.fingerprint,decision:'approve'}),{code:'owner_required'});
     await assert.rejects(decideControlled(pool,owner,{id:first.id,fingerprint:'changed',decision:'approve'}),{code:'action_changed'});
     const policy={enabled:true,owner_id:'123',group_ids:['-20']};
+    restoreChats=installChatsForTest(policyDirectory(policy));
     const command=async(text:string,privateDM=true)=>ingest(pool,{...source,key:'decision:'+text+privateDM,channel:'telegram',kind:'telegram_update',scope:privateDM?'123':'-20',payload:{message:{text,chat:{id:privateDM?123:-20,type:privateDM?'private':'group'},from:{id:123}}}});
     const group=await command('/approve '+first.id,false);assert.match((await controlReply(pool,policy,group.id))!,/Only the owner/);
     const approved=await command('/approve '+first.id);assert.match((await controlReply(pool,policy,approved.id))!,/approved/);
@@ -65,5 +70,5 @@ test('real PostgreSQL: exact approvals, owner decisions, bounded/revoked grants 
     assert.equal((await claimControlled(pool,{actor:'five'},undefined,{owner:'inngest',epoch:1})).claimed,false);
     const denied=await decideControlled(pool,owner,{id:changed.id,fingerprint:(await controlledAction(pool,owner,changed.id)).fingerprint,decision:'deny'});assert.equal(denied.state,'rejected');
     assert.equal((await pool.query('SELECT original_text FROM events WHERE id=$1',[event.id])).rows[0].original_text.toString(),source.text);
-  }finally{await pool.end();await root.query(`DROP SCHEMA ${namespace} CASCADE`);await root.end();}
+  }finally{restoreChats();await pool.end();await root.query(`DROP SCHEMA ${namespace} CASCADE`);await root.end();}
 });

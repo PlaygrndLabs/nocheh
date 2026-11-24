@@ -45,7 +45,7 @@ test('separated application captures through control outages, exposes owner repo
     if(operation==='telegram.status')return {ok:true,telegram:'connected',telegram_details:{state:'connected'}};
     if(operation==='guard.detect')return {literals:[]};
     if(operation==='prompts.defaults')return {defaults:{'reply.common':'Common','reply.owner':'Owner','reply.group':'Group','reply.private':'Private answer','reply.member':'Member','reply.member_read':'Member read','memory.limited':'Limited',
-      'memory.evidence':'Evidence','memory.notes_review':'Review','guard.secret_check':'Secrets','sharing.group_filter':'Filter','images.read':'Images','reply.scheduled':'Scheduled','reply.schedules':'Schedules'}};
+      'memory.evidence':'Evidence','memory.notes_review':'Review','guard.secret_check':'Secrets','sharing.group_filter':'Filter','images.read':'Images','reply.scheduled':'Scheduled','reply.schedules':'Schedules','reply.member_schedules':'Member schedules'}};
     if(operation.startsWith('persona.')||operation==='config.read')return {operation,input};
     if(operation==='memory.read')return {scope:input.scope,profile:'p-owner',memories:[{name:'MEMORY.md',text:'Juniper',
       entries:[{target:'memory',text:'Juniper',key:'e'.repeat(64),origins:[{by:'unknown'}],more:0,cites:[]}]}],sessions:[]};
@@ -125,11 +125,14 @@ test('separated application captures through control outages, exposes owner repo
     await request('/v1/status',undefined,503);
     await request('/v1/ingest',event,403,scopeToken(token,'123',Date.now()+60000));
     const accepted=await request('/v1/ingest',event,202);assert.equal(accepted.state,'spooled');
-    const browserInput={scope:'123',profile:'nocheh-'+digest('123').slice(0,24),conversation:'http-'+Date.now(),id:'submission',text:'Original browser observation',files:[]};
-    await request('/v1/browser/input',browserInput,403,scopeToken(token,'123',Date.now()+60000));
-    const browserSource=await request('/v1/browser/input',browserInput);assert.equal(browserSource.state,'spooled');
-    assert.equal(JSON.parse(await readFile(join(root,'spool/pending',browserSource.event_id+'.json'),'utf8')).text,browserInput.text);
+    // The dashboard chat page is off until Nocheh has its own chat page: browser input is refused even with the service
+    // token, and nothing is spooled for it.
+    const ownerProfile='nocheh-'+digest('123').slice(0,24);
+    const browserInput={scope:'123',profile:ownerProfile,conversation:'http-'+Date.now(),id:'submission',text:'Original browser observation',files:[]};
+    for(const credential of [token,scopeToken(token,'123',Date.now()+60000)])
+      assert.equal((await request('/v1/browser/input',browserInput,404,credential)).error,'browser_chat_off');
     const path=join(root,'spool/pending',digest(key)+'.json');assert.equal(JSON.parse(await readFile(path,'utf8')).text,event.text);
+    assert.deepEqual((await readdir(join(root,'spool/pending'))).filter(name=>name.endsWith('.json')),[digest(key)+'.json'],'nothing is spooled for browser input');
     await request('/v1/ingest',event,202);
     await request('/v1/ingest',{...event,text:'Changed observation'},409);
     archiveDown=false;
@@ -139,8 +142,7 @@ test('separated application captures through control outages, exposes owner repo
     await until(async()=>!(await readdir(join(root,'spool/pending'))).includes(digest(key)+'.json'));
     assert.equal((await connected.archive.query('SELECT count(*)::int AS count FROM events WHERE id=$1',[digest(key)])).rows[0].count,1);
     assert.equal((await connected.control.query('SELECT state FROM source_intakes WHERE event_id=$1',[digest(key)])).rows[0].state,'ready');
-    await until(async()=>!!(await connected.archive.query('SELECT 1 FROM events WHERE id=$1',[browserSource.event_id])).rowCount);
-    assert.equal((await request('/v1/status')).archive.events,initialStatus.archive.events+2,'overview counts original observations from archive storage');
+    assert.equal((await request('/v1/status')).archive.events,initialStatus.archive.events+1,'overview counts original observations from archive storage');
     const captured=(await services.archive.captured(digest(key))).reference;
     const legacyRuntime={event:{...event,key:key+':legacy-runtime',origin:'generated',kind:'runtime_context'},received_at:'2026-09-01T00:00:00.000Z',artifacts:[],derived:[]};
     const legacyImported=await request('/v1/import',legacyRuntime);assert.equal(legacyImported.store,'derived');
@@ -174,34 +176,17 @@ test('separated application captures through control outages, exposes owner repo
     await request('/v1/runtime/profiles',undefined,403,credential);
     const profiles=await request('/v1/runtime/profiles');assert.ok(profiles.profiles.some((p:any)=>p.is_default));
     assert.equal((await request('/v1/runtime/profiles/resolve',{profile:'default'})).space,'123');
-    await request('/v1/browser/admit',{...browserInput,event_id:browserSource.event_id},403,credential);
-    assert.equal((await request('/v1/browser/admit',{...browserInput,event_id:browserSource.event_id})).owned,true);
-    await services.preparation.run(browserSource.event_id,async()=>{throw Error('no browser files');},'fixture',services.detect,
-      {owner:'inngest',epoch:(await connected.control.query("SELECT epoch FROM workflow_owners WHERE family='preparation'")).rows[0].epoch});
-    const browserOwner=(await connected.control.query("SELECT epoch FROM workflow_owners WHERE family='browser'")).rows[0].epoch;
-    const browserContext=await request('/v1/browser/workflow-context',{event_id:browserSource.event_id,owner_epoch:browserOwner});
-    const browserClaim=await request('/v1/browser/claim',browserContext);assert.equal(browserClaim.claimed,true);
-    assert.equal((await request('/v1/browser/claim',browserContext)).claimed,false);
-    assert.deepEqual((await request('/v1/browser/prepare',browserContext)).files,[]);
-    assert.equal((await request('/v1/browser/heartbeat',browserContext)).cancel_requested,false);
-    await request('/v1/browser/finish',{event_id:browserSource.event_id,actor:browserContext.actor,state:'done',session:browserInput.conversation,text:'Synthetic browser result'});
-    const delivered=await request('/v1/browser/observe',{...browserInput,event_id:browserSource.event_id});
-    assert.equal(delivered.text,'Synthetic browser result');assert.ok(delivered.delivery);
-    await request('/v1/browser/delivered',delivered.delivery,403,credential);
-    controlDown=true;archiveDown=true;
-    const deliveredSource=await request('/v1/browser/delivered',delivered.delivery,202);
-    assert.equal(JSON.parse(await readFile(join(root,'spool/pending',deliveredSource.event_id+'.json'),'utf8')).text,'Synthetic browser result');
-    await request('/v1/browser/delivered',{...delivered.delivery,sha256:digest('forged')},409);
-    controlDown=false;archiveDown=false;
-    await until(async()=>!!(await connected.archive.query('SELECT 1 FROM events WHERE id=$1',[deliveredSource.event_id])).rowCount);
-    await request('/v1/memory/check',undefined,409,browserClaim.archive_credential);
+    // No browser run is admitted, claimed or delivered, so none can hand out a pass. A closed run's pass is checked on
+    // the scheduled run below.
+    for(const operation of ['admit','workflow-context','claim','prepare','heartbeat','finish','observe','undelivered','delivered'])
+      assert.equal((await request('/v1/browser/'+operation,{...browserInput,event_id:digest(key)},404)).error,'browser_chat_off',operation);
     await request('/v1/scheduler/ownership',{},403,credential);
     const scheduleOwner=await request('/v1/scheduler/ownership',{}),scheduleJob='http-job-'+Date.now();
-    const scheduleDefinition={profile:browserInput.profile,name:'HTTP fixture',prompt:'Synthetic scheduled prompt',schedule:{kind:'interval',minutes:60},
+    const scheduleDefinition={profile:ownerProfile,name:'HTTP fixture',prompt:'Synthetic scheduled prompt',schedule:{kind:'interval',minutes:60},
       deliver:'local',repeat:null,enabled:true,removed:false,preferences:{},execution_version:'v1'};
-    await request('/v1/scheduler/definition',{scope:'123',profile:browserInput.profile,job_id:scheduleJob,definition:scheduleDefinition,
+    await request('/v1/scheduler/definition',{scope:'123',profile:ownerProfile,job_id:scheduleJob,definition:scheduleDefinition,
       workflow_cursor:digest(scheduleJob),workflow_sequence:1});
-    const scheduled=await request('/v1/scheduler/input',{scope:'123',space:'123',profile:browserInput.profile,job_id:scheduleJob,id:'first',
+    const scheduled=await request('/v1/scheduler/input',{scope:'123',space:'123',profile:ownerProfile,job_id:scheduleJob,id:'first',
       text:scheduleDefinition.prompt,files:[],definition:scheduleDefinition,job_revision:digest(canonical(scheduleDefinition)),
       scheduled_for:'2026-09-18T12:00:00Z',fire_reason:'manual',owner_epoch:scheduleOwner.epoch});
     assert.equal(scheduled.state,'captured');
@@ -210,11 +195,12 @@ test('separated application captures through control outages, exposes owner repo
     const scheduledClaim=await request('/v1/scheduler/claim',scheduledContext);assert.equal(scheduledClaim.claimed,true);
     // Unarchived schedule fires pass the runtime's pre-run delivery check through their admitted run.
     assert.equal((await request('/v1/memory/check',undefined,200,scheduledClaim.archive_credential)).valid,true);
-    const otherScope=await services.prepared.audience.turn(token,{scope:'-42',space:'-42',logical_profile:browserInput.profile},scheduled.event_id,Date.now()+60000);
+    const otherScope=await services.prepared.audience.turn(token,{scope:'-42',space:'-42',logical_profile:ownerProfile},scheduled.event_id,Date.now()+60000);
     assert.equal((await request('/v1/memory/check',undefined,200,otherScope)).valid,false);
     assert.equal((await request('/v1/scheduler/prepare',scheduledContext)).files.length,0);
     await request('/v1/scheduler/finish',{event_id:scheduled.event_id,actor:scheduledContext.actor,state:'done',session:scheduledContext.conversation,text:'Scheduled result'});
     assert.equal((await request('/v1/scheduler/delivery',{event_id:scheduled.event_id})).state,'local');
+    // A finished run's pass reads no more.
     await request('/v1/memory/check',undefined,409,scheduledClaim.archive_credential);
 
     // The group's name as the owner's refresh records it, on its chat row (ADR-0252).
@@ -281,7 +267,8 @@ test('separated application captures through control outages, exposes owner repo
     assert.equal((await request('/v1/events/'+digest(key),undefined,200,offCredential)).representation,'original');
     await writeFile(join(root,'spool/.restore-inactive'),'inactive restored installation');
     await request('/v1/projects',undefined,503);await request('/v1/ingest',{...event,key:key+':inactive'},503);
-    await request('/v1/browser/input',{...browserInput,id:'inactive'},503);
+    // Browser input is refused before the inactive fence, as everywhere.
+    assert.equal((await request('/v1/browser/input',{...browserInput,id:'inactive'},404)).error,'browser_chat_off');
     await until(async()=>Object.values(worker.status()).every(value=>value==='inactive'));
     assert.equal((await request('/health')).inactive,true);
   }finally {

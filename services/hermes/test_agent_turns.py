@@ -21,6 +21,8 @@ from .async_runs import CLOSED,identity
 from .agent_turns import AgentTurns
 from services.durable import canonical,digest,immutable_file
 from .scopes import Scope,Scopes
+from . import daily_session
+from datetime import timezone
 from .subscription import ProviderNotConfigured
 
 SECRET='synthetic-service-token-123456789'
@@ -297,11 +299,23 @@ class AgentTurnTests(unittest.TestCase):
         self.assertEqual({key:value for key,value in self.wait(agent,body).items() if key!='run_id'},{'state':'failed','error_code':'provider_not_configured'})
         silent=self.agent(self.replying(),resolve=lambda body,claims:None);body=turn_body(71);silent.start(body)
         self.assertEqual({key:value for key,value in self.wait(silent,body).items() if key!='run_id'},{'state':'suppressed'})
-        forged=turn_body(72,secret='another-synthetic-secret-123456');agent.start(forged);state=self.wait(agent,forged)
+        # A pass whose claims bind another turn (here another event's) is refused before the turn starts.
+        mismatched=turn_body(72);mismatched['archive_credential']=credential('-20','f'*64)
+        agent.start(mismatched);state=self.wait(agent,mismatched)
         self.assertEqual((state['state'],state.get('error_code')),('ambiguous','runtime_execution_interrupted'),'a refused pass never reaches the turn')
         self.assertFalse((self.folder/(state['run_id']+'.outcome')).exists())
         self.assertEqual(self.calls,[])
         self.content_free('private',kept=('.request',))
+
+    def test_a_pass_is_read_by_its_claims_not_its_signature(self):
+        # Hermes does not check the signature: Nocheh's own services check the signature on every call the pass makes. A pass
+        # signed with another key but carrying this turn's claims runs; one for another chat does not.
+        agent=self.agent(self.replying())
+        body=turn_body(74,secret='another-synthetic-secret-123456');agent.start(body)
+        self.assertEqual(self.wait(agent,body)['reply']['text'],'Synthetic answer')
+        self.assertEqual(len(self.calls),1)
+        other=turn_body(75);other['archive_credential']=credential('-30',other['event_id']);agent.start(other)
+        self.assertEqual(self.wait(agent,other)['state'],'ambiguous');self.assertEqual(len(self.calls),1)
 
     def test_a_private_answer_runs_as_the_owners_private_chat_never_as_the_owner(self):
         def signed(event,**extra):
@@ -365,8 +379,34 @@ class AgentTurnTests(unittest.TestCase):
         self.assertEqual(state['timings'],{'total':{'ms':9,'calls':1}})
         logical=digest('-20:main');profile=self.root/'profiles'/Scopes.profile('-20')
         self.assertEqual(run.await_args.args[5],'nocheh-'+logical)
-        self.assertEqual(json.loads((profile/('active-'+logical+'.json')).read_text()),{'session_id':'nocheh-native-session'})
+        saved=json.loads((profile/('active-'+logical+'.json')).read_text())
+        self.assertEqual((saved['session_id'],saved['day']),('nocheh-native-session',daily_session.day_of(saved['last_active'],timezone.utc)))
         title.assert_called_once()
+
+    def test_a_new_day_moves_the_chat_to_a_new_session_that_starts_from_the_last(self):
+        from .assistant_gateway import native_turn
+        logical=digest('-20:main');profile=self.root/'profiles'/Scopes.profile('-20');profile.mkdir(parents=True)
+        cursor=profile/('active-'+logical+'.json')
+        cursor.write_text(json.dumps({'session_id':'nocheh-yesterday','day':'2000-01-01','last_active':946684800}))
+        child={'state':'done','text':'Synthetic native answer','session_id':'','timings':{}}
+        async def run(profile,scope,body,model,credentials,session_id,*rest):return {**child,'session_id':session_id}
+        with patch('services.hermes.assistant_gateway.prepare_profile',return_value=profile),\
+             patch('services.hermes.turn_process._run_process',side_effect=run) as process,\
+             patch('services.hermes.assistant_gateway.check_delivery_policy',return_value=True),\
+             patch('services.hermes.assistant_gateway.title_session'),\
+             patch('services.hermes.daily_session.start') as start,\
+             patch('services.hermes.retired_history.withhold_retired'),\
+             patch('services.hermes.profile_config.preferences',return_value={'nocheh.carry_messages':20}):
+            agent=self.agent(native_turn);body=turn_body(42,day_zone='Asia/Dubai');agent.start(body);self.wait(agent,body)
+            # A follow-up after an approval stays in the session that asked, whatever the day.
+            cursor.write_text(json.dumps({'session_id':'nocheh-yesterday','day':'2000-01-01','last_active':946684800}))
+            body=turn_body(43,attempt='c1-'+'e'*40,continuation='e'*64);agent.start(body);self.wait(agent,body)
+        today=daily_session.day_of(time.time(),daily_session.zone('Asia/Dubai'))
+        fresh='nocheh-'+logical+'-'+today.replace('-','')
+        self.assertEqual(process.await_args_list[0].args[5],fresh)
+        self.assertEqual(start.call_args.args[1:4],(fresh,'nocheh-yesterday',20))
+        self.assertEqual(process.await_args_list[1].args[5],'nocheh-yesterday')
+        self.assertEqual(start.call_count,1)
 
     def test_turns_run_with_telegram_unavailable(self):
         # A first turn loads what the loop imports lazily, so only the blocked turn runs under the patch.
@@ -399,10 +439,11 @@ class AgentTurnTests(unittest.TestCase):
             handler.path='/internal/turn/events'
             self.assertEqual(handler.dispatch({**observe(body),'after':2})['events'][-1]['state'],'done')
             handler.path='/internal/turn/cancel';self.assertEqual(handler.dispatch(observe(body)),state)
-            # A Telegram turn has only the turn routes; the run routes refuse it, with or without a channel.
+            # A Telegram turn has only the turn routes; the run routes refuse it, with or without a channel. The
+            # dashboard chat page is off, so a browser run is refused too.
             for route in ('start','resume','events','cancel'):
                 handler.path='/internal/run/'+route
-                for value in (body,{key:item for key,item in body.items() if key!='channel'}):
+                for value in (body,{key:item for key,item in body.items() if key!='channel'},{**body,'channel':'browser'}):
                     with self.assertRaisesRegex(ValueError,'runtime_channel_unavailable'):handler.dispatch(value)
 
     def test_the_service_answers_turn_routes_and_reports_active_turns(self):
@@ -430,7 +471,7 @@ class AgentTurnTests(unittest.TestCase):
                 self.assertFalse({'telegram','telegram_details'}&set(health))
                 # Nothing that reached Telegram is left: these are unknown routes.
                 for route in ('/internal/dispatch','/internal/action','/internal/file','/internal/telegram/approval','/internal/telegram/refusal',
-                              '/internal/telegram/notice','/internal/telegram/chat'):
+                              '/internal/telegram/notice','/internal/telegram/chat','/internal/browser/events','/internal/browser-credentials'):
                     self.assertEqual(call(route,{'chat_id':'-20'}),(400,{'error':'invalid_request'}),route)
                 self.assertEqual(call('/internal/run/start',turn_body(42)),(400,{'error':'invalid_request'}))
         finally:server.shutdown();server.server_close();thread.join()

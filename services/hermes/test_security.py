@@ -44,6 +44,33 @@ class SecurityTests(unittest.TestCase):
             self.assertEqual(database_path(profile),profile/'native-state'/'state.db')
             (profile/'native-state'/'state.db').symlink_to('/private/secret')
             with self.assertRaisesRegex(ValueError,'session_path_denied'):database_path(profile)
+    def test_a_turn_reads_its_pictures_through_the_broker_with_its_pass_in_either_mode(self):
+        import hashlib,threading
+        from http.server import BaseHTTPRequestHandler,ThreadingHTTPServer
+        from .assistant_turn import turn_image
+        picture=b'synthetic picture bytes';image=hashlib.sha256(picture).hexdigest();seen=[]
+        class Broker(BaseHTTPRequestHandler):
+            def log_message(self,*_):pass
+            def do_GET(self):
+                seen.append((self.path,self.headers.get('Authorization')))
+                data=picture if self.path=='/v1/turn-files/'+image else b'other bytes'
+                self.send_response(200);self.send_header('Content-Length',str(len(data)));self.end_headers();self.wfile.write(data)
+        server=ThreadingHTTPServer(('127.0.0.1',0),Broker);thread=threading.Thread(target=server.serve_forever,daemon=True);thread.start()
+        try:
+            # The non-isolated child has no mount of the stored files either: the same route, with the same pass.
+            for isolated in ('','1'):
+                with self.subTest(isolated=isolated),patch.dict(os.environ,{'GUARD_URL':f'http://127.0.0.1:{server.server_port}','NOCHEH_ISOLATED_TURN':isolated}):
+                    seen.clear()
+                    self.assertEqual(turn_image(image,'turn.pass.signature'),picture)
+                    self.assertEqual(seen,[('/v1/turn-files/'+image,'Bearer turn.pass.signature')])
+                    # Without a pass nothing is asked for; bytes that are not the picture named are refused.
+                    for credential in (None,''):
+                        with self.assertRaisesRegex(ValueError,'turn_pass_required'):turn_image(image,credential)
+                    with self.assertRaisesRegex(ValueError,'invalid_image_identity'):turn_image('../'+image[3:],'turn.pass.signature')
+                    self.assertEqual(len(seen),1)
+                    with self.assertRaisesRegex(ValueError,'image_hash_mismatch'):turn_image('c'*64,'turn.pass.signature')
+        finally:server.shutdown();server.server_close();thread.join()
+
     def test_no_unknown_mode_or_transport_fallback(self):
         with patch.dict(os.environ,NOCHEH_SECURITY_RUNTIME='broken'):
             with self.assertRaises(ValueError):isolated_enabled()

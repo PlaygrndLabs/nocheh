@@ -461,7 +461,7 @@ export function Stat({
 /** A plain responsive table. Wide tables scroll sideways inside their card on phones. */
 export function Table({className, ...props}: React.ComponentProps<'table'>) {
   return (
-    <div className="overflow-x-auto">
+    <div className="relative overflow-x-auto">
       <table className={cn('w-full border-collapse text-left text-sm', className)} {...props} />
     </div>
   );

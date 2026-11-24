@@ -10,7 +10,7 @@ from urllib.request import Request,urlopen
 from .async_runs import AsyncRuns,identity,CLOSED
 from services.durable import canonical,immutable_file
 from .job_progress import merge
-from .scopes import Scope,verify_capability
+from .scopes import Scope,check_claims
 from .usage import _count
 
 # A run's heartbeat every HEARTBEAT_SECONDS, each waiting at most HEARTBEAT_TIMEOUT. A background job run outlasts
@@ -104,12 +104,19 @@ class ManagedAsync:
         return result
 
     def flush(self):
+        failed=None
         for path in self.directory.glob('*.receipt'):
             run=path.stem
             if (self.directory/(run+'.published')).exists():continue
             request=self.directory/(run+'.request')
             if not request.exists():continue
-            self.publish(json.loads(request.read_bytes()),json.loads(path.read_bytes()))
+            body=json.loads(request.read_bytes())
+            # Nocheh refuses the browser channel for good (ADR-0289): retire its receipt instead of retrying it forever.
+            if body.get('channel')=='browser':immutable_file(self.directory,run+'.published',b'{}');continue
+            # One receipt Nocheh refuses must not hold back the others.
+            try:self.publish(body,json.loads(path.read_bytes()))
+            except Exception as error:failed=failed or error
+        if failed:raise failed
 
     def emit(self,body,text):
         if not isinstance(text,str):raise ValueError('invalid_stream_event')
@@ -172,7 +179,7 @@ class ManagedAsync:
         immutable_file(self.directory,identity(body)+'.context',canonical(context))
         if not claim.get('claimed'):
             return {'state':claim['state'] if claim['state'] in CLOSED else 'ambiguous'}
-        claims=verify_capability(claim['archive_credential'],self.admin.token,scope,context['event_id'])
+        claims=check_claims(claim['archive_credential'],scope,context['event_id'])
         if not scope.owner and claims.get('revision')!=scope.revision:raise ValueError('browser_audience_changed')
         stopped=threading.Event();lost=threading.Event()
         # A background run's progress lines reach its heartbeat and receipt through the relay.
