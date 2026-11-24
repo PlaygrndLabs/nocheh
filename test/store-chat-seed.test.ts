@@ -136,6 +136,7 @@ const notChatColumns:Record<string,string>={
   'control.telegram_topic_registrations.topic_id':'frozen in step 2b-1; a topic key',
   'control.projects.share_chats':'a project switch, Share group chats (ADR-0267)','control.memory_walls.workspace':'a memory workspace id',
   'control.memory_walls.chats':'chats from the chat directory a memory wall reads, written after step 2b (ADR-0286)',
+  'control.projects.own_groups':'groups from the chat directory a project keeps to themselves, written after step 2b (ADR-0287)',
   'control.schedule_notice_grants.chat_id':'a member\'s chat from the chat directory, written after step 2b; a one-time grant (ADR-0277)',
   'derived.derived_artifacts.source_revision':'a source revision','derived.guard_activations.source_id':'a guard source id','derived.guard_fragments.source_id':'a guard source id',
   'derived.guard_revisions.source_id':'a guard source id','derived.guard_sources.source_id':'a guard source id','derived.learned_entries.scope_kind':'the kind of scope_id',
