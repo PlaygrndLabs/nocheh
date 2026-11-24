@@ -23,8 +23,11 @@ of why it was allowed.
    `📝 Does: …`, the instruction Nocheh saved (cut at 700 characters; the Schedules page has
    all of it). A press that edits the message keeps that line, read from the saved version.
 2. **Outside content holds a schedule.** A turn whose message or reads brought in outside
-   content (`outsideReads`: a forward, a file, a reply to someone else's message, a web page
-   or another server's tool, Gmail and Notion included) may not leave a schedule running
+   content (ADR-0293's `outsideReads` for the asker, the owner or a member in their own chat:
+   a forward, a file, a reply to someone else's message, earlier outside content in the
+   conversation, a web page or another server's tool, Gmail and Notion included; not the
+   asker's own archive or task lookups, and not a conversation the runtime never reported)
+   may not leave a schedule running
    unless it already ran with that very instruction. `/v1/schedules/turn/definition` answers
    409 `schedule_start_needed`; Hermes's plugin then saves the job paused, with a new
    execution version, and posts it again in the same turn. Nocheh records it and answers
