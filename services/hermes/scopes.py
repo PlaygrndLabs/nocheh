@@ -104,8 +104,8 @@ class Scopes:
         from services.chats import Fixed,Served,ServedList
         self.enabled=value['enabled']
         if self.enabled and isinstance(served,Served) and not served.owner_chat:raise ValueError('owner_required')
-        from .environment import secret
-        self.served=Fixed(served) if isinstance(served,Served) else served or ServedList(None,lambda:secret('SERVICE_TOKEN'))
+        from .environment import agent_key
+        self.served=Fixed(served) if isinstance(served,Served) else served or ServedList(None,agent_key)
 
     def current(self,epoch=None,max_age=5.0,holds=None):
         """The served list as the app has it now: read again when older than `max_age` seconds, when a pass carries a

@@ -151,7 +151,7 @@ test('model labels: fixed words, no person names, at most 120 characters',()=>{
   assert.equal(label([turn({place:{chat:GP1},answered:'person_message',reads:['reply']})]),
     'Nocheh\'s note from a group on 2026-11-16, after reading the message it answered (another person\'s), the message it…');
   assert.equal(fromToken([turn({reads:['reply']})]),'turn_read');
-  // ADR-0295: long-term memory and tasks others wrote are someone else's words, even in the owner's private chat.
+  // ADR-0300: long-term memory and tasks others wrote are someone else's words, even in the owner's private chat.
   assert.equal(label([turn({reads:['memory','tasks']})]),'Nocheh\'s note from the owner\'s private chat on 2026-11-16, after reading long-term memory, tasks other people wrote');
   assert.equal(fromToken([turn({reads:['tasks']})]),'turn_read');
   assert.equal(label([turn({answered:'file_by_owner'})]),'Nocheh\'s note from the owner\'s private chat on 2026-11-16, after reading a file');

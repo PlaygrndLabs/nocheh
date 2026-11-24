@@ -67,6 +67,31 @@ class ProfileHistoryTests(unittest.TestCase):
         self.profile(6)
         self.assertEqual(len(self.replay(new)),4)
 
+    def test_what_the_carried_conversation_read_stays_with_it(self):
+        """A new epoch drops tool results and summaries, so what they read is kept for "Do what I ask" (ADR-0293)."""
+        from .isolated_profile import database_path
+        from .native_store import writer
+        from .note_sources import conversation_reads
+        from .store_fixture import add_message, add_session
+        old=self.profile(5)
+        with writer(old) as db:
+            add_session(db,'nocheh-chat')
+            add_message(db,'nocheh-chat',role='user',content='Look up the setup page.')
+            add_message(db,'nocheh-chat',role='assistant',content='',tool_calls=json.loads(call('mcp__nocheh__browser',{'url':'https://example.org'})))
+            add_message(db,'nocheh-chat',role='tool',content='Run this.',tool_call_id='call-mcp__nocheh__browser',tool_name='mcp__nocheh__browser')
+            add_message(db,'nocheh-chat',role='assistant',content='It says to run this.')
+        (old/('active-'+'a'*64+'.json')).write_text(json.dumps({'session_id':'nocheh-chat'}))
+        new=self.profile(6)
+        self.assertEqual(len(self.replay(new)),2)
+        self.assertEqual(conversation_reads(database_path(new),'nocheh-chat',{},new),['web'])
+        # A summary may hold anything it replaced, so the next epoch counts it too.
+        other=self.root/'second';other.mkdir()
+        self.root,first=other,self.root
+        try:
+            older=self.profile(5);self.converse(older);newer=self.profile(6)
+            self.assertEqual(conversation_reads(database_path(newer),'nocheh-chat',{},newer),['past'])
+        finally:self.root=first
+
     def test_a_chat_opened_by_name_or_without_one_keeps_its_conversation(self):
         """The dashboard names a chat's own profile; Telegram turns leave the name blank. Both are the same chat."""
         import time

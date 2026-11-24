@@ -51,7 +51,16 @@ def dispatch(body):
         return status(state)
     if operation == 'problems.check':
         from tools.operations.provider.problems import check
-        return check(state)
+        from tools.operations.provider import spending
+        # The monthly spending limit is checked on the same beat (ADR-0298), first, so a failing problem check never skips it.
+        try:
+            spent = spending.check(state)
+        except Exception:
+            spent = {'state': 'unavailable'}
+        return {**check(state), 'spending': spent}
+    if operation == 'spending.view':
+        from tools.operations.provider.spending import summary
+        return summary(state)
     if operation == 'storage.report':
         from tools.operations.installation.storage import report
         return report(state)
@@ -84,12 +93,13 @@ def dispatch(body):
         return launch_check(load(state))
     if operation == 'native.connection':
         from tools.operations.installation.configuration import native_endpoint
+        from tools.operations.security.native import session_token
         host,port=native_endpoint(state)
-        return {'host':host,'port':port,'token':load(state)['SERVICE_TOKEN']}
+        return {'host':host,'port':port,'token':session_token(state)}
     if operation == 'memory.api':
         from urllib.parse import urlsplit
         path=body['path'];parsed=urlsplit(path)
-        if parsed.scheme or parsed.netloc or parsed.path not in ('/v1/memory/longterm','/v1/memory/longterm/rebuild','/v1/memory/longterm/retry-failed','/v1/memory/longterm/fresh-start','/v1/memory/spaces','/v1/memory/shares','/v1/memory/shares/revoke','/v1/memory/reviews','/v1/memory/reviews/control','/v1/memory/recall','/v1/memory/preview','/v1/memory/facts','/v1/memory/longterm/coverage','/v1/memory/originals','/v1/memory/message-facts'):
+        if parsed.scheme or parsed.netloc or parsed.path not in ('/v1/memory/longterm','/v1/memory/longterm/rebuild','/v1/memory/longterm/retry-failed','/v1/memory/longterm/fresh-start','/v1/memory/spaces','/v1/memory/shares','/v1/memory/shares/revoke','/v1/memory/reviews','/v1/memory/reviews/control','/v1/memory/recall','/v1/memory/preview','/v1/memory/facts','/v1/memory/longterm/coverage','/v1/memory/originals','/v1/memory/message-facts','/v1/memory/hidden','/v1/memory/hidden/restore'):
             raise ValueError('memory_route_denied')
         return api_call(path,body.get('body'),'memory_operation_unavailable')
     if operation == 'operations.list':

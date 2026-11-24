@@ -63,7 +63,7 @@ def resolve(body,claims):
 class AgentTurnTests(unittest.TestCase):
     def setUp(self):
         folder=tempfile.TemporaryDirectory();self.addCleanup(folder.cleanup);self.root=Path(folder.name)
-        environment=patch.dict(os.environ,{'SERVICE_TOKEN':SECRET,'HERMES_HOME':os.environ.get('HERMES_HOME') or str(self.root/'home')})
+        environment=patch.dict(os.environ,{'AGENT_KEY':SECRET,'HERMES_HOME':os.environ.get('HERMES_HOME') or str(self.root/'home')})
         environment.start();self.addCleanup(environment.stop)
         self.folder=self.root/'spool'/'agent-turns';self.calls=[]
 

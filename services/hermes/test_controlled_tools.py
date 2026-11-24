@@ -22,7 +22,7 @@ class ToolTests(unittest.TestCase):
             self.assertIn('--network=none',command);self.assertIn('--read-only',command);self.assertIn('--cap-drop=ALL',command)
             self.assertNotIn(action['arguments']['command'],' '.join(command))
             self.assertIn('type=bind,src='+str((home/'workspace').resolve())+',dst=/workspace',command)
-            self.assertFalse(any('SERVICE_TOKEN' in x or 'docker.sock' in x for x in command))
+            self.assertFalse(any(key in x for x in command for key in ('SERVICE_TOKEN','AGENT_KEY','NOCHEH_HERMES_SESSION_TOKEN','docker.sock')))
             self.assertNotIn('--mount',sandbox_command(root,{**action,'kind':'browser'},'test-only'))
             # Chromium's threads count as processes; a shell command keeps the tighter bound.
             self.assertIn('--pids-limit=512',sandbox_command(root,{**action,'kind':'browser'},'test-only'))

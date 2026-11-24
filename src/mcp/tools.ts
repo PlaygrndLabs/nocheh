@@ -308,7 +308,7 @@ const taskFields=['title','notes','status','state','priority','start_on','start_
   'properties','reminders','blocked_by','related','attachments'];
 const pick=(args:Value,keys:readonly string[])=>Object.fromEntries(keys.filter(key=>own(args,key)).map(key=>[key,args[key]]));
 /** Storage's marks that a chat's task read shows tasks of other groups it does not share what it knows with (ADR-0276),
- * or text someone other than the owner wrote (ADR-0295), kept on a read cut to fit: Hermes labels a note written after it
+ * or text someone other than the owner wrote (ADR-0300), kept on a read cut to fit: Hermes labels a note written after it
  * as from an outside read. */
 const otherGroups=(answer:unknown)=>{
   const value=answer&&typeof answer==='object'?answer as Value:{};

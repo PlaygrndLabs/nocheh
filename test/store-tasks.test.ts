@@ -1193,7 +1193,7 @@ for(const family of families)test(`every group and topic of a project reads and 
     const relating=await s.tasks.chatGet(bob,second.id);
     assert.deepEqual([relating.related.map((item:any)=>item.id),relating.other_groups],[[first.id],true],'a linked task of another group marks it too');
     assert.equal(relating.related[0].group_id,g1,'a linked task shows its group of the project');
-    // ADR-0295: what a member wrote is marked as theirs in every chat, the owner's private chat and brief too; the owner's
+    // ADR-0300: what a member wrote is marked as theirs in every chat, the owner's private chat and brief too; the owner's
     // own is not. A list shows no comment text, so it marks none.
     const mine=await actor((await capture('123',123,'What is open?','Owner')).id,null,'123');
     const wrote=await s.tasks.chatGet(mine,waits.id);

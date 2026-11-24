@@ -105,6 +105,6 @@ test('a replacement agent offers only what it has, and Nocheh refuses the rest w
 });
 
 test('one agent runs at a time, and turn passes name it',()=>{
-  const plugged=agent({hermesUrl:'http://fixture.invalid',token:'fixture'});
+  const plugged=agent({hermesUrl:'http://fixture.invalid',agentKey:'fixture'});
   assert.equal(plugged.id,activeAgent);assert.equal(defaultAgent,activeAgent);assert.equal(plugged.name,'Hermes');
 });

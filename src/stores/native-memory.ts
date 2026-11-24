@@ -1039,8 +1039,10 @@ export class NativeMemoryRepository {
       const facts=options.subject?{subject:options.subject,sessions:options.limitToSession?[session.session_id]:null,profile:false}:null;
       // The fact list is read beside the context, so the turn waits for the slower of the two.
       const listed=this.listFacts(workspace,facts),read=await this.engine.context(workspace,session.session_id,options);
+      // Only the owner's block may fall back to the engine's prose. A chat's own prose can hold a conclusion an old-fact
+      // clean-up drew across every chat of its speaker and filed under this chat (ADR-0298); its listed facts never do.
       return this.contextBlock(current,audience,source,configuration,empty,{title,summaryTitle:headers.summary,summary:read.summary,
-        summaryMessage:read.summaryMessage,representation:read.subject,facts,listed});
+        summaryMessage:read.summaryMessage,representation:owner?read.subject:'',facts,listed});
     }
     if(owner&&known)return this.contextBlock(current,audience,source,{engine:this.engine.id,workspace,audience,peer:speaker,profile:true,...block},empty,
       {title,summaryTitle:headers.summary,summary:'',summaryMessage:null,representation:'',facts:{subject:speaker!,sessions:null,profile:true}});

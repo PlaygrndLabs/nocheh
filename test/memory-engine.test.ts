@@ -216,7 +216,9 @@ test('facts come from the stock list with their cited writes, and uncited ones a
 test('every participant\'s facts for the owner\'s dashboard: by the stock list\'s filters, never one peer\'s facts about another (ADR-0261 step 4)',async()=>{
   const pages:Record<string,unknown>={
     '':{items:[conclusion(1,{observer_id:'bob',observed_id:'ana',source_message_ids:[id(11)]})],next_page:'p2'},
-    p2:{items:[conclusion(2,{observer_id:'ana',observed_id:'ana',source_message_ids:[id(11),id(12)]}),conclusion(3,{observer_id:'bob',observed_id:'bob'})],next_page:'p3'}};
+    p2:{items:[conclusion(2,{observer_id:'ana',observed_id:'ana',source_message_ids:[id(11),id(12)]}),conclusion(3,{observer_id:'bob',observed_id:'bob'}),
+      // A memory wall's copy of ana's fact (ADR-0286) is left out, not refused.
+      conclusion(9,{observer_id:'scope.wall-'+'a'.repeat(40),observed_id:'ana',source_message_ids:[id(11)]})],next_page:'p3'}};
   const {calls,engine}=fake((path,body)=>{
     if(path.startsWith(listPath))return pages[new URL('http://h'+path).searchParams.get('cursor')!];
     if(path.endsWith('/nocheh/provenance'))return {roots:body.conclusion_ids,limitations:[],
@@ -405,4 +407,24 @@ test('a wall is named by its chats and asked by name with its own key; its facts
   status={a:{state:'failed'}};await assert.rejects(engine.wallReady('space',wall),{code:'memory_wall_copy_failed'});
   await engine.openSession('space','s1',{person:'writer'},[wall]);
   assert.deepEqual(calls.at(-1)!.body.scopes,[wall],'a new session joins its chat\'s walls');
+});
+
+test('hidden facts list and come back through the plugin, and a bad answer or request is refused (ADR-0298)',async()=>{
+  const id='h'.repeat(21),copy='c'.repeat(21);
+  const {calls,engine}=fake((path,body)=>{
+    if(path.includes('/nocheh/hidden?'))return {items:[
+      {id,content:'Works at the old studio.',level:'explicit',observer:'person_a',observed:'person_a',created_at:'2026-03-02T10:00:00+00:00',reason:'replaced',hidden_at:'2026-11-20T09:12:00Z',copied_from:null},
+      {id:copy,content:'Works at the old studio.',level:'explicit',observer:'scope.wall-x',observed:'person_a',created_at:'2026-03-02T10:00:00+00:00',reason:'unused',hidden_at:'2026-11-19T00:00:00Z',copied_from:id},
+    ],next:null};
+    if(path.endsWith('/nocheh/hidden/restore'))return {restored:[...body.ids,copy]};
+    return {};
+  });
+  const page=await engine.hiddenFacts('w',{after:null,size:25});
+  assert.equal(calls[0]!.path,'/v3/workspaces/w/nocheh/hidden?size=25');
+  assert.deepEqual(page.facts.map(f=>[f.participant,f.wall,f.copyOf,f.reason]),[['person_a',false,null,'replaced'],['person_a',true,id,'unused']]);
+  assert.deepEqual(await engine.restoreFacts('w',[id]),[id,copy]);
+  assert.deepEqual(calls.at(-1)!.body,{ids:[id]});
+  await assert.rejects(engine.restoreFacts('w',['not-an-id']),/invalid_restore_request/);
+  const odd=fake(()=>({items:[{id,content:'x',observer:'p',observed:'p',reason:'deleted',copied_from:null}],next:null})).engine;
+  await assert.rejects(odd.hiddenFacts('w',{after:null,size:25}),/invalid_honcho_hidden/,'an unknown reason is a broken answer');
 });

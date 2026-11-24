@@ -384,10 +384,11 @@ Off for every chat; a chat or topic sets its own on its Tools card in Chats
 ./bin/nocheh policy set agent.max_iterations 4 --job JOB_ID
 ```
 
-Pass `--revision REVISION` to conditional CLI writes. Native profiles created here
-are owner-private and do not clone credentials. Their rename and removal controls
-preserve managed Telegram bindings; removal retains their directory under
-`retired-profiles` for recovery. Session inspection and changes stay within the
+Pass `--revision REVISION` to conditional CLI writes. Hermes's own Profiles page
+only reads, like its Cron page: making, renaming or retiring a profile there answers
+`profiles_read_only`, since the agent login cannot save profiles in Nocheh
+([ADR-0295](adr/0295-agent-login-replaces-the-master-key-in-hermes.md)). Its
+listing, the active profile and the preference pages stay. Session inspection and changes stay within the
 selected profile. Native file browsing/uploads are confined to that profile's
 workspace, including symlink checks. These workspace files are not chat imports;
 chat attachment capture is part of P4. Native session imports remain gated: use
@@ -757,6 +758,8 @@ not an overlay for the installation Compose file. Assign a unique project/image,
 an unused localhost port, and new random credentials in a private environment file:
 `NOCHEH_FIXTURE_PROJECT`, `NOCHEH_FIXTURE_IMAGE`, `NOCHEH_DASHBOARD_PORT`,
 `POSTGRES_PASSWORD`, and `SERVICE_TOKEN`. Never copy installation credentials.
+The fixture's `AGENT_KEY` is a fixed synthetic value in its Compose file, and it has
+no `NOCHEH_HERMES_SESSION_TOKEN`, since it runs no Hermes.
 The fixture owns its database volume and internal database network; only its
 HTTP preview bridge publishes the chosen loopback port. It has no poller,
 scheduler, provider credentials, or external-effect executor.

@@ -106,15 +106,19 @@ def _copy(source,profile):
         found={}
         for name,session in _cursors(source).items():
             stored=native_store.session_row(old,session)
-            messages=_conversation(native_store.messages(old,session,latest=True,limit=MESSAGES*3))[-MESSAGES:] if stored else []
-            if messages:found[name]=(session,str(stored.get('source') or 'telegram'),messages)
+            window=native_store.messages(old,session,latest=True,limit=MESSAGES*3) if stored else []
+            messages=_conversation(window)[-MESSAGES:]
+            if messages:found[name]=(session,str(stored.get('source') or 'telegram'),messages,window)
     if not found:return 0
     # Isolated turns keep the database in native-state/; a fresh profile starts in that layout.
     if not (profile/'state.db').exists():(profile/'native-state').mkdir(exist_ok=True,mode=0o700)
     copied=0
     with native_store.writer(profile) as new:
-        for name,(session,origin,messages) in found.items():
+        for name,(session,origin,messages,window) in found.items():
             if new.sessions.get(session):continue
+            # What the carried messages read stays with them, or they are not carried (ADR-0293).
+            from .note_sources import carry_reads
+            carry_reads(profile,session,source,session,window)
             new.sessions.create(NewSession(session_id=session,source=origin))
             new.messages.append_batch(session,[NewMessage.from_live(message) for message in messages])
             copied+=len(messages)

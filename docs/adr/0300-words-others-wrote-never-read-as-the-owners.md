@@ -1,4 +1,4 @@
-# ADR-0295: Words others wrote never read as the owner's
+# ADR-0300: Words others wrote never read as the owner's
 
 <status>
 Accepted on 2026-11-24, from the attack test audit. Amends

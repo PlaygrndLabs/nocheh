@@ -14,7 +14,7 @@ class ManagedAsyncTests(unittest.TestCase):
     def setUp(self):
         self.temp=tempfile.TemporaryDirectory();self.root=Path(self.temp.name)
         self.scope=Scope('42','42',True,'owner','42',1)
-        self.admin=SimpleNamespace(root=self.root,model='model',token='fixture-service-token',
+        self.admin=SimpleNamespace(root=self.root,model='model',agent_key='fixture-agent-key-not-a-real-credential',
             profile=lambda name:(name,self.root),binding=lambda name:self.scope,policy=Scopes({'enabled':True},Served.of('42',groups=['-123'],topics=[['-123/topic/7','-123','7']])))
         self.body={'channel':'browser','event_id':'a'*64,'attempt':1,'owner_epoch':2}
         self.context={'event_id':'a'*64,'actor':'run_'+'a'*64,'scope':'42','profile':'owner','conversation':'native-session','owner_epoch':2}
@@ -31,7 +31,7 @@ class ManagedAsyncTests(unittest.TestCase):
                 claims.update(generation='12345678-1234-1234-1234-123456789abc',guard_epoch=self.context['revision'],revision=self.context['revision'],
                     logical_profile=self.context['profile'],space=self.context['space'],scope=None if self.context['scope']=='42' else self.context['scope'])
             encoded=base64.urlsafe_b64encode(json.dumps(claims).encode()).decode().rstrip('=')
-            signature=base64.urlsafe_b64encode(hmac.new(self.admin.token.encode(),encoded.encode(),hashlib.sha256).digest()).decode().rstrip('=')
+            signature=base64.urlsafe_b64encode(hmac.new(b'fixture-pass-signer',encoded.encode(),hashlib.sha256).digest()).decode().rstrip('=')
             return {**body,'claimed':True,'archive_credential':'turn.'+encoded+'.'+signature,'text':'private prompt canary'}
         if route=='prepare':return {'files':[],'transcripts':[]}
         if route=='finish':self.finished=body;self.state=body['state'];return {'state':self.state}

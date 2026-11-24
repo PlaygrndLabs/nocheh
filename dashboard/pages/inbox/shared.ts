@@ -27,7 +27,63 @@ export type Action = {
   resolution?: 'ran' | 'not_run' | 'dismissed' | 'read_closed' | null;
   resolved_at?: string | null;
   created_at: string;
+  /** Why it ran, from the authority Nocheh allowed it under; absent while it waits. */
+  because?: Because | null;
+  /** Who or what asked for it: someone's message, a schedule or a job. */
+  asked?: Because | null;
 };
+/** Why an action ran or who asked for it (ADR-0294), as storage names it. */
+export type Because =
+  | {kind: 'said'; who: 'owner' | 'member'; name: string | null; words: string | null}
+  | {kind: 'approved'}
+  | {
+      kind: 'rule';
+      what: 'site' | 'file' | 'command' | 'tool' | 'exact';
+      target: string | null;
+      chat: string | null;
+      until: string | null;
+    }
+  | {kind: 'setting'; connection: 'gmail' | 'github' | 'notion'}
+  | {kind: 'group_tools'; who: 'owner' | 'member'; name: string | null}
+  | {kind: 'schedule'; name: string | null; words: string | null}
+  | {kind: 'job'; title: string | null};
+const quoted = (text: string) => '“' + text + '”';
+const connectionNames = {gmail: 'Gmail', github: 'GitHub', notion: 'Notion'} as const;
+/** One plain line saying why an action ran, or who asked: "You said “read example.com”", "Your rule: example.com in Sales". */
+export function becauseText(because: Because | null | undefined, chat: (id: string) => string): string {
+  if (!because) return '';
+  switch (because.kind) {
+    case 'said': {
+      const who = because.who === 'owner' ? 'You' : (because.name ?? 'A member');
+      return because.words ? `${who} said ${quoted(because.words)}` : `${who} asked for it`;
+    }
+    case 'approved':
+      return 'You approved its card';
+    case 'rule': {
+      const where = because.chat ? ' in ' + chat(because.chat) : '';
+      if (because.what === 'site') return `Your rule: ${because.target ?? 'this site'}${where}`;
+      if (because.what === 'file')
+        return `Your rule: this file on ${because.target?.split('/')[0] ?? 'a shared site'}${where}`;
+      if (because.what === 'tool') return `Your rule: this tool on ${because.target ?? 'its server'}${where}`;
+      if (because.what === 'command') return `Your rule: this command${where}`;
+      return 'Allowed on an earlier card';
+    }
+    case 'setting':
+      return `Your ${connectionNames[because.connection]} setting`;
+    case 'group_tools':
+      return because.who === 'owner'
+        ? 'You asked in this group'
+        : `${because.name ?? 'A member'}’s group permission for web pages and tools`;
+    case 'schedule': {
+      const name = because.name ? ' ' + quoted(because.name) : '';
+      return because.words
+        ? `Your schedule${name}, set when you said ${quoted(because.words)}`
+        : `Your schedule${name}`;
+    }
+    case 'job':
+      return because.title ? `Your approved job ${quoted(because.title)}` : 'A job you approved';
+  }
+}
 export type Permission = {
   id: string;
   kind: string;

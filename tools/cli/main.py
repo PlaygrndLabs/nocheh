@@ -11,7 +11,7 @@ import sys
 import tempfile
 from pathlib import Path
 
-from tools.operations.installation.configuration import initialize, load, read_env, write_env, generate, env_path, compose_environment, compose_command, github_folders, machine_folder, runtime_folders, DEFAULT_STATE, INSTALLATION_ROOT
+from tools.operations.installation.configuration import initialize, load, read_env, write_env, generate, cut_over, mark_restart, RESTART_MARKER, env_path, compose_environment, compose_command, github_folders, machine_folder, runtime_folders, DEFAULT_STATE, INSTALLATION_ROOT
 from tools.operations.installation.workspaces import WorkspaceError
 
 ROOT = REPO_ROOT
@@ -32,13 +32,19 @@ def build_image(name, env=None, images=None):
 
 
 def development_box_token():
-    """make dev runs on the operating .env without initialize(), so one from before boxes or machines gets its tokens
-    here. Returns the operating workspace's image prefix."""
+    """make dev runs on the operating .env without initialize(), so one from before boxes, machines or the agent login
+    gets its tokens here; the first run without an agent login also makes SERVICE_TOKEN anew (ADR-0295). Returns the
+    operating workspace's image prefix."""
     from tools.development.live_dev import operating_root, operating_config
     from tools.operations.installation.workspaces import images
     root = operating_root(); values = operating_config(root); path = root / '.env'; saved = read_env(path)
-    missing = tuple(name for name in ('NOCHEH_BOX_TOKEN', 'NOCHEH_MACHINE_TOKEN') if not saved.get(name))
+    changed = cut_over(saved)
+    missing = tuple(name for name in ('SERVICE_TOKEN', 'NOCHEH_BOX_TOKEN', 'NOCHEH_MACHINE_TOKEN', 'AGENT_KEY', 'NOCHEH_HERMES_SESSION_TOKEN')
+                    if not saved.get(name))
     if missing: write_env(path, generate(saved, missing))
+    if changed:
+        from tools.operations.installation.settings import carry_applied, carry_keys
+        mark_restart(root / 'data/local'); carry_keys(root / 'data/local', saved); carry_applied(root / 'data/local', values)
     # The launcher's read-only bind of the GitHub copies, nocheh-machines' keys folder and the folders the services
     # mount, such as nocheh-telegram's state and Hermes's two (ADR-0251): made here at 0700, so Docker never makes
     # them as root.
@@ -89,7 +95,9 @@ def run_isolated_tests(rest):
                 if result == 0:
                     result = subprocess.call(['docker', 'run', '--rm', '--network', 'none', '--read-only',
                         '--tmpfs', '/tmp:rw,exec,nosuid,nodev,mode=1777', '--entrypoint', 'python',
-                        '-e', 'HERMES_HOME=/tmp/nocheh-tests', '-e', 'SERVICE_TOKEN=test-service-token',
+                        '-e', 'HERMES_HOME=/tmp/nocheh-tests',
+                        # Hermes holds the agent login and never the master key (ADR-0295); the bot keeps SERVICE_TOKEN.
+                        *(('-e', 'AGENT_KEY=test-agent-key-' + 'a' * 26) if tests == 'services/hermes' else ('-e', 'SERVICE_TOKEN=test-service-token')),
                         env['NOCHEH_IMAGES'] + '-hermes:local', '-m', 'unittest', 'discover', '-s', tests,
                         '-t', '.', '-p', 'test_*.py', '-q'], cwd=ROOT, env=env)
         finally:
@@ -162,7 +170,7 @@ def workspace_command(command, rest):
 
 def main():
     parser = argparse.ArgumentParser(description=__doc__)
-    parser.add_argument("command", choices=("init", "workspace", "workspaces", "update", "up", "dev", "dev-stop", "dev-status", "down", "status", "logs", "build", "test", "verify", "config", "discover-telegram", "configure-telegram", "backup", "restore", "offsite", "diagnose", "db", "dashboard", "jobs", "import", "memory", "honcho", "runtime", "policy", "approvals", "cron", "export", "compatibility", "workflows", "sources", "projects", "learned", "sharing", "organization", "knowledge", "reset", "admin", "deploy", "archive", "security", "security-profiles", "storage"))
+    parser.add_argument("command", choices=("init", "rotate-keys", "workspace", "workspaces", "update", "up", "dev", "dev-stop", "dev-status", "down", "status", "logs", "build", "test", "verify", "config", "discover-telegram", "configure-telegram", "backup", "restore", "offsite", "diagnose", "db", "dashboard", "jobs", "import", "memory", "honcho", "runtime", "policy", "approvals", "cron", "export", "compatibility", "workflows", "sources", "projects", "learned", "sharing", "organization", "knowledge", "reset", "admin", "deploy", "archive", "security", "security-profiles", "storage"))
     args=parser.parse_args(sys.argv[1:2]);rest=sys.argv[2:]
     if args.command == 'admin':
         sys.path.insert(0, str(ROOT))
@@ -249,6 +257,10 @@ def main():
             claimed = claim_folder(fresh)
     except WorkspaceError as error:
         print('nocheh: ' + str(error), file=sys.stderr); return 1
+    if args.command == 'rotate-keys':
+        sys.path.insert(0, str(ROOT))
+        from tools.operations.installation.settings import rotate_keys
+        return rotate_keys(STATE)
     if args.command=='approvals':
         sys.path.insert(0,str(ROOT))
         from tools.operations.security.approvals import main as approvals
@@ -389,6 +401,10 @@ def main():
         # A database viewer left running gets its login (ADR-0251); a problem there is reported and leaves up's result.
         from tools.operations.installation.database_viewer import refresh as refresh_viewer
         refresh_viewer(STATE, command, ROOT)
+        if (STATE / RESTART_MARKER).exists():
+            # The dashboard and executor keep keys they read once; up does not recreate them (ADR-0295).
+            from tools.operations.installation.settings import restart_cached
+            restart_cached(STATE)
 
     return result
 

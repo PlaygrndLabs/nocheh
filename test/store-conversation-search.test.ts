@@ -25,7 +25,7 @@ test('GET /v1/conversations?q finds a chat by any Telegram ID it has had, with i
   const restore=installChatsForTest(fixtureDirectory(groupIds));
   const runtime=async()=>{throw Error('the chat search calls nothing');};
   const s=fixtureServices(stores,{dataDir:root,serviceToken:token,detectorVersion:'fixture',policy:()=>policy,runtime,memoryEngine:honchoEngine(runtime as any)});
-  const settings:Settings={service:'nocheh-app',host:'127.0.0.1',port:0,token,databasePassword:'',storageLayout:'original-only-v1',dataDir:root,
+  const settings:Settings={service:'nocheh-app',host:'127.0.0.1',port:0,token,agentKey:digest('agent:'+token),databasePassword:'',storageLayout:'original-only-v1',dataDir:root,
     hermesUrl:'http://fixture',telegramUrl:'http://fixture',honchoUrl:'http://fixture',honchoEnabled:false,memoryToken:'',guardMode:'on',detectorVersion:'fixture',assistant:policy};
   const server=storageServer(s,settings,runtime as any);
   try {

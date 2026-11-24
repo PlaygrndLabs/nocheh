@@ -80,12 +80,12 @@ REPLY_END='[End of replied-to message]'
 
 
 def service_lookup(event_ids):
-    """Ask storage which recorded turns are retired; only the service token may ask."""
+    """Ask storage which recorded turns are retired; only the agent login may ask."""
     from urllib.request import Request,urlopen
-    from .environment import secret
+    from .environment import agent_key
     request=Request(os.environ.get('ARCHIVE_URL','http://nocheh-app:8780')+'/internal/sources/retired',
         data=json.dumps({'event_ids':list(event_ids)}).encode(),
-        headers={'Authorization':'Bearer '+secret('SERVICE_TOKEN'),'Content-Type':'application/json'})
+        headers={'Authorization':'Bearer '+agent_key(),'Content-Type':'application/json'})
     with urlopen(request,timeout=15) as response:value=json.loads(response.read(1024*1024))
     if (not isinstance(value,dict) or not isinstance(value.get('revision'),str) or not isinstance(value.get('retired'),list)
             or not isinstance(value.get('answered'),dict) or any(not isinstance(replies,list) for replies in value['answered'].values())

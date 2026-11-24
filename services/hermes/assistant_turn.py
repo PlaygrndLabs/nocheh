@@ -416,7 +416,9 @@ def run(body, emit=None, relay=None):
         agent=AIAgent(provider=credentials.provider,api_mode=credentials.api_mode,model=body['model'],
             api_key=credentials.access_token,base_url=credentials.base_url,
             enabled_toolsets=['memory'] if review else MEMBER_READ_TOOLSETS if member_read else (MEMBER_TOOLSETS+['cronjob'] if schedules else MEMBER_TOOLSETS) if member else ANSWER_TOOLSETS if answer else BOX_TOOLSETS if box else MACHINE_TOOLSETS if machine else BACKGROUND_TOOLSETS if background else SCHEDULE_TOOLSETS if schedules else TURN_TOOLSETS,
-            fallback_model=None,
+            # Settings › Models' backup reply model: same provider and broker route, used only when the reply model fails.
+            fallback_model=[{'provider':credentials.provider,'model':body['backup_model'],'base_url':credentials.base_url,
+                             'api_key':credentials.access_token,'api_mode':credentials.api_mode}] if body.get('backup_model') else None,
             session_id=session_id,persistence=database,platform=body.get('channel','telegram'),chat_id=body['chat_id'],
             user_id=body['user_id'],chat_type='dm' if body['owner'] or answer or member or member_read else 'group',
             skip_context_files=True,load_soul_identity=not review,skip_memory=False,skip_background_review=True,

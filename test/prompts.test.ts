@@ -37,7 +37,9 @@ test('turns and calls that run an instruction text carry only the owner’s vali
 });
 
 test('approval card templates leave out a line whose value is missing and keep default texts the owner did not set',()=>{
-  assert.equal(fillTemplate(approvalCard,{destination:'your private chat',origin:null,text:'Hello'}),'📨 Send to your private chat\n\nHello');
+  assert.equal(fillTemplate(approvalCard,{destination:'your private chat',origin:null,asked:null,text:'Hello'}),'📨 Send to your private chat\n\nHello');
+  assert.equal(fillTemplate(approvalCard,{destination:'group “Sales”',origin:'“Ops”',asked:'You said: “post it in Sales”',text:'Hello'}),
+    '📨 Send to group “Sales”\n💬 Asked in “Ops”\n🗣 You said: “post it in Sales”\n\nHello');
   assert.equal(fillTemplate('A {kind}\n\n\n\n{arguments} {unknown}',{kind:'shell',arguments:'{}'}),'A shell\n\n{} {unknown}');
   const lines=approvalLines('sent: Done!\nreject:\nnot a line');
   assert.equal(lines.sent,'Done!');assert.equal(lines.reject,'❌ Reject','an empty line keeps the default');assert.equal(lines.approve,'✅ Approve');

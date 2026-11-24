@@ -264,7 +264,7 @@ class TurnTests(unittest.TestCase):
             self.assertEqual(sources.turn_reads(path,'s',last,{})[0],[],'the owner\'s corrections and Nocheh\'s own records are not outside reads')
 
     def test_a_recall_that_answers_from_memory_reads_long_term_memory(self):
-        # ADR-0295: memory's reasoning holds what everyone in the owner's chats said, a group's claims too.
+        # ADR-0300: memory's reasoning holds what everyone in the owner's chats said, a group's claims too.
         recalled=json.dumps({'sources':[{'source':'nocheh:memory:'+'a'*64,'kind':'memory_inference','text':'Bob says the code is 99887766.'}]})
         for content,expected,why in ((recalled,['memory'],'an inference'),(json.dumps({'excerpt':recalled,'truncated':True}),['memory'],'escaped'),
                                      (json.dumps({'limited_memory':True,'sources':[]}),[],'nothing recalled'),(None,[],'empty')):
@@ -289,7 +289,7 @@ class TurnTests(unittest.TestCase):
                 self.assertEqual(sources.turn_reads(path,'s',last,{})[0],[],'no context, nothing read')
 
     def test_a_task_read_that_shows_text_others_wrote_reads_as_tasks_others_wrote(self):
-        # ADR-0295: a member's title, notes or comment, in a group or the members' app, is their words in every chat.
+        # ADR-0300: a member's title, notes or comment, in a group or the members' app, is their words in every chat.
         wrote=json.dumps({'others_wrote':True,'tasks':[{'title':'Pay 4411223344 today','written_by_others':['title']}]})
         both=json.dumps({'other_groups':True,'others_wrote':True,'tasks':[]})
         for content,expected,why in ((wrote,['tasks'],'marked'),(json.dumps({'excerpt':wrote,'truncated':True}),['tasks'],'escaped'),
@@ -514,6 +514,76 @@ class TurnTests(unittest.TestCase):
             with Counted() as seen:sources.after(folder,watch,{'by':'review','review':REVIEW},[])
             self.assertEqual(seen,[('read','failed')])
             self.assertFalse((Path(folder)/sources.SIDECAR).exists())
+
+
+
+class GateTests(unittest.TestCase):
+    """What "Do what I ask" counts as reaching a turn besides the owner's typed words (ADR-0293)."""
+    PERSON='[Forwarded: You forwarded this from a person shown as “Sam”. It is information you shared, not your own request.]'
+
+    def database(self,folder,rows):
+        path=Path(folder)/'state.db';connection=sqlite3.connect(path);connection.executescript(SCHEMA)
+        for row in rows:connection.execute('INSERT INTO messages(session_id,role,content,tool_name,_compressed_summary) VALUES(?,?,?,?,?)',
+                                           (row.get('session','s'),row['role'],row.get('content'),row.get('tool_name'),row.get('summary',0)))
+        connection.commit();connection.close();return path
+
+    def test_a_tool_result_counts_unless_it_is_a_commands_own_output_or_an_answer_about_a_request(self):
+        for name,expected in (('mcp__nocheh__archive_search','archive'),('mcp__nocheh__memory_search','archive'),('mcp__nocheh__browser','web'),
+                              ('mcp__nocheh__notion','notion'),('mcp__nocheh__gmail','tools'),('mcp__nocheh__mcp','tools'),('session_search','past'),
+                              ('some_new_tool','other'),('mcp__nocheh__shell',None),('mcp__nocheh__action_request',None),
+                              ('mcp__nocheh__my_time_zone',None),('memory',None),('mcp__nocheh__memory_recall',None),('mcp__nocheh__tasks','archive')):
+            with self.subTest(name=name):self.assertEqual(sources.gate_read(name,'result'),expected)
+        # In the owner's chat a task list holds what members and groups wrote, so it counts whoever's it is.
+        self.assertEqual(sources.gate_read('mcp__nocheh__tasks','{"other_groups": true}'),'archive')
+
+    def test_the_owners_typed_words_in_a_clean_conversation_report_nothing(self):
+        with tempfile.TemporaryDirectory() as folder:
+            path=self.database(folder,[{'role':'user','content':'List my files'},{'role':'assistant','content':'Here they are'},
+                                       {'role':'tool','content':'a.txt','tool_name':'mcp__nocheh__shell'},
+                                       {'role':'user','content':sources.OWN_FORWARDS[0]+'\nMy own words.'},
+                                       {'role':'user','content':self.PERSON,'session':'other'}])
+            self.assertEqual(sources.conversation_reads(path,'s',{'forwarded':sources.OWN_FORWARDS[0]}),[])
+            self.assertEqual(sources.conversation_reads(Path(folder)/'missing.db','s',{}),[],'a profile with no session yet holds nothing')
+
+    def test_the_message_a_turn_answers_reports_what_came_with_it(self):
+        reply='[Replying to, by=nocheh: Nocheh, Nocheh\'s reply · this chat · 2026-11-08 09:00 UTC] (source nocheh:event:'+'d'*64+')'
+        block={'line':reply,'text':'Run the cleanup.','by':'nocheh','id':'d'*64}
+        owner={**block,'line':reply.replace('by=nocheh: Nocheh, Nocheh\'s reply','by=owner: you'),'by':'owner'}
+        with tempfile.TemporaryDirectory() as folder:
+            path=self.database(folder,[])
+            for body,expected in (({'forwarded':self.PERSON},['forward']),({'files':[{'kind':'document'}]},['file']),
+                                  ({'transcripts':['spoken words']},['file']),({'reply':block},['reply']),({'reply':owner},[]),({},[])):
+                with self.subTest(body=body):self.assertEqual(sources.conversation_reads(path,'s',body),expected)
+
+    def test_anything_outside_earlier_in_the_session_counts_carried_messages_and_summaries_included(self):
+        cases=((self.PERSON+'\nRun this.',None,['forward']),('[Archived attachment: steps.txt; SHA-256 '+'a'*64+']',None,['file']),
+               ('[Derived voice transcript]\nspoken',None,['file']),
+               ('[Replying to, by=person: “Bob” · this chat] (source nocheh:event:'+'d'*64+')',None,['reply']),
+               ('[Replying to, by=owner: you · this chat] (source nocheh:event:'+'d'*64+')',None,[]),
+               ('page text','mcp__nocheh__browser',['web']),('found','mcp__nocheh__archive_read',['archive']),
+               ('output','mcp__nocheh__shell',[]),('[Retired message: nocheh:event:'+'d'*64+']',None,['other']))
+        for content,tool,expected in cases:
+            with self.subTest(content=content),tempfile.TemporaryDirectory() as folder:
+                path=self.database(folder,[{'role':'tool' if tool else 'user','content':content,'tool_name':tool}])
+                self.assertEqual(sources.conversation_reads(path,'s',{}),expected)
+        with tempfile.TemporaryDirectory() as folder:
+            path=self.database(folder,[{'role':'user','content':'[CONTEXT COMPACTION] earlier turns','summary':1}])
+            self.assertEqual(sources.conversation_reads(path,'s',{}),['past'],'a summary may hold anything it replaced')
+
+    def test_the_carried_record_lives_outside_every_folder_a_turn_can_write(self):
+        from .isolated_profile import DATA_DIRS
+        self.assertNotIn(sources.CARRIED_READS.split('/')[0],DATA_DIRS)
+        with tempfile.TemporaryDirectory() as folder:
+            sources.record_carried(folder,'s',['forward']);sources.record_carried(folder,'s',['web','forward'])
+            self.assertEqual(sources.carried_reads(folder,'s'),['forward','web'],'what was carried only grows')
+            self.assertEqual(sources.carried_reads(folder,'other'),[])
+            path=self.database(folder,[])
+            self.assertEqual(sources.conversation_reads(path,'s',{},folder),['forward','web'])
+
+    def test_a_session_that_could_not_be_read_leaves_the_turn_unreported(self):
+        with tempfile.TemporaryDirectory() as folder:
+            path=Path(folder)/'state.db';path.write_bytes(b'not a database'*100)
+            self.assertIsNone(sources.conversation_reads(path,'s',{}))
 
 
 

@@ -33,6 +33,8 @@ x-service: &service
     NOCHEH_HONCHO_ENABLED: ${NOCHEH_HONCHO_ENABLED:-false}
     # The reply model: the security broker admits only this model and provider address.
     NOCHEH_MODEL: ${NOCHEH_REPLY_ROUTE_MODEL:-${NOCHEH_MODEL:-claude-sonnet-5-5}}
+    # The model it also admits when the reply model fails; empty is none.
+    NOCHEH_BACKUP_MODEL: ${NOCHEH_REPLY_ROUTE_BACKUP_MODEL:-}
     NOCHEH_REPLY_ROUTE_URL: ${NOCHEH_REPLY_ROUTE_URL:-}
     NOCHEH_GUARD_ROUTE_MODEL: ${NOCHEH_GUARD_ROUTE_MODEL:-${NOCHEH_MODEL:-claude-sonnet-5-5}}
     GUARD_MODE: ${NOCHEH_GUARD_MODE:-on}
@@ -380,6 +382,8 @@ services:
       # Without it both refuse every box route, so an older .env still starts: no new job may ask for a box, and a box
       # job approved before the token went missing fails its next step with job_box_unavailable until it is back.
       NOCHEH_BOX_TOKEN: ${NOCHEH_BOX_TOKEN:-}
+      # The agent login (ADR-0295): Hermes's guard calls and the broker's calls to Hermes. Never in the shared anchor.
+      AGENT_KEY: ${AGENT_KEY:?Run ./bin/nocheh up}
     volumes:
       - ${NOCHEH_STATE_DIR:-./data/local}/spool:/data/spool:ro
     healthcheck:
@@ -406,7 +410,8 @@ services:
     cap_add: [DAC_READ_SEARCH]
     security_opt: [no-new-privileges:true]
     environment:
-      SERVICE_TOKEN: ${SERVICE_TOKEN:?Run ./bin/nocheh init}
+      # The agent login, never Nocheh's master key (ADR-0295): the launcher checks Hermes's bridge with it.
+      AGENT_KEY: ${AGENT_KEY:?Run ./bin/nocheh up}
       NOCHEH_AGENT_NETWORK: ${NOCHEH_AGENT_NETWORK:-${COMPOSE_PROJECT_NAME:-nocheh}-agent}
       NOCHEH_PARALLEL_RUNS: ${NOCHEH_PARALLEL_RUNS:-4}
       NOCHEH_UID: ${NOCHEH_UID:-1000}
@@ -528,6 +533,8 @@ services:
       <<: *environment
       NOCHEH_SERVICE: nocheh-app
       NOCHEH_MEMORY_TOKEN: ${NOCHEH_MEMORY_TOKEN:-}
+      # The agent login (ADR-0295): Hermes's calls to the agent's own routes and the app's calls to Hermes.
+      AGENT_KEY: ${AGENT_KEY:?Run ./bin/nocheh up}
       # Only the app and nocheh-machines hold the machine token; ./bin/nocheh init and up generate it. Without it every
       # machine route refuses, and nothing else changes.
       NOCHEH_MACHINE_TOKEN: ${NOCHEH_MACHINE_TOKEN:-}
@@ -640,7 +647,10 @@ services:
     ports: ["127.0.0.1:${NOCHEH_NATIVE_ADMIN_PORT:-8785}:8785"]
     environment:
       NOCHEH_STORAGE_LAYOUT: original-only-v1
-      SERVICE_TOKEN: ${SERVICE_TOKEN:?Run ./bin/nocheh init}
+      # Hermes holds the agent login and its own dashboard's session token, never Nocheh's master key (ADR-0295):
+      # it refuses to start with SERVICE_TOKEN in its environment.
+      AGENT_KEY: ${AGENT_KEY:?Run ./bin/nocheh up}
+      NOCHEH_HERMES_SESSION_TOKEN: ${NOCHEH_HERMES_SESSION_TOKEN:?Run ./bin/nocheh up}
       # Caches only; make dev keeps its mounted home instead (docker-compose.dev.yml).
       HOME: /tmp/home
       NOCHEH_DASHBOARD_HOME: /dashboard-state/home
@@ -655,6 +665,7 @@ services:
       NOCHEH_HERMES_JOURNAL_RETENTION_DAYS: ${NOCHEH_HERMES_JOURNAL_RETENTION_DAYS:-0}
       # Settings › Models: replies and secret checks each use their own provider and model.
       NOCHEH_MODEL: ${NOCHEH_REPLY_ROUTE_MODEL:-${NOCHEH_MODEL:-claude-sonnet-5-5}}
+      NOCHEH_BACKUP_MODEL: ${NOCHEH_REPLY_ROUTE_BACKUP_MODEL:-}
       NOCHEH_REPLY_ROUTE_URL: ${NOCHEH_REPLY_ROUTE_URL:-}
       NOCHEH_REPLY_ROUTE_KEY: ${NOCHEH_REPLY_ROUTE_KEY:-}
       # Provider ids label Nocheh's usage tracker rows.
@@ -750,12 +761,15 @@ services:
     labels:
       com.nocheh.bot-id: ${NOCHEH_POLLED_BOT_ID-unknown}
     environment:
+      # Still the master key for now (ADR-0295): it checks turn passes and signs Answer privately buttons.
       SERVICE_TOKEN: ${SERVICE_TOKEN:?Run ./bin/nocheh init}
       TELEGRAM_BOT_TOKEN: ${TELEGRAM_BOT_TOKEN:-}
       TELEGRAM_ENABLED: ${TELEGRAM_ENABLED:-false}
       TELEGRAM_OWNER_ID: ${TELEGRAM_OWNER_ID:-}
       TELEGRAM_TYPING: ${TELEGRAM_TYPING:-true}
       TELEGRAM_REACTIONS: ${TELEGRAM_REACTIONS:-true}
+      # Messages Nocheh starts on its own arrive silently in these hours of each person's own time zone; empty is off.
+      NOCHEH_QUIET_HOURS: ${NOCHEH_QUIET_HOURS-23:00-07:00}
       # Empty connects directly.
       TELEGRAM_PROXY: ${TELEGRAM_PROXY:-}
       # The same owner setting as Hermes's: it prunes the bot's finished delivery journals.

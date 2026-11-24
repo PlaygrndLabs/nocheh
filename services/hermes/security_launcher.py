@@ -22,9 +22,11 @@ from pathlib import Path
 from urllib.parse import quote
 from urllib.request import Request,build_opener,ProxyHandler
 from .isolated_profile import DATA_DIRS,DATA_FILES
-from .environment import parallel
+from .environment import parallel,agent_key,refuse_master_key
 
 CONFIGURATION=('config.yaml','SOUL.md','skills')
+# The agent login Hermes's bridge sends; read once by main() (ADR-0295). Unset, every turn is refused.
+AGENT_KEY=''
 BOX_NAME=re.compile(r'nocheh-box-[a-f0-9]{24}')
 def security_url():return os.environ.get('NOCHEH_SECURITY_URL') or 'http://nocheh-security:8786'
 def agent_network():return os.environ.get('NOCHEH_AGENT_NETWORK','nocheh-agent')
@@ -578,8 +580,8 @@ class Handler(BaseHTTPRequestHandler):
         if self.path!='/health':self.send_error(404);return
         self.send_response(200);self.end_headers();self.wfile.write(b'{"ok":true,"service":"security-launcher"}')
     def do_POST(self):
-        secret=os.environ['SERVICE_TOKEN']
-        if self.path!='/v1/turn' or not hmac.compare_digest(self.headers.get('Authorization','').encode(),('Bearer '+secret).encode()):
+        secret=AGENT_KEY
+        if self.path!='/v1/turn' or not secret or not hmac.compare_digest(self.headers.get('Authorization','').encode(),('Bearer '+secret).encode()):
             self.send_error(403);return
         if not SLOTS.acquire(blocking=False):self.send_error(503);return
         identifier=None;profile=None;reserved=False;job=None;closed=threading.Event();killed=threading.Event();started=time.monotonic()
@@ -604,6 +606,8 @@ class Handler(BaseHTTPRequestHandler):
             from .security_transport import scoped_transport
             body.update(scoped_transport(credential,body['api_mode']))
             body['model_context_length']=binding['model_context_length']
+            # The backup reply model comes from the binding only, so a turn cannot name one the broker refuses.
+            body['backup_model']=binding.get('backup_model') or None
             box=None
             if boxed:
                 # Without its box the turn stops with job_box_unavailable before its agent runs.
@@ -664,6 +668,10 @@ def repo_problems(mounted):
     return ['the GitHub copies folder is not mounted at '+REPO_COPIES+' (./bin/nocheh up adds it)']
 
 def main():
+    global AGENT_KEY
+    refuse_master_key()
+    try:AGENT_KEY=agent_key()
+    except ValueError as error:raise SystemExit(str(error)+'; run ./bin/nocheh up') from None
     network=agent_network();limit=box_limit()
     description=docker('GET','/networks/'+network)
     if description.get('Internal') is not True:raise RuntimeError('internal_network_required')

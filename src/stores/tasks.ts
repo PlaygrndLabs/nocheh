@@ -975,7 +975,7 @@ export class TaskRepository {
    * project's groups, so nothing is marked. A task with no group label never marks.
    * In every chat, each task shown whose title or notes a person other than the owner last wrote, in a group or in the
    * members' app, or that shows a comment a member wrote, lists those parts in `written_by_others`, and the answer is
-   * marked `others_wrote: true`: their words, never the owner's, even in the owner's private chat or brief (ADR-0295).
+   * marked `others_wrote: true`: their words, never the owner's, even in the owner's private chat or brief (ADR-0300).
    */
   private async marked<T>(turn:Turn,answer:T):Promise<T> {
     if(!answer||typeof answer!=='object')return answer;

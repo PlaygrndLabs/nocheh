@@ -3,9 +3,8 @@ import {githubReposHere} from './github-lookups.js';
 import {createServer} from 'node:http';
 import {randomUUID} from 'node:crypto';
 import {join} from 'node:path';
-import {admin,boundReader,currentReader} from '../access.js';
+import {admin,agentLogin,boundReader,currentReader} from '../access.js';
 import {ownerChat,telegramDeliveryAllowed} from '../assistant-policy.js';
-import {servedChats} from '../chats.js';
 import {telegramAddress} from '../frontdoor/telegram.js';
 import {canonical,digest,envelope} from '../archive.js';
 import type {Settings} from '../config.js';
@@ -53,10 +52,13 @@ import {assertMachineRunRoute} from './machine-reads.js';
 import {lookupTurn} from './scheduled-lookups.js';
 import {ownerRecallAllowed,withRecallPlaces} from './recall-places.js';
 import {memberAssistant,memberPrivate,readSetGroups} from '../spaces.js';
+import {ownerTimeZone} from './task-settings.js';
 import {noticeAuthorizeRequest,type NoticeAuthorizeResponse} from '../notice-authorize.js';
 import {authorizeNotice} from './task-reminder-delivery.js';
 import type {hostTransport} from '../workflows/host-transport.js';
 import {MEMBER_APP_CORE_PREFIX} from '../member-app-wire.js';
+import {backgroundOperation,internalChats,noteSources,retiredSources,runtimeProfiles,schedulerOperation,serveAgent} from './agent-routes.js';
+import {conversationReads,isTurnRead,recordTurnReads} from './turn-reads.js';
 
 /** No legacy pool, schema initialization, cross-store SQL or fallback route. */
 export function storageServer(s:StorageServices,config:Settings,call:RuntimeCall,status:()=>unknown=()=>({}),transport?:ReturnType<typeof hostTransport>,capabilities:Readonly<Record<string,boolean>>={}) {
@@ -72,6 +74,8 @@ export function storageServer(s:StorageServices,config:Settings,call:RuntimeCall
     if(path.startsWith('/v1/browser/'))throw new HttpError(404,'browser_chat_off');
     assertStorageActive(config.dataDir);
     if(transport?.handle(req,res))return;
+    // The agent login reaches only the routes Hermes calls, before any other route or reader (ADR-0295).
+    const login=agentLogin(req,config.agentKey);if(login)return serveAgent(s,config,login,req,res,url);
     if(req.method==='POST'&&path==='/internal/actions/authorize') {
       authorize(req,config.token);await assertGuardConfiguration(s.guards,config.guardMode);await s.configuration.assert(config.assistant);
       return json(res,200,await s.telegramActions.authorizeDelivery(await readJson(req)));
@@ -85,14 +89,35 @@ export function storageServer(s:StorageServices,config:Settings,call:RuntimeCall
       const allowed=await authorizeNotice(s.stores.control,request,await currentChats())||await authorizeScheduleNotice(s.stores.control,request);
       return json(res,200,{allowed} satisfies NoticeAuthorizeResponse);
     }
+    if(req.method==='GET'&&path==='/internal/quiet-hours') {
+      // nocheh-telegram asks whose private chat keeps which time zone, for quiet hours: the owner's task time zone,
+      // and each active member's own, else the owner's. Groups have none, so nothing there is ever held quiet.
+      authorize(req,config.token);
+      const owner=s.access.policy().owner_id,zone=await ownerTimeZone(s.stores.control),zones:Record<string,string>={};
+      const members=(await s.stores.control.query<{external_id:string;time_zone:string|null}>(`SELECT a.external_id,m.time_zone FROM members m
+        JOIN chat_accounts a ON a.member_id=m.id WHERE m.state='active' AND m.private_chat AND a.kind='human' ORDER BY a.external_id LIMIT 10000`)).rows;
+      for(const row of members)zones[row.external_id]=row.time_zone??zone;
+      if(owner)zones[owner]=zone;
+      return json(res,200,{zones});
+    }
+    if(req.method==='POST'&&path==='/internal/spending-pause') {
+      // The dashboard's spending check (ADR-0298): the month the monthly limit was reached, or null once it is not.
+      // The security service reads it before each model call.
+      authorize(req,config.token);
+      const month=object(await readJson(req,1024)).month;
+      if(month!==null&&(typeof month!=='string'||!/^\d{4}-\d{2}$/.test(month)))throw new HttpError(400,'invalid_spending_pause');
+      if(month===null)await s.stores.control.query('DELETE FROM spending_pause');
+      else await s.stores.control.query(`INSERT INTO spending_pause(singleton,month) VALUES(true,$1)
+        ON CONFLICT(singleton) DO UPDATE SET month=EXCLUDED.month,updated_at=now()`,[month]);
+      return json(res,200,{month});
+    }
     if(req.method==='GET'&&path==='/internal/chats') {
       // What the Python services may act for (ADR-0252): the served chats with their topics, and the owner's private
       // chat apart from the owner's account; and each member's own private chat that is open now, marked member_private
       // so the bot takes a member pass only there (step 4). A member change moves no epoch: the bot reads this list
       // again when it is old or misses a chat, and storage checks every member pass again anyway.
-      authorize(req,config.token);const owner=s.access.policy().owner_id,directory=await currentChats();
       // A member's chat whose member has Personal assistant on is marked member_assistant too: their schedules run there.
-      return json(res,200,servedChats(directory,owner?{app:'telegram',external:owner}:null,id=>memberPrivate(id,directory),id=>memberAssistant(id,directory)));
+      authorize(req,config.token);return json(res,200,await internalChats(s));
     }
     if(req.method==='POST'&&path==='/internal/chats/leave') {
       // The bot asks right before Nocheh leaves a group (ADR-0253): is it still pending from this add?
@@ -101,15 +126,12 @@ export function storageServer(s:StorageServices,config:Settings,call:RuntimeCall
     }
     if(req.method==='POST'&&path==='/internal/sources/retired') {
       // Hermes withholds retired turns from its own native history before each turn.
-      authorize(req,config.token);const ids=object(await readJson(req,64*1024)).event_ids;
-      if(!Array.isArray(ids)||ids.length>500||ids.some(id=>typeof id!=='string'||!/^[a-f0-9]{64}$/.test(id)))throw new HttpError(400,'invalid_event_ids');
-      return json(res,200,await s.retirements.historyRetirements(ids as string[]));
+      authorize(req,config.token);return json(res,200,await retiredSources(s,req));
     }
     if(req.method==='POST'&&path==='/internal/notes/sources') {
       // Hermes asks where its notes came from before each turn and review (ADR-0257). The labels name groups only as
       // Nocheh saved them and are never let through beforehand, so the request guard still reads them.
-      authorize(req,config.token);
-      return json(res,200,await s.noteSources.lookup(await readJson(req,256*1024)));
+      authorize(req,config.token);return json(res,200,await noteSources(s,req));
     }
     if(req.method==='POST'&&path==='/internal/memory/prepare') {
       if(!config.memoryToken)throw new HttpError(503,'memory_gateway_unconfigured');authorize(req,config.memoryToken);
@@ -265,9 +287,7 @@ export function storageServer(s:StorageServices,config:Settings,call:RuntimeCall
     }
     if(await owner.handle(principal,req,res,url))return;
     if(path==='/v1/runtime/profiles'||path==='/v1/runtime/profiles/resolve') {
-      admin(principal);await assertGuardConfiguration(s.guards,config.guardMode);await s.configuration.assert(config.assistant);
-      if(req.method==='GET'&&path==='/v1/runtime/profiles')return json(res,200,await s.runtimeProfiles.list(principal));
-      if(req.method==='POST')return json(res,200,await (path.endsWith('/resolve')?s.runtimeProfiles.resolve(principal,await readJson(req)):s.runtimeProfiles.save(principal,await readJson(req))));
+      admin(principal);const value=await runtimeProfiles(s,config,principal,req,path);if(value!==undefined)return json(res,200,value);
     }
     if(req.method==='POST'&&path==='/v1/agent/manage') {
       // Owner management of the agent's own state (ADR-0234): each action maps to an agent operation, never a native path.
@@ -293,34 +313,14 @@ export function storageServer(s:StorageServices,config:Settings,call:RuntimeCall
       return json(res,200,operation==='readNotes'?await s.noteSources.withOwnerLabels(value,ids=>s.originals.originals(ids)):value);
     }
     if(req.method==='POST'&&path.startsWith('/v1/scheduler/')) {
-      admin(principal);const body=object(await readJson(req,2*1024*1024)),operation=path.slice('/v1/scheduler/'.length);
-      if(operation==='finish')return json(res,200,await s.scheduled.finish(body));
-      await assertGuardConfiguration(s.guards,config.guardMode);await s.configuration.assert(config.assistant);
-      if(operation==='definition')return json(res,200,await s.schedules.definition(principal,body));
-      if(operation==='input')return json(res,200,await s.schedules.capture(principal,body));
-      if(operation==='workflow-context')return json(res,200,await s.scheduled.context(body));
-      if(operation==='claim')return json(res,200,await s.scheduled.claim(body));
-      if(operation==='prepare')return json(res,200,await s.scheduled.prepare(body));
-      if(operation==='heartbeat')return json(res,200,await s.scheduled.heartbeat(body));
-      if(operation==='observe')return json(res,200,await s.scheduled.observe(body));
-      if(operation==='cancel')return json(res,200,await s.scheduled.cancel(body));
-      if(operation==='recover')return json(res,200,await s.scheduled.recoverExpired());
-      if(operation==='runs')return json(res,200,await s.scheduled.history(body));
       // Ownership, delivery and a new schedule's message are Nocheh's own now: it delivers after run() and announces from
-      // the turn route (ADR-0290).
-      throw new HttpError(404,'not_found');
+      // the turn route (ADR-0290), so those answer 404.
+      admin(principal);const body=object(await readJson(req,2*1024*1024));
+      return json(res,200,await schedulerOperation(s,config,principal,path.slice('/v1/scheduler/'.length),body));
     }
     if(req.method==='POST'&&path.startsWith('/v1/background/')) {
-      admin(principal);const body=object(await readJson(req,2*1024*1024)),operation=path.slice('/v1/background/'.length),runs=s.jobs.runs;
-      if(operation==='finish')return json(res,200,await runs.finish(body));
-      if(operation==='cancel')return json(res,200,await runs.cancel(body));
-      if(operation==='observe')return json(res,200,await runs.observe(body));
-      await assertGuardConfiguration(s.guards,config.guardMode);await s.configuration.assert(config.assistant);
-      if(operation==='workflow-context')return json(res,200,await runs.context(body));
-      if(operation==='claim')return json(res,200,await runs.claim(body));
-      if(operation==='prepare')return json(res,200,await runs.prepare(body));
-      if(operation==='heartbeat')return json(res,200,await runs.heartbeat(body));
-      throw new HttpError(404,'not_found');
+      admin(principal);const body=object(await readJson(req,2*1024*1024));
+      return json(res,200,await backgroundOperation(s,config,path.slice('/v1/background/'.length),body));
     }
     if(await ownerSecurityRoute(s.stores.control,principal,req,res,url,{separated:true,preview:input=>s.controlledActions.preview(principal,input)}))return;
     if(path==='/v1/workflows'||path.startsWith('/v1/workflows/')) {
@@ -420,7 +420,10 @@ export function storageServer(s:StorageServices,config:Settings,call:RuntimeCall
     }
     if(path==='/v1/tools/actions'&&req.method==='GET') {
       if(!principal.admin)return result({telegram:await s.telegramActions.recent(principal),actions:await s.controlledActions.recent(principal)},true);
-      admin(principal);return json(res,200,{...await s.controlledActions.list(principal),telegram:await s.telegramActions.list(principal)});
+      admin(principal);const listed=await s.controlledActions.list(principal),telegram=await s.telegramActions.list(principal);
+      // Each decided action says why it ran and who asked (ADR-0294).
+      const why=(table:'controlled'|'telegram')=>async(action:any)=>action.state==='proposed'?action:{...action,...await s.actionBecause.describe(table,action.id)};
+      return json(res,200,{...listed,actions:await Promise.all(listed.actions.map(why('controlled'))),telegram:await Promise.all(telegram.map(why('telegram')))});
     }
     if(path==='/v1/tools/telegram-decision'&&req.method==='POST') {
       admin(principal);const outcome=await s.telegramActions.decide(principal,await readJson(req));
@@ -440,7 +443,21 @@ export function storageServer(s:StorageServices,config:Settings,call:RuntimeCall
     }
     if(path==='/v1/context/prepare'&&req.method==='POST') {
       if(principal.admin)throw new HttpError(403,'scoped_turn_required');await s.turns.binding(principal);
-      return result(await readJson(req,1024*1024));
+      // A tool result the agent's runtime is about to hand the model names what it read, which is kept before the model
+      // sees it: a command later in the turn then asks first (ADR-0293).
+      const read=url.searchParams.get('read'),input=await readJson(req,1024*1024);
+      if(read!==null) {
+        if(!isTurnRead(read))throw new HttpError(400,'invalid_turn_reads');
+        if(principal.turnEvent&&/^[a-f0-9]{64}$/.test(principal.turnEvent))await recordTurnReads(s.stores.control,principal,'turn',[read]);
+      }
+      return result(input);
+    }
+    // What the conversation a turn runs in holds besides the owner's typed words, from the agent's runtime before the
+    // model starts (ADR-0293). A turn it never reported counts as outside.
+    if(path==='/v1/turn/conversation-reads'&&req.method==='POST') {
+      if(principal.admin)throw new HttpError(403,'scoped_turn_required');await s.turns.binding(principal);
+      await recordTurnReads(s.stores.control,principal,'conversation',conversationReads(await readJson(req)));
+      return json(res,200,{recorded:true});
     }
     if(path==='/v1/memory/check'&&req.method==='GET'){
       const source=principal.turnEvent?(await s.stores.archive.query('SELECT origin,channel,kind,scope,payload FROM events WHERE id=$1',[principal.turnEvent])).rows[0]??null:null;
@@ -453,6 +470,8 @@ export function storageServer(s:StorageServices,config:Settings,call:RuntimeCall
     if(req.method==='GET'&&path==='/v1/memory/longterm/coverage')return json(res,200,await s.memoryDashboard.coverage(principal));
     if(req.method==='GET'&&path==='/v1/memory/facts')return json(res,200,await s.memoryDashboard.facts(principal,{chat:url.searchParams.get('chat')??'',
       person:url.searchParams.get('person')??'',after:url.searchParams.get('after')??''}));
+    if(req.method==='GET'&&path==='/v1/memory/hidden')return json(res,200,await s.memoryDashboard.hidden(principal,url.searchParams.get('after')??''));
+    if(req.method==='POST'&&path==='/v1/memory/hidden/restore')return json(res,200,await s.memoryDashboard.restore(principal,await readJson(req)));
     if(req.method==='GET'&&path==='/v1/memory/originals')return json(res,200,await s.originals.lookup(principal,url.searchParams.getAll('id')));
     // A message's facts are asked of long-term memory itself, so they sit outside Messages' live paths (/events/).
     if(req.method==='GET'&&path==='/v1/memory/message-facts')return json(res,200,await s.memoryDashboard.learned(principal,url.searchParams.get('id')??''));
