@@ -706,6 +706,9 @@ const messagesFixture=(()=>{
   return false;
  };
 })();
+// The unused-facts rule (ADR-0299): off, with use tracked for the last 40 days.
+let cleanUp:{hide_unused_days:number|null;tracking_since:string;starts_at:string|null;swept_at:string|null;last_hidden:number|null;revision:number}=
+  {hide_unused_days:null,tracking_since:new Date(Date.now()-40*86400000).toISOString(),starts_at:null,swept_at:null,last_hidden:null,revision:0};
 // Facts a clean-up hid (ADR-0298): kept, and brought back from Memory › Long-term › Facts.
 const hiddenFacts:{id:string;text:string;about:string|null;where:'everywhere'|'group';reason:'replaced'|'unused';hidden_at:string|null;learned_at:string}[]=[
   {id:'h'.repeat(20)+'1',text:'Works at the old studio downtown.',about:'Sam Rivera',where:'everywhere',reason:'replaced',hidden_at:'2026-11-20T09:12:00Z',learned_at:'2026-03-02T10:00:00Z'},
@@ -759,6 +762,7 @@ const sourcesFixture=(()=>{
    json(res,200,learned.get(source)??{facts:[],reason:'not_learned'});return true;}
   if(route==='/memory/longterm/coverage'){json(res,200,{coverage:{total:515,exact:412,with_others:96,none:7}});return true;}
   if(route==='/memory/hidden'){json(res,200,{facts:hiddenFacts,next:null});return true;}
+  if(route==='/memory/clean-up'){json(res,200,cleanUp);return true;}
   if(route==='/memory/facts'){const chat=url.searchParams.get('chat')??'',person=url.searchParams.get('person')??'';
    json(res,200,{facts:facts.filter(f=>(!chat||f.chat===chat||parentSpace(f.chat)===chat)&&(!person||f.person===person)).map(f=>f.fact),next:null});return true;}
   if(route==='/memory/originals'){const asked=url.searchParams.getAll('id');if(!asked.length||asked.length>50||asked.some(item=>!/^[a-f0-9]{64}$/.test(item)))throw new HttpError(400,'invalid_originals_request');
@@ -1126,6 +1130,12 @@ const server=createServer((req,res)=>{void(async()=>{
    if(!String(body.name??'').trim()||!Array.isArray(body.scopes)||!body.scopes.length)throw new HttpError(400,'invalid_organization_delegation');
    const saved=prior??{id:randomUUID().replace(/-/g,'').repeat(2),baseline_suspended:[]};Object.assign(saved,{name:String(body.name).trim(),enabled:body.enabled,scopes:body.scopes,project_ids:body.project_ids,expires_at:body.expires_at??null,revision:(prior?.revision??0)+1,
     baseline_suspended:(saved.baseline_suspended??[]).filter((s:string)=>!(body.resume_scopes??[]).includes(s))});if(!prior)delegations.push(saved);return json(res,200,delegationView(saved));}
+  if(route==='/memory/clean-up'){const days=body.hide_unused_days;
+    if(!(days===null||Number.isSafeInteger(days)&&days>=30&&days<=3650))throw new HttpError(400,'invalid_clean_up_request');
+    if(body.expected_revision!==cleanUp.revision)throw new HttpError(409,'clean_up_revision_conflict');
+    cleanUp={...cleanUp,hide_unused_days:days,starts_at:days===null?null:new Date(Date.parse(cleanUp.tracking_since)+days*86400000).toISOString(),
+      swept_at:null,revision:cleanUp.revision+1};
+    return json(res,200,cleanUp);}
   if(route==='/memory/hidden/restore'){const asked:string[]=Array.isArray(body.ids)?body.ids:[];
     if(!asked.length||asked.length>50)throw new HttpError(400,'invalid_restore_request');
     const restored=hiddenFacts.filter(f=>asked.includes(f.id)).map(f=>f.id);

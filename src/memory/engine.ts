@@ -98,6 +98,11 @@ export type MemoryEngine={
   hiddenFacts?(space:string,options:{after:string|null;size:number}):Promise<{facts:HiddenFact[];next:string|null}>;
   /** Bring hidden facts back, with their wall copies; answers the ids that came back. */
   restoreFacts?(space:string,ids:readonly string[]):Promise<string[]>;
+  /** A reply read these facts (ADR-0299); the engine keeps each fact's last use. */
+  markUsed?(space:string,ids:readonly string[]):Promise<void>;
+  /** Hide, as unused, up to `limit` facts (with their wall copies) that nothing learned, read or said again since `before`;
+   *  answers how many rows it hid. */
+  hideUnused?(space:string,before:Date,limit:number):Promise<number>;
 
   // Corrections and deletions, one bounded step per call.
   /** Delete facts learned from a session, then the session itself. */

@@ -39,6 +39,8 @@ const transport=process.env.INNGEST_SIGNING_KEY?hostTransport(process.env.INNGES
 const server=storageServer(services,config,call,()=>({...capture.status(),workflows:workflows.state()}),transport,adapter.capabilities);
 transport?.attach(server);
 // Long-term memory is on by default once its engine's service (Honcho) is enabled; an owner's own attach or detach stands.
+// The unused-facts rule checks hourly and sweeps at most once a day (ADR-0299); a restored, inactive install never runs it.
+const stopCleanUp=services.memoryDashboard.startCleanUp(()=>!restoredInactive(config.dataDir));
 if(config.honchoEnabled)void services.memory.attachByDefault().catch(error=>console.warn(JSON.stringify({event:'memory_default_attach_failed',code:error?.code??'unknown'})));
 // The members' app's own listener (ADR-0265 D3): only /v1/member-app/*, reached by nocheh-miniapp alone.
 // A member's own schedules go through the same agent operation as the owner's Schedules page (members' schedules).
@@ -50,7 +52,7 @@ server.listen(config.port,config.host,()=>console.log(JSON.stringify({event:'rea
 let stopping=false;
 for(const signal of ['SIGINT','SIGTERM'])process.on(signal,()=>{
   if(stopping)return;stopping=true;
-  transport?.close();stopChatRecords();
+  transport?.close();stopChatRecords();stopCleanUp();
   const closed=Promise.all([new Promise<void>(resolve=>server.close(()=>resolve())),new Promise<void>(resolve=>memberApp.close(()=>resolve()))]);
   void Promise.all([closed,capture.stop(),workflows.close()]).then(()=>pools.close()).catch(()=>{process.exitCode=1;});
 });
