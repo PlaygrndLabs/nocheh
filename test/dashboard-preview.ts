@@ -1094,10 +1094,10 @@ const server=createServer((req,res)=>{void(async()=>{
   const taskChange=route.match(/^\/tasks\/([a-f0-9]{64})(?:\/(comments|delete))?$/);
   if(taskChange)return json(res,200,await (taskChange[2]==='comments'?tasks.comment(taskOwner,taskChange[1]!,body):taskChange[2]==='delete'?tasks.remove(taskOwner,taskChange[1]!)
     :tasks.update(taskOwner,taskChange[1]!,body)));
-  if(route==='/projects'){if(Object.keys(body).some(key=>!['id','name','description','state','share_chats','expected_revision','operation_id'].includes(key)))throw new HttpError(400,'unknown_policy_field');
+  if(route==='/projects'){if(Object.keys(body).some(key=>!['id','name','description','state','share_chats','own_groups','expected_revision','operation_id'].includes(key)))throw new HttpError(400,'unknown_policy_field');
    const prior=body.id?memoryProjects.find(p=>p.id===body.id):null;if((prior?.revision??0)!==body.expected_revision)throw new HttpError(409,'project_revision_conflict');
    if(!String(body.name??'').trim()||!['active','archived'].includes(body.state))throw new HttpError(400,'invalid_project');
-   const saved=prior??{id:randomUUID().replace(/-/g,'').repeat(2)};Object.assign(saved,{name:String(body.name).trim(),description:String(body.description??''),state:body.state,share_chats:typeof body.share_chats==='boolean'?body.share_chats:prior?.share_chats??true,revision:(prior?.revision??0)+1});if(!prior)memoryProjects.push(saved);return json(res,200,saved);}
+   const saved=prior??{id:randomUUID().replace(/-/g,'').repeat(2)};Object.assign(saved,{name:String(body.name).trim(),description:String(body.description??''),state:body.state,share_chats:typeof body.share_chats==='boolean'?body.share_chats:prior?.share_chats??true,own_groups:Array.isArray(body.own_groups)?[...body.own_groups].sort():prior?.own_groups??[],revision:(prior?.revision??0)+1});if(!prior)memoryProjects.push(saved);return json(res,200,saved);}
   if(route==='/organization/delegations'){if(Object.keys(body).some(key=>!['id','name','enabled','scopes','project_ids','expires_at','expected_revision','operation_id','resume_scopes'].includes(key)))throw new HttpError(400,'unknown_knowledge_field');
    const prior=body.id?delegations.find(d=>d.id===body.id):null;if((prior?.revision??0)!==body.expected_revision)throw new HttpError(409,'organization_delegation_changed');
    if(!String(body.name??'').trim()||!Array.isArray(body.scopes)||!body.scopes.length)throw new HttpError(400,'invalid_organization_delegation');

@@ -135,7 +135,7 @@ for(const family of families)test(`a project writes no sharing rule between its 
     for(const extra of [{sharing_enabled:true},{sharing_enabled:false},{sharing_mode:'filtered'}])
       await assert.rejects(projects.save(owner,{...fields,...extra,operation_id:op('box')}),{code:'unknown_policy_field'},JSON.stringify(extra));
     const before=await rules(),project=await projects.save(owner,{...fields,operation_id:op('new')});
-    assert.deepEqual(Object.keys(project).sort(),['description','id','name','revision','share_chats','state']);
+    assert.deepEqual(Object.keys(project).sort(),['description','id','name','own_groups','revision','share_chats','state']);
     assert.equal(project.share_chats,true,'a new project shares its group chats (ADR-0267)');
     const other=await projects.save(owner,{...fields,name:'P2',operation_id:op('other')});
     for(const space of [group,second,unserved])await assign(space,'assigned',project.id);

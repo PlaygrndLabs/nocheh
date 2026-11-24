@@ -1652,23 +1652,72 @@ test('moving a task into a project’s list names the chats that will see it fir
   await page.close();
 });
 
-test('a project shares its group chats only by its switch, and a group joins one only after seeing the groups already there', async () => {
-  // No box makes groups share (ADR-0247); the project's "Share group chats" switch does, on by default (ADR-0267).
+test('a project ticks the groups that share memory, and a group joins one only after seeing the groups already there', async () => {
+  // No box on a group makes groups share (ADR-0247); the project's tick list does, every group ticked by default
+  // (ADR-0267, ADR-0287). The list and the save are answered here, so the fixture's own project is left as it was.
+  const tickPage = await browser.newPage({viewport: {width: 1440, height: 900}});
+  const saves = [];
+  let saved = {share_chats: true, own_groups: []};
+  await tickPage.route(/\/api\/nocheh\/projects\?after=$/, async route => {
+    const real = await (await route.fetch()).json();
+    for (const project of real.projects)
+      if (project.id === 'ab'.repeat(32)) Object.assign(project, {groups: ['-10042', '-10073'], ...saved});
+    await route.fulfill({status: 200, contentType: 'application/json', body: JSON.stringify(real)});
+  });
+  await tickPage.route(/\/api\/nocheh\/projects\/(ab)+\/context$/, async route => {
+    const real = await (await route.fetch()).json();
+    Object.assign(real.project, saved);
+    await route.fulfill({status: 200, contentType: 'application/json', body: JSON.stringify(real)});
+  });
+  await tickPage.route(/\/api\/nocheh\/projects$/, async route => {
+    if (route.request().method() !== 'POST') return route.fallback();
+    const body = route.request().postDataJSON();
+    saves.push(body);
+    saved = {share_chats: body.share_chats, own_groups: body.own_groups};
+    await route.fulfill({
+      status: 200,
+      contentType: 'application/json',
+      body: JSON.stringify({...body, revision: body.expected_revision + 1}),
+    });
+  });
+  await tickPage.goto(origin + '/#memory?view=projects&project=' + 'ab'.repeat(32));
+  const tickDrawer = tickPage.getByRole('dialog', {name: 'Aurora field guide'});
+  await tickDrawer.getByText('All groups share memory').waitFor();
+  await tickDrawer.getByRole('button', {name: 'Edit'}).click();
+  const tickDialog = tickPage.getByRole('dialog', {name: 'Edit project'});
+  const shares = tickDialog.getByRole('group', {name: 'Groups that share memory'});
+  await shares.getByText('Aurora planning + Weekend notes share one memory.', {exact: false}).waitFor();
+  assert.equal(await shares.getByRole('checkbox', {name: 'Aurora planning'}).isChecked(), true);
+  // Unticking a group leaves it its own; with one ticked, no group shares.
+  await shares.getByRole('checkbox', {name: 'Weekend notes'}).uncheck();
+  await shares.getByText('No groups share. Each group reads only its own chat.').waitFor();
+  await shares.getByRole('button', {name: 'Tick all'}).click();
+  assert.equal(await shares.getByRole('checkbox', {checked: true}).count(), 2);
+  await shares.getByRole('checkbox', {name: 'Weekend notes'}).uncheck();
+  await tickDialog.getByRole('button', {name: 'Save'}).click();
+  await tickDialog.waitFor({state: 'detached'});
+  assert.deepEqual(
+    saves.map(body => [body.share_chats, body.own_groups]),
+    [[true, ['-10073']]],
+  );
+  await tickDrawer.getByText('Groups don’t share memory').waitFor();
+  await tickDrawer.getByRole('listitem').filter({hasText: 'Aurora planning'}).getByText('Own memory only').waitFor();
+  // Clearing every tick turns sharing off.
+  await tickDrawer.getByRole('button', {name: 'Edit'}).click();
+  await shares.getByRole('button', {name: 'Clear'}).click();
+  assert.equal(await shares.getByRole('checkbox', {checked: true}).count(), 0);
+  await tickDialog.getByRole('button', {name: 'Save'}).click();
+  await tickDialog.waitFor({state: 'detached'});
+  assert.deepEqual(saves.at(-1).share_chats, false);
+  assert.deepEqual(saves.at(-1).own_groups, []);
+  await tickPage.close();
+
   const {page, problems} = await open('memory?view=projects&project=' + 'ab'.repeat(32));
   const drawer = page.getByRole('dialog', {name: 'Aurora field guide'});
   await drawer.getByRole('button', {name: 'Edit'}).click();
   const dialog = page.getByRole('dialog', {name: 'Edit project'});
-  await dialog.getByText('Put only related groups in one project; keep family groups out of projects.').waitFor();
-  assert.equal(await dialog.getByRole('checkbox').count(), 0, 'no box makes a project share');
-  const share = dialog.getByRole('switch', {name: 'Share group chats'});
-  assert.equal(await share.getAttribute('aria-checked'), 'true', 'the project shares its group chats');
-  await share.click();
-  // Off keeps knowledge apart, never tasks: a project's tasks stay one list for all its groups (ADR-0276).
-  await dialog
-    .getByText(
-      'Off: an answer in a group uses only what that group knows. The project’s tasks are still one list for all its groups.',
-    )
-    .waitFor();
+  await dialog.getByLabel('Name').waitFor();
+  assert.equal(await dialog.getByRole('checkbox').count(), 0, 'one group has nothing to share with');
   await dialog.getByRole('button', {name: 'Cancel'}).click();
   await dialog.waitFor({state: 'detached'});
   assert.equal(await page.getByText('Shares', {exact: true}).count(), 0);
@@ -1689,7 +1738,7 @@ test('a project shares its group chats only by its switch, and a group joins one
     'Already in Aurora field guide',
     'Everyone in these groups, members or not, can see answers built from all of them.',
     'Put only related groups in one project',
-    'members or not, will see every task on the list of Aurora field guide, whatever “Share group chats” says. Members can change them where they may write tasks.',
+    'members or not, will see every task on the list of Aurora field guide, whatever “Groups that share memory” says. Members can change them where they may write tasks.',
   ].map(part => text.indexOf(part));
   assert.ok(
     order.every((at, index) => at >= 0 && (!index || at > order[index - 1])),
@@ -1943,7 +1992,7 @@ test('a project shares its group chats only by its switch, and a group joins one
     .getByText('Everyone in these groups, members or not, can see answers built from all of them.', {exact: false})
     .waitFor();
   await turnOn
-    .getByText('will see every task on the list of Aurora field guide, whatever “Share group chats” says', {
+    .getByText('will see every task on the list of Aurora field guide, whatever “Groups that share memory” says', {
       exact: false,
     })
     .waitFor();

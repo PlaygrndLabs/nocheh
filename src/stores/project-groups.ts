@@ -31,19 +31,20 @@ export async function projectGroups(db:Database,projectId:string,served:readonly
 }
 
 /**
- * The groups a served group reads while its project shares its group chats (ADR-0267): the project's groups
- * (projectGroupsSql), the asking group among them, when `group` is a group Nocheh serves assigned to an active project
- * whose "Share group chats" is on and which has at least one other served group. Null otherwise: a group in no
- * project, in an archived project or in one that does not share, a project with no other served group, a topic, a
- * private chat and any id with no chat row read only themselves. `served` is servedGroups().
+ * The groups a served group reads while its project shares its group chats (ADR-0267): the project's ticked groups
+ * (projectGroupsSql less the project's `own_groups`, ADR-0287), the asking group among them, when `group` is a group
+ * Nocheh serves, ticked, assigned to an active project whose "Share group chats" is on and which has at least one other
+ * ticked served group. Null otherwise: a group in no project, in an archived project or in one that does not share, an
+ * unticked group, a project with no other ticked served group, a topic, a private chat and any id with no chat row read
+ * only themselves. `served` is servedGroups().
  */
 export async function sharedProjectGroups(db:Database,group:string,served:readonly string[]):Promise<{project:string;groups:string[]}|null> {
   const groups=[...new Set(served)].filter(groupChatId);
   if(!groupChatId(group)||!groups.includes(group))return null;
-  const row=(await db.query<{project:string;groups:string[]}>(`SELECT p.id AS project,${projectGroupsSql('p.id','$2')} AS groups
+  const row=(await db.query<{project:string;groups:string[];own_groups:string[]}>(`SELECT p.id AS project,p.own_groups,${projectGroupsSql('p.id','$2')} AS groups
     FROM project_assignments a JOIN projects p ON p.id=a.project_id AND p.state='active' AND p.share_chats
     WHERE a.space_id=$1 AND a.mode='assigned'`,[group,groups])).rows[0];
-  const found=(row?.groups??[]).filter(groupChatId);
+  const found=(row?.groups??[]).filter(member=>groupChatId(member)&&!row!.own_groups.includes(member));
   return row&&found.includes(group)&&found.length>1?{project:row.project,groups:found}:null;
 }
 

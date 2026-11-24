@@ -110,7 +110,7 @@ test('owner HTTP manages versions, provenance, corrections, project assignments 
     assert.equal((await request(guardPath+'/revisions/'+guard.active_revision)).content.text,'Generated reading');
 
     const project=await request('/v1/projects',{name:key,description:'Synthetic',state:'active',expected_revision:0,operation_id:key+':project'});
-    assert.deepEqual(Object.keys(project).sort(),['description','id','name','revision','share_chats','state'],'a project has no share box, only Share group chats');
+    assert.deepEqual(Object.keys(project).sort(),['description','id','name','own_groups','revision','share_chats','state'],'a project has no share box, only Share group chats');
     assert.equal(project.share_chats,true,'a new project shares its group chats (ADR-0267)');
     for(const extra of [{sharing_enabled:false},{sharing_mode:'filtered'}])
       assert.deepEqual(await request('/v1/projects',{name:key+':box',description:'',state:'active',...extra,expected_revision:0,operation_id:key+':box:'+Object.keys(extra)[0]},400),

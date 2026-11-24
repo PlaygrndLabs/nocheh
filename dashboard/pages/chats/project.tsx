@@ -26,6 +26,8 @@ export type Project = {
   groups?: string[];
   /** "Share group chats": its groups read each other (ADR-0267). */
   share_chats?: boolean;
+  /** The groups left unticked in "Groups that share memory" (ADR-0287). */
+  own_groups?: string[];
   revision?: number;
 };
 type Assignment = {
@@ -373,7 +375,11 @@ function GroupProject({chat, served}: {chat: Chat; served: boolean}) {
                     .filter(group => group !== space)
                     .map(names),
                 )}{' '}
-                {projectNote((choices.find(project => project.id === data.project!.id) ?? data.project).share_chats)}
+                {projectNote(
+                  ((found: Project) => found.share_chats !== false && !(found.own_groups ?? []).includes(space))(
+                    choices.find(project => project.id === data.project!.id) ?? data.project,
+                  ),
+                )}
               </p>
             )}
           </div>
