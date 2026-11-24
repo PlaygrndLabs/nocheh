@@ -127,6 +127,10 @@ before(async () => {
 });
 
 after(async () => {
+  // A page a test left open may still have a route reading its answer; closing the browser under it fails after the end.
+  for (const context of browser?.contexts() ?? []) {
+    for (const page of context.pages()) await page.unrouteAll({behavior: 'ignoreErrors'});
+  }
   await browser?.close();
   server?.kill();
 });

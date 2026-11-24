@@ -3,5 +3,11 @@
   "load": {},
   "node": {},
   "browser": {},
-  "python": {}
+  "python": {},
+  "upstream": {
+    "honcho :: tests/integration/test_lifecycle_tenants.py::test_liveness_exists_uses_tenant_led_parent_indexes": {
+      "reason": "Honcho's tests expect Postgres 15's query plan for a multi-tenant liveness check; Postgres 18 picks a hashed subplan. Nocheh runs Honcho with one tenant.",
+      "since": "2026-11-24"
+    }
+  }
 }

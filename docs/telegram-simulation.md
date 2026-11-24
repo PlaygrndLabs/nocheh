@@ -209,6 +209,15 @@ not fail the run; any other failure does, and a listed test that passes again is
 named so it comes off the list. GitHub runs it on every pull request and on main
 (`.github/workflows/checks.yml`), with synthetic data and no secrets.
 
+Before an upgrade of Hermes or Honcho goes live, `check_all --setup --only upstream`
+runs their own tests at the pinned revisions on Nocheh's Python and Postgres
+versions (`tools/development/upstream_tests.py`): Honcho's whole pytest suite on a
+synthetic Postgres 18 with pgvector (`NOCHEH_CHECK_VECTOR_PGPORT`), and the Hermes
+test files for the Hermes modules Nocheh's plugins import, plus its storage,
+contract, cron and memory-plugin folders. The upstream sources are downloaded at
+run time and never committed. GitHub runs it on pull requests that move a pin
+(`.github/workflows/upgrade-checks.yml`).
+
 After a repair, rerun affected behavior and adjacent contracts. Integrate verified
 increments under the shared Git lock without activating the operating services.
 Carry unrelated evidence forward with its original revision and limitations.
@@ -388,7 +397,12 @@ machine pass `--build`: the development stack runs its own source-watched
 images, so the installation's `:local` images can be older than the checkout.
 `--build` builds the checkout's services, management, store, Hermes and box images
 under `:tester` tags, refreshes the browser image, and tests those; the live
-tags are never rebuilt. Honcho keeps the installation's pinned image. Scripted answers
+tags are never rebuilt. `--upgrade` checks an upgrade instead: the copy starts on
+the installation's own images, the scenarios fill it, then the checkout's images
+replace them in place. Every table's rows in each store and Hermes state.db, and
+the kept files, must still be there, and each chat must still have its history.
+When the Honcho pin moved and its image is built (`nocheh-honcho:<revision>`), the
+upgrade moves Honcho to it too. Otherwise Honcho keeps the installation's pinned image. Scripted answers
 test Nocheh's wiring and rules, not model judgement; Telegram's official test
 environment is a later step.
 
