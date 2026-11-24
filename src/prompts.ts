@@ -458,12 +458,12 @@ export const scheduleNoticeTexts=['set: ⏰ New schedule: {name}','set_changed: 
   'held: ⏸ Saved paused, because the reply that set it read {reads}. Check what it does, then press Start.',
   'waiting: ⏸ Saved paused. Press Start to run it.',
   'read_forward: a forwarded message','read_file: a file','read_reply: a message you replied to','read_web: a web page',
-  'read_tools: an outside tool such as Gmail or Notion','read_other: content from outside this chat','read_and: and',
+  'read_tools: an outside tool such as Gmail or Notion','read_archive: a search of past messages, which can find other people\'s','read_other: content from outside this chat','read_and: and',
   'pause: ⏸ Pause','start: ▶️ Start','delete: 🗑 Delete','paused: ⏸ Paused. Resume it on the Schedules page.','started: ▶️ Started.','deleted: 🗑 Deleted.',
   'unnamed: a schedule','no_next: none','changed: This schedule changed or is gone. See the Schedules page.','only_owner: Only the owner can do this.',
   'quiet: ✅ {name}: ran now, nothing new right now.'].join('\n');
 export type ScheduleNoticeText='set'|'set_changed'|'when'|'next'|'does'|'note'|'held'|'waiting'|'read_forward'|'read_file'|'read_reply'|'read_web'|
-  'read_tools'|'read_other'|'read_and'|'pause'|'start'|'delete'|'paused'|'started'|'deleted'|'unnamed'|'no_next'|'changed'|'only_owner'|'quiet';
+  'read_tools'|'read_archive'|'read_other'|'read_and'|'pause'|'start'|'delete'|'paused'|'started'|'deleted'|'unnamed'|'no_next'|'changed'|'only_owner'|'quiet';
 /** The schedule notice lines, with any line the owner removed or left empty, or stored without a value it must keep, taken
  * from the default. */
 export function scheduleNoticeLines(text:string|undefined):Record<ScheduleNoticeText,string> {

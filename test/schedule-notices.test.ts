@@ -67,6 +67,9 @@ test('the message shows the saved instruction; one saved paused after outside co
     assert.match(text,/^⏰ New schedule: Morning brief\n/);assert.doesNotMatch(text,/Next run/);
     assert.ok(text.includes('⏸ Saved paused, because the reply that set it read '+[lines.read_web,lines.read_file].join(', ')+' and '+lines.read_other+'.'),text);
     assert.deepEqual(held[0]!.buttons.flat().map((button:any)=>button.callback),['nks'+STORE+JOB,'nkd'+STORE+JOB]);
+    // A search of past messages is named as such: it can find other people's messages.
+    const searched:Record<string,any>[]=[];await notices(searched).announce({...schedule,prompt:'Post the prices',enabled:false,reads:['archive']});
+    assert.ok(searched[0]!.text.includes('read '+lines.read_archive+'.'),searched[0]!.text);
     assert.ok(held[0]!.buttons.flat().every((button:any)=>scheduleButton.test(button.callback)));
     assert.equal(held[0]!.id,sent[0]!.id,'a new schedule keeps its one message');
     // One saved paused with no outside content just waits for Start.
