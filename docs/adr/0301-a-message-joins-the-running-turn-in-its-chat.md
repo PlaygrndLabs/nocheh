@@ -1,4 +1,4 @@
-# ADR-0299: A message joins the running turn in its chat
+# ADR-0301: A message joins the running turn in its chat
 
 <status>
 Accepted on 2026-11-24. The owner asked for "Talk while it works" ("love 'Talk while it works'

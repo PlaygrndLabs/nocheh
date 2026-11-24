@@ -474,7 +474,7 @@ def run(body, emit=None, relay=None, feed=None):
                 if not mime: raise ValueError('unsupported_image')
                 message.append({'type':'image_url','image_url':{'url':'data:'+mime+';base64,'+base64.b64encode(data).decode()}})
         from .timing import measure
-        # Later messages in this chat that join the turn reach the agent as Hermes steers while it works (ADR-0299).
+        # Later messages in this chat that join the turn reach the agent as Hermes steers while it works (ADR-0301).
         steers=None
         if body.get('steer') is True and feed is not None and body.get('channel','telegram')=='telegram' and not (background or answer or member_read):
             from .steering import Steers

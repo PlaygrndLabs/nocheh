@@ -19,14 +19,14 @@ Nocheh is in development mode and not yet released. Everything below is built an
   durable workflows; data tools reach the agent over Nocheh's MCP server.
 - Chats: groups reply only when addressed and capture every message and file from everyone
   ([ADR-0264](docs/adr/0264-groups-are-read-whole-from-everyone.md)); held messages are all answered; reactions show progress. A message
-  sent while the agent works joins its running turn ([ADR-0299](docs/adr/0299-a-message-joins-the-running-turn-in-its-chat.md)).
+  sent while the agent works joins its running turn ([ADR-0301](docs/adr/0301-a-message-joins-the-running-turn-in-its-chat.md)).
 - Members: owner-added members use their joined groups and their own private chat; in a group
   Nocheh answers from that group only; the mini app is English only (members steps 1 to 5,
   [ADR-0242](docs/adr/0242-private-chats-stay-out-of-group-sharing.md) to [ADR-0265](docs/adr/0265-member-mini-app.md)).
 - Workspaces: several installs run side by side on one machine ([ADR-0245](docs/adr/0245-several-workspaces-on-one-machine.md)).
 - Memory: fact sources and People pages ([ADR-0261](docs/adr/0261-recalled-facts-and-search-hits-name-their-source.md)); memory search stays on
   `text-embedding-3-small` until the owner picks another model ([ADR-0181](docs/adr/0181-memory-search-model-change-rebuilds-memory.md)); a group's recall, search and learning read
-  through a memory wall that only holds its own chats ([ADR-0286](docs/adr/0286-memory-walls.md)); "Retire old facts" (Honcho dreams) is an owner setting, off by default, and keeps retired facts hidden with "Bring back" ([ADR-0298](docs/adr/0298-retire-old-facts.md)); each project ticks which of its groups share memory ([ADR-0287](docs/adr/0287-projects-tick-the-groups-that-share-memory.md)).
+  through a memory wall that only holds its own chats ([ADR-0286](docs/adr/0286-memory-walls.md)); "Retire old facts" (Honcho dreams) is an owner setting, off by default, and keeps retired facts hidden with "Bring back" ([ADR-0298](docs/adr/0298-retire-old-facts.md)), and so is "Hide unused facts" after a set number of days ([ADR-0299](docs/adr/0299-hide-unused-facts.md)); each project ticks which of its groups share memory ([ADR-0287](docs/adr/0287-projects-tick-the-groups-that-share-memory.md)).
 - People: the name the owner sets in Memory › People is the person's name everywhere, and each
   person has a private note only the owner reads
   ([ADR-0274](docs/adr/0274-people-names-everywhere-and-private-notes.md)). Honcho 3.6.2 reads
@@ -83,7 +83,8 @@ Owner steps:
 - Machine jobs: the owner's own Stop test on the connected VM.
 
 Checks and follow-ups:
-- Retire old facts ([ADR-0298](docs/adr/0298-retire-old-facts.md)): untried live. Once the owner turns it on, check the first dreams' cost on Usage, that the learning queue keeps up, and that a retired fact shows under Hidden facts and comes back. Next: an owner rule, off by default, that hides facts no reply read and no chat said again for a set number of days (e.g. 180).
+- Retire old facts ([ADR-0298](docs/adr/0298-retire-old-facts.md)): untried live. Once the owner turns it on, check the first dreams' cost on Usage, that the learning queue keeps up, and that a retired fact shows under Hidden facts and comes back.
+- Hide unused facts ([ADR-0299](docs/adr/0299-hide-unused-facts.md)): untried live. Use is tracked from the first start with it, so the rule hides nothing for its first set number of days. Once it runs, check the "Last check" count and that the facts it hid show under Hidden facts.
 - Security fixes part 2 ([ADR-0251](docs/adr/0251-fixes-that-lose-nothing.md)): about a week after install, check `./bin/nocheh diagnose`
   for `hermes_page_script_reports` (none) and a passing tester run, then switch the Hermes page
   script policy from Report-Only to enforced in one commit. Later: one shared name cleaner for
@@ -92,7 +93,7 @@ Checks and follow-ups:
   one live check on the owner's install with the setting on: a typed command runs, and the same command after a
   forward in that day's conversation shows its card with the reason line.
 - Development startup order: a full tester run of `project_groups_stay_apart` alone.
-- Talk while it works ([ADR-0299](docs/adr/0299-a-message-joins-the-running-turn-in-its-chat.md)): a live check on the owner's install, two messages
+- Talk while it works ([ADR-0301](docs/adr/0301-a-message-joins-the-running-turn-in-its-chat.md)): a live check on the owner's install, two messages
   in a row while the agent uses a tool, after the merge.
 - A project's tasks are one list ([ADR-0276](docs/adr/0276-a-projects-tasks-are-one-list.md)): a full tester run of
   `project_groups_stay_apart`, `member_private_chat_reads_joined_groups`, `member_app_tasks`,

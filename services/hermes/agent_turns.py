@@ -211,7 +211,7 @@ class AgentTurns:
         # running private turn therefore holds no group, so the owner's and other members' turns there go on; Nocheh
         # still sends a group's replies in arrival order. One order for every turn, so no two turns wait on each other.
         lane,space=claims.get('lane'),scope.space or scope.chat_id
-        # Talk while it works (ADR-0299): a plain message from the same person in the same conversation joins the turn
+        # Talk while it works (ADR-0301): a plain message from the same person in the same conversation joins the turn
         # running in its first lane, and the agent answers both in one reply; one the agent did not read runs on its own.
         steer=self._steer(scope,claims,body,answer,member_read)
         async with self._lane('lane:'+lane if lane else space,arrival,steer) as (joined,steering):
@@ -223,7 +223,7 @@ class AgentTurns:
 
     @staticmethod
     def _steer(scope,claims,body,answer,member_read):
-        """Who a turn is, for joining (ADR-0299): its whole checked scope and its lane, so a message joins only a turn of
+        """Who a turn is, for joining (ADR-0301): its whole checked scope and its lane, so a message joins only a turn of
         the same person in the same conversation with the same rights; and, when it may join one, its ticket and its text
         as the agent reads a message. Only plain Telegram messages take part: never a private answer, an ask about a
         member, an approval's follow-up or a fixed reply. A message with a photo, or one of the questions a turn answers

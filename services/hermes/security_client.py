@@ -10,7 +10,7 @@ LAUNCHER='http://hermes-agent-sb:8787'
 
 
 def forward_steers(feed,credential,nonce):
-    """Messages that join the running turn (ADR-0299), one stdin line each after the request, go to the launcher in
+    """Messages that join the running turn (ADR-0301), one stdin line each after the request, go to the launcher in
     order; it hands them to this turn's container only. One it cannot take is dropped, and its message runs on its own."""
     while True:
         try:line=feed.line()

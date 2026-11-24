@@ -110,7 +110,7 @@ def schedule_store(binding,boxed,machine,root=Path('/profiles')):
     return logical
 
 class Inlet:
-    """Messages that join a running turn (ADR-0299), for its container's stdin after the request, in the order they came.
+    """Messages that join a running turn (ADR-0301), for its container's stdin after the request, in the order they came.
     Ones that come before the turn's container is attached wait for it; after the turn, none is taken."""
     def __init__(self,nonce):self.nonce,self.lock,self.sock,self.waiting,self.closed=nonce,threading.Lock(),None,[],False
 
@@ -616,7 +616,7 @@ class Handler(BaseHTTPRequestHandler):
         if self.path!='/health':self.send_error(404);return
         self.send_response(200);self.end_headers();self.wfile.write(b'{"ok":true,"service":"security-launcher"}')
     def steer(self):
-        """A message that joins the running turn of the pass's profile (ADR-0299), for that turn only: the turn's nonce must
+        """A message that joins the running turn of the pass's profile (ADR-0301), for that turn only: the turn's nonce must
         match. Refused when no such turn runs, and its message then runs on its own."""
         try:
             length=int(self.headers.get('Content-Length','0'))

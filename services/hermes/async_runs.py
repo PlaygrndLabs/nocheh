@@ -12,7 +12,7 @@ CLOSED={'done','failed','ambiguous','suppressed','cancelled'}
 STAGES={'admission','assistant','delivery'}
 CODES={'model_unavailable','assistant_runtime_unavailable','runtime_restart_during_dispatch','unsupported_message',
        'delivery_unconfirmed','dispatch_interrupted','space_policy_changed','guard_context_changed','runtime_execution_interrupted','intentional_silence','telegram_rejected','not_addressed',
-       # A message the running turn of its chat read and answered (ADR-0299).
+       # A message the running turn of its chat read and answered (ADR-0301).
        'joined_turn',
        # A turn's own refusals keep their cause; otherwise a permanent fault reads as a bare failure.
        'unexpected_profile_tool','required_guard_unavailable','profile_scope_denied','invalid_process_scope_binding','unsupported_memory_compaction_revision','provider_not_configured',
