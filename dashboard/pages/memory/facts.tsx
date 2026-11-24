@@ -3,6 +3,7 @@
  * and conventions), and correcting or retiring any of it.
  */
 import {useEffect, useState} from 'react';
+import {HideUnusedCard} from './retire-old-facts';
 import {Lightbulb, Search} from 'lucide-react';
 import {useParam} from '../../lib/navigation';
 import {setParams} from '../../lib/routes';
@@ -203,6 +204,11 @@ export function Facts() {
           }
         />
       </Card>
+
+      {/* Nocheh's rule for long-term memory's facts (ADR-0299). */}
+      <div className="mt-5">
+        <HideUnusedCard />
+      </div>
 
       <FactDrawer
         id={entry}

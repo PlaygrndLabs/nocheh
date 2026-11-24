@@ -238,6 +238,15 @@ export class HonchoEngine implements MemoryEngine {
     if(!Array.isArray(found?.restored)||found.restored.some((id:unknown)=>!nativeId(id)))throw new HttpError(502,'invalid_honcho_restore');
     return found.restored as string[];
   }
+  async markUsed(space:string,ids:readonly string[]) {
+    const wanted=[...new Set(ids)].filter(nativeId);
+    for(let start=0;start<wanted.length;start+=200)await this.call(this.base(space)+'/nocheh/used',{ids:wanted.slice(start,start+200)});
+  }
+  async hideUnused(space:string,before:Date,limit:number) {
+    const found=await this.call(this.base(space)+'/nocheh/hide-unused',{before:before.toISOString(),limit});
+    if(!Number.isSafeInteger(found?.hidden)||found.hidden<0)throw new HttpError(502,'invalid_honcho_hide_unused');
+    return found.hidden as number;
+  }
   /** Honcho deletes a workspace only once its sessions are gone. */
   async forgetSpace(space:string):Promise<ForgetStep> {
     const found=await this.call(this.base(space)+'/sessions/list?page=1&size=100',{});
