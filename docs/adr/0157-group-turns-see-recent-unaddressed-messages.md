@@ -4,7 +4,8 @@
 Accepted on 2026-10-19 after release test 1 on the owner's installation: in
 the test group the owner wrote "Anyone up for lunch tomorrow?" without
 addressing Nocheh, then replied to Nocheh with "What did I just ask the
-group?", and Nocheh quoted an older question addressed to it instead.
+group?", and Nocheh quoted an older question addressed to it instead. On
+2026-11-24 the owner widened the window from 12 to 24 hours.
 </status>
 
 <context>
@@ -19,7 +20,7 @@ and is not a record of what was just said.
 - A group or topic turn carries the group messages captured in the same
   conversation space since the last turn there: messages suppressed as
   `not_addressed` or from members who may not talk to Nocheh
-  (`conversation_not_selected`), at most 20, from the last 12 hours, oldest
+  (`conversation_not_selected`), at most 20, from the last 24 hours, oldest
   first. Album parts are skipped; any other dispatch outcome is the previous
   turn and ends the list.
 - Each message is the guarded copy this conversation may read, at most 1,000
@@ -39,6 +40,6 @@ and is not a record of what was just said.
   message's text in the turn is replaced by a notice naming its id, and that
   turn's tool calls, tool results and notes are withheld with it, while the
   turn's own message and its delivered answer stay.
-- Messages older than 12 hours or beyond the last 20 since the previous turn
+- Messages older than 24 hours or beyond the last 20 since the previous turn
   reach a reply only through archive search or Honcho memory.
 </consequences>

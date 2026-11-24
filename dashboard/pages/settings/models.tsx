@@ -19,7 +19,7 @@ type Listing = {models: string[]; url?: string; error?: string; loading?: boolea
 
 const PRESET_KEY: Record<string, string> = {openai: 'OPENAI_API_KEY', anthropic: 'ANTHROPIC_API_KEY'};
 const PART_TEXT: Record<string, {title: string; hint: string}> = {
-  reply: {title: 'Replies', hint: 'Writes every answer in Telegram and the browser chat.'},
+  reply: {title: 'Replies', hint: 'Writes every answer in Telegram.'},
   memory: {title: 'Memory', hint: 'Learns from messages and answers questions about what Nocheh remembers.'},
   guard: {
     title: 'Secret check',

@@ -19,8 +19,7 @@ def pin_check(root=ROOT):
     checks={}
     for path in ('deploy/hermes.Dockerfile','src/managed-runs.ts'):
         checks[path]=pinned['revision'] in (root/path).read_text()
-    for path in ('services/hermes/native_admin.py','services/hermes/browser_gateway.py'):
-        checks[path]=pinned['version'] in (root/path).read_text()
+    checks['services/hermes/native_admin.py']=pinned['version'] in (root/'services/hermes/native_admin.py').read_text()
     # The image's install stamp carries this release to Hermes' own version surfaces.
     checks['deploy/hermes.Dockerfile']=checks['deploy/hermes.Dockerfile'] and \
         'ARG HERMES_VERSION='+pinned['version']+'\n' in (root/'deploy/hermes.Dockerfile').read_text()

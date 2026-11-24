@@ -777,7 +777,7 @@ const server=createServer((req,res)=>{void(async()=>{
  const phone=req.headers['x-nocheh-mini-session'];
  if(typeof phone==='string'){if(await ownerLock.check(phone,'phone')!=='signed_in')throw new HttpError(401,'mini_app_sign_in_required');}
  else sessions.authorize(req,req.method!=='GET');
- if(['/inngest/runs','/hermes/nocheh','/hermes/chat'].includes(path)){res.setHeader('content-type','text/html');res.end('<h1>Synthetic integration boundary</h1><p>This isolated preview has no native runtime or provider. Production proxy behavior is verified by boundary tests.</p><a href="/">Return to Nocheh</a>');return;}
+ if(['/inngest/runs','/hermes/nocheh'].includes(path)){res.setHeader('content-type','text/html');res.end('<h1>Synthetic integration boundary</h1><p>This isolated preview has no native runtime or provider. Production proxy behavior is verified by boundary tests.</p><a href="/">Return to Nocheh</a>');return;}
  const route=path.replace(/^\/api\/(?:plugins\/)?nocheh/,'');
  const mode=await scenario();if(mode==='conflict'&&!modeRevision){settingsRevision+='external';revision++;modeRevision=true;}if(mode!=='conflict')modeRevision=false;if(mode==='offline'&&['/monitoring','/workflows/metrics','/status','/tools/actions'].includes(route))throw new HttpError(503,'fixture_observation_unavailable');
  if(await messagesFixture(req,res,route,url))return;
@@ -887,7 +887,7 @@ const server=createServer((req,res)=>{void(async()=>{
   if(route==='/memory/longterm/rebuild'){const chosen=url.searchParams.getAll('space').length;
     return json(res,200,{workspace:'synthetic-workspace',failed_learning:failedLearning,relearn:chosen?{conversations:chosen,sessions:chosen*2,messages:12*chosen,interpretations:1}:{conversations:5,sessions:9,messages:180,interpretations:4},replace:{saved_messages:212}});}
   if(route==='/honcho/status')return json(res,200,{enabled:true,running:true,reasoning_provider_configured:false,embedding_credential:true,api_budget_usd:5});
-  if(route==='/runtime')return json(res,200,{agent:{id:'hermes',name:'Hermes',capabilities:{telegram:true,browser:true,scheduler:true,background:true,settings:true,persona:true,prompts:true,notes:true,recall:true,review:true,schedules:false,schedule_list:true}},
+  if(route==='/runtime')return json(res,200,{agent:{id:'hermes',name:'Hermes',capabilities:{telegram:true,browser:false,scheduler:true,background:true,settings:true,persona:true,prompts:true,notes:true,recall:true,review:true,schedules:false,schedule_list:true}},
     status:{ok:true,model:'Subscription model',telegram:'disabled'},capabilities:{'guard.detect':true,'image.read':true,'usage.price':false}});
   if(route==='/graph'){
     const scope=url.searchParams.get('scope')??'*',all=scope==='*';

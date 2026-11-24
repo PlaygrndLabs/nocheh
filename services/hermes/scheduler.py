@@ -185,8 +185,11 @@ class Scheduler:
                 else:
                     try:
                         if not recovered:self.recover();recovered=True
-                        self.managed_flush();self.sync()
-                        self.flush();self.status='workflow_owned'
+                        # A managed receipt Nocheh refuses must not stop schedules from syncing and publishing.
+                        try:self.managed_flush();managed=True
+                        except Exception:managed=False
+                        self.sync()
+                        self.flush();self.status='workflow_owned' if managed else 'waiting_for_archive'
                     except Exception:self.status='waiting_for_archive'
                 save_receipt(self.root/'scheduler-status.json',json.dumps({'state':self.status,'actor':self.actor,'at':now().isoformat()}))
                 self.stopping.wait(2)

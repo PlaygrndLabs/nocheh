@@ -24,7 +24,7 @@ from .agent_turns import AgentTurns
 from .native_memory import recall
 from .profile_history import _same_chat
 from .prompts import reply
-from .scopes import Scope, Scopes, verify_capability
+from .scopes import Scope, Scopes, check_claims
 
 SECRET = 'synthetic-service-token-123456789'
 OWNER, MEMBER_CHAT, OTHER_CHAT = '123', '4567', '4568'
@@ -96,7 +96,7 @@ class MemberScopeTests(unittest.TestCase):
     def test_a_members_pass_is_verified_for_that_member_alone(self):
         scope = Scopes.apply_revision(self.resolve(update(4567, 4567), MEMBER_CHAT, scope=MEMBER_CHAT, member=MEMBER), member_claims())
         event = 'a' * 64
-        self.assertEqual(verify_capability(signed(member_claims()), SECRET, scope, event)['member'], MEMBER)
+        self.assertEqual(check_claims(signed(member_claims()), scope, event)['member'], MEMBER)
         self.assertEqual(scope.member, MEMBER, 'the revision keeps the member')
         refused = {'another member': member_claims(member=OTHER, lane=OTHER), 'another lane': member_claims(lane=OTHER),
                    'a malformed member': member_claims(member='D' * 64, lane=None), 'no member': member_claims(member=None, lane=None),
@@ -104,21 +104,21 @@ class MemberScopeTests(unittest.TestCase):
                    'reads': member_claims(reads=['-20']), 'a member chat': member_claims(memberChat=MEMBER_CHAT),
                    'as the owner': member_claims(scope=None)}
         for why, claims in refused.items():
-            with self.subTest(why), self.assertRaises(ValueError):verify_capability(signed(claims), SECRET, scope, event)
+            with self.subTest(why), self.assertRaises(ValueError):check_claims(signed(claims), scope, event)
         # A member's pass never verifies for the owner, a group, an answer, or a job's scope built without a member.
         owner = Scope(OWNER, OWNER, True, Scopes.profile(OWNER), OWNER)
         group = Scope('-20', '4567', False, Scopes.profile('-20'), '-20')
         for other in (owner, group, replace(scope, member='')):
-            with self.subTest(scope=other), self.assertRaises(ValueError):verify_capability(signed(member_claims()), SECRET, other, event)
+            with self.subTest(scope=other), self.assertRaises(ValueError):check_claims(signed(member_claims()), other, event)
         # A lane only orders a group's turns or its own member's; the owner's own pass and an answer's carry none.
         group_claims = {**member_claims('-20', member=None), 'lane': MEMBER}
-        self.assertEqual(verify_capability(signed(group_claims), SECRET, group, event)['lane'], MEMBER)
-        with self.assertRaises(ValueError):verify_capability(signed({**group_claims, 'lane': 'x'}), SECRET, group, event)
+        self.assertEqual(check_claims(signed(group_claims), group, event)['lane'], MEMBER)
+        with self.assertRaises(ValueError):check_claims(signed({**group_claims, 'lane': 'x'}), group, event)
         owner_claims = {**member_claims(OWNER, member=None), 'scope': None}
-        verify_capability(signed(owner_claims), SECRET, owner, event)
-        with self.assertRaises(ValueError):verify_capability(signed({**owner_claims, 'lane': MEMBER}), SECRET, owner, event)
+        check_claims(signed(owner_claims), owner, event)
+        with self.assertRaises(ValueError):check_claims(signed({**owner_claims, 'lane': MEMBER}), owner, event)
         answer_claims = {**member_claims(OWNER, member=None), 'answer': 'a' * 32}
-        with self.assertRaises(ValueError):verify_capability(signed({**answer_claims, 'lane': MEMBER}), SECRET, owner, event)
+        with self.assertRaises(ValueError):check_claims(signed({**answer_claims, 'lane': MEMBER}), owner, event)
 
     def test_the_served_list_takes_the_mark_only_on_a_members_own_private_chat(self):
         row = lambda **change: {'id': MEMBER_CHAT, 'app': 'telegram', 'kind': 'private', 'parent_id': None, 'topic_key': None, 'state': 'off',

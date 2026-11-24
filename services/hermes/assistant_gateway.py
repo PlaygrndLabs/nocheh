@@ -7,9 +7,11 @@ import asyncio
 import json
 import os
 import re
+import time
 from pathlib import Path
 
 from services.durable import canonical, digest
+from . import daily_session
 from .scopes import Scopes, topic_id
 
 # Parallel Telegram turns across chats, set by the owner. Each isolated turn takes
@@ -101,25 +103,36 @@ async def native_turn(root,scope,body,model,credentials,cancelled=None):
     thread='main' if topic is None else str(topic)
     logical=digest(scope.chat_id+':'+thread)
     cursor=profile/('active-'+logical+'.json')
-    session_id=json.loads(cursor.read_text())['session_id'] if cursor.exists() else 'nocheh-'+logical
+    # One session per chat per day (ADR-0288); a follow-up after an approval stays in the session that asked.
+    place=daily_session.zone(body.get('day_zone'))
+    now=time.time()
+    session_id,previous,day=daily_session.choose(daily_session.cursor_value(json.loads(cursor.read_text())) if cursor.exists() else None,
+        logical,now,place,follow_up=body.get('continuation') is not None)
+    if previous is not None:
+        def open_day():
+            from .native_store import writer
+            from .profile_config import preferences, read
+            carry=preferences(read(profile/'config.yaml'))['nocheh.carry_messages']
+            with writer(profile) as db:daily_session.start(db,session_id,previous,carry,body.get('channel','telegram'))
+        await asyncio.to_thread(open_day)
     from .turn_process import run_process
     result = await run_process(root, scope, body, model, credentials, session_id,cancelled=cancelled,prepared_profile=profile)
     if result.get('state')=='done':
         def save_cursor():
             temporary=cursor.with_suffix('.tmp')
             with temporary.open('wb') as file:
-                file.write(canonical({'session_id':result['session_id']}));file.flush();os.fsync(file.fileno())
+                file.write(canonical({'session_id':result['session_id'],'day':day,'last_active':int(now)}));file.flush();os.fsync(file.fileno())
             temporary.replace(cursor)
             directory=os.open(profile,os.O_RDONLY)
             try:os.fsync(directory)
             finally:os.close(directory)
         await asyncio.to_thread(save_cursor)
-        try:await asyncio.to_thread(title_session,profile,result['session_id'],body['payload']['message'],scope.owner,bool(scope.answer),bool(scope.member),bool(scope.member_read))
+        try:await asyncio.to_thread(title_session,profile,result['session_id'],body['payload']['message'],scope.owner,bool(scope.answer),bool(scope.member),bool(scope.member_read),day)
         except Exception:pass # A missing title is cosmetic; the next turn tries again.
     return result
 
 
-def session_title(message,owner,answer=False,member=False,member_read=False):
+def session_title(message,owner,answer=False,member=False,member_read=False,day=None):
     """The chat a Telegram session belongs to, as the dashboard's session list shows it. A private answer's own
     session is named as one, so the owner's private chat keeps its own name (ADR-0249); so is an ask about a member;
     a member's private chat is named as a member's, by the name Telegram shows for them (step 4)."""
@@ -138,16 +151,18 @@ def session_title(message,owner,answer=False,member=False,member_read=False):
         created=opening.get('forum_topic_created') if isinstance(opening.get('forum_topic_created'),dict) else {}
         label=created.get('name') if isinstance(created.get('name'),str) and created.get('name').strip() else 'topic '+str(topic)
         name+=' › '+label.strip()
-    # Hermes allows 100 characters; leave room for its " #2" when another session already has the name.
-    return name[:90]
+    # Each day's session carries its day (ADR-0288). Hermes allows 100 characters; leave room for its " #2" when
+    # another session already has the name.
+    dated=daily_session.label(day)
+    return (name[:80]+' · '+dated) if dated else name[:90]
 
 
-def title_session(profile,session_id,message,owner,answer=False,member=False,member_read=False):
+def title_session(profile,session_id,message,owner,answer=False,member=False,member_read=False,day=None):
     """Name a Telegram session after its chat. It is Hermes's top automatic title: it replaces a first-message
     title and stays once set, and Hermes keeps a title set by hand over it."""
     from persistence.conversation.sessions import TitleSource
     from .native_store import writer
-    title=session_title(message,owner,answer,member,member_read)
+    title=session_title(message,owner,answer,member,member_read,day)
     with writer(profile) as db:
         record=db.sessions.get(session_id)
         if record is None or record.title_source in (TitleSource.LLM,TitleSource.USER):return

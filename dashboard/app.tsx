@@ -15,7 +15,6 @@ import {
   LockKeyhole,
   LogOut,
   Menu,
-  MessageCircle,
   MessagesSquare,
   Monitor,
   Moon,
@@ -45,8 +44,6 @@ type NavIcon = React.ComponentType<{className?: string}>;
 type NavItem = {id: PageId; title: string; Icon: NavIcon} | {href: string; title: string; Icon: NavIcon};
 const nav: NavItem[] = [
   {id: 'home', title: 'Home', Icon: Home},
-  // The assistant console's chat; its profile picker chooses the private chat or a group.
-  {href: '/hermes/chat', title: 'Chat', Icon: MessageCircle},
   {id: 'inbox', title: 'Inbox', Icon: Inbox},
   {id: 'tasks', title: 'Tasks', Icon: ListChecks},
   {id: 'schedules', title: 'Schedules', Icon: CalendarClock},

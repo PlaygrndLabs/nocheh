@@ -1,7 +1,6 @@
 """Native profile routing with a fail-closed Nocheh conversation allowlist."""
 from dataclasses import dataclass
 import hashlib
-import hmac
 import base64
 import time
 import json
@@ -23,10 +22,13 @@ def topic_id(message):
     return raw if forum or message.get('is_topic_message') is True else None
 
 
-def verify_capability(credential,secret,scope,event_id):
+def check_claims(credential,scope,event_id):
+    """A turn pass's claims, checked against the turn they must bind. Hermes does not check the signature, so the master key
+    can leave it (ADR-0289): Nocheh's own services check it on every call the pass makes, and a forged pass reaches nothing there. Here
+    the claims choose only this turn's local profile, lane and tools, so every one must match its binding exactly."""
     try:
         prefix,body,signature=credential.split('.')
-        expected=base64.urlsafe_b64encode(hmac.new(secret.encode(),body.encode(),hashlib.sha256).digest()).decode().rstrip('=')
+        if not body or not signature:raise ValueError()
         claims=json.loads(base64.urlsafe_b64decode(body+'='*(-len(body)%4)))
         # A private answer's pass names its record and reads as the owner's private chat, never as the owner: only in that
         # chat, with the chat itself as its scope (ADR-0249).
@@ -49,7 +51,7 @@ def verify_capability(credential,secret,scope,event_id):
         lane=claims.get('lane')
         if lane is not None and (not isinstance(lane,str) or not re.fullmatch(r'[a-f0-9]{64}',lane) or claims.get('scope') is None or
                                  answer is not None or member_read is not None or member is not None and lane!=member):raise ValueError()
-        if prefix!='turn' or claims.get('event_id')!=event_id or not hmac.compare_digest(signature,expected) or claims.get('audience')!='nocheh-assistant' or claims.get('scope')!=(None if scope.owner and answer is None and member_read is None else scope.chat_id) or not time.time()*1000<claims['expires']<=time.time()*1000+3600000:
+        if prefix!='turn' or claims.get('event_id')!=event_id or claims.get('audience')!='nocheh-assistant' or claims.get('scope')!=(None if scope.owner and answer is None and member_read is None else scope.chat_id) or not time.time()*1000<claims['expires']<=time.time()*1000+3600000:
             raise ValueError()
         if claims.get('space') is not None:
             if claims['space'] != scope.space or type(claims.get('revision')) is not int or claims['revision'] < 1:raise ValueError()
@@ -118,7 +120,7 @@ class Scopes:
 
     @staticmethod
     def claims(credential):
-        """The claims a turn pass carries, before they are verified: only to know which chat it names, never as authority."""
+        """The claims a turn pass carries, before they are checked: only to know which chat it names, never as authority."""
         try:
             body=credential.split('.')[1]
             claims=json.loads(base64.urlsafe_b64decode(body+'='*(-len(body)%4)))
