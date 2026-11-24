@@ -25,9 +25,12 @@ def identity(body):
 
 
 class AsyncRuns:
-    def __init__(self,directory,execute,reconcile):
+    def __init__(self,directory,execute,reconcile,launched=None):
         self.directory=Path(directory);self.directory.mkdir(parents=True,exist_ok=True,mode=0o700)
         self.execute,self.reconcile=execute,reconcile
+        # A runner that keeps its runs in arrival order hears of each launch: under the lock, so in the order runs arrive, and
+        # before the run's worker starts. What it returns is called once that run is over, whether or not it ever executed.
+        self.launched=launched
         self.lock=threading.RLock();self.active={}
 
     def _path(self,run,suffix):return self.directory/(run+suffix)
@@ -80,6 +83,7 @@ class AsyncRuns:
 
     def _launch(self,run,body):
         if run in self.active or self._path(run,'.result').exists():return
+        over=self.launched(run,body) if self.launched else None
         cancelled=threading.Event();self.active[run]=cancelled
         def progress(stage):
             if stage not in STAGES:raise ValueError('invalid_run_stage')
@@ -96,9 +100,17 @@ class AsyncRuns:
                 result=result or {'state':'ambiguous','error_code':'runtime_execution_interrupted'}
             finally:
                 with self.lock:
-                    if not self._path(run,'.result').exists():self._finish(run,locals().get('result',{'state':'ambiguous'}))
-                    self.active.pop(run,None)
-        threading.Thread(target=work,name='nocheh-runtime-'+run[:12],daemon=True).start()
+                    try:
+                        if not self._path(run,'.result').exists():self._finish(run,locals().get('result',{'state':'ambiguous'}))
+                    finally:
+                        self.active.pop(run,None)
+                        # Still under the lock, so the run is over before it can launch again.
+                        if over is not None:over()
+        try:threading.Thread(target=work,name='nocheh-runtime-'+run[:12],daemon=True).start()
+        except BaseException:
+            self.active.pop(run,None)
+            if over is not None:over()
+            raise
 
     def start(self,body):
         run=identity(body)

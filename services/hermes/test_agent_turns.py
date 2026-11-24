@@ -244,6 +244,93 @@ class AgentTurnTests(unittest.TestCase):
         self.assertEqual(sorted(started),sorted(names),'every turn ran exactly once')
         self.assertEqual(agent.lanes,{},'idle chats leave no lane behind')
 
+    def recording(self,started):
+        async def turn(root,scope,body,model,credentials,cancelled=None):
+            started.append(body['text'])
+            return {'state':'done','text':'Reply to '+body['text'],'session_id':'nocheh-synthetic'}
+        return turn
+
+    def test_a_later_turn_waits_for_an_earlier_turns_scope_read(self):
+        # The first turn's scope read is slow and the second's quick: the second still joins its chat's lane second.
+        gate=threading.Event();started=[]
+        def slow(body,claims):
+            if body['text']=='first':gate.wait(5)
+            return resolve(body,claims)
+        agent=self.agent(self.recording(started),resolve=slow)
+        first,second,other=turn_body(1,'-20','first'),turn_body(2,'-20','second'),turn_body(3,'-30','other')
+        agent.start(first);agent.start(second);agent.start(other)
+        self.assertEqual(self.wait(agent,other)['state'],'done','another chat does not wait for a slow scope read')
+        self.assertEqual(started,['other'],'the second turn waits for the first one to join its lane')
+        gate.set()
+        for body in (first,second):self.assertEqual(self.wait(agent,body)['state'],'done')
+        self.assertEqual(started,['other','first','second'])
+        self.assertEqual((agent.lanes,agent.order.lines),({},{}),'idle chats leave no lane or place behind')
+
+    def test_a_later_turn_waits_for_an_earlier_turns_worker_to_start(self):
+        # The first turn's worker thread starts late: the second's, already running, still waits for it.
+        started,held=[],[];original=threading.Thread.start
+        def start(thread):
+            if thread.name.startswith('nocheh-runtime-') and not held:held.append(thread)
+            else:original(thread)
+        agent=self.agent(self.recording(started))
+        first,second=turn_body(1,'-20','first'),turn_body(2,'-20','second')
+        with patch.object(threading.Thread,'start',start):agent.start(first);agent.start(second)
+        time.sleep(.05)
+        self.assertEqual(started,[],'the second turn waits for the first one to join its lane')
+        original(held[0])
+        for body in (first,second):self.assertEqual(self.wait(agent,body)['state'],'done')
+        self.assertEqual(started,['first','second'])
+
+    def test_many_turns_in_a_few_chats_each_keep_their_arrival_order(self):
+        # Scope reads that finish in the reverse of arrival order, across chats and topics, reorder no conversation.
+        started=[]
+        def shuffled(body,claims):
+            time.sleep((3-body['payload']['update_id']%4)*.004)
+            return resolve(body,claims)
+        agent=self.agent(self.recording(started),capacity=2,resolve=shuffled)
+        places=(('-20',None),('-30',None),('-20',7))
+        bodies=[turn_body(update,places[update%3][0],f'{update%3}:{update:02}',topic=places[update%3][1]) for update in range(1,31)]
+        for body in bodies:agent.start(body)
+        for body in bodies:self.assertEqual(self.wait(agent,body)['state'],'done')
+        for place in ('0','1','2'):
+            with self.subTest(place=place):
+                ran=[text for text in started if text.startswith(place+':')]
+                self.assertEqual(ran,sorted(ran));self.assertEqual(len(ran),10)
+        self.assertEqual(agent.lanes,{},'idle chats leave no lane behind')
+
+    def test_a_turn_that_ends_before_its_lanes_holds_no_one_up(self):
+        # Each ends before its turn joins a lane; another chat's turn started after it still runs, and so does a retry.
+        from . import async_runs
+        written=async_runs.immutable_file
+        def failing(*suffixes):
+            left=list(suffixes)
+            def write(directory,name,value):
+                for suffix in left:
+                    if name.endswith(suffix):left.remove(suffix);raise OSError('synthetic disk error')
+                return written(directory,name,value)
+            return write
+        def refusing(body,claims):
+            if body['text']=='refused':raise ValueError('archive_capability_scope_mismatch')
+            if body['text']=='unserved':return None
+            return resolve(body,claims)
+        started=[];agent=self.agent(self.recording(started),resolve=refusing)
+        cases=(('refused',(),'ambiguous'),('unserved',(),'suppressed'),('unstarted',('.started',),'ambiguous'),
+               ('unrecorded',('.started','.result'),None))
+        for update,(text,suffixes,state) in enumerate(cases,1):
+            with self.subTest(text=text):
+                body,other=turn_body(update,'-20',text),turn_body(100+update,'-30','other '+text)
+                with patch.object(async_runs,'immutable_file',failing(*suffixes)),patch.object(threading,'excepthook',lambda _:None):
+                    agent.start(body);self.until(lambda:identity(body) not in agent.runs.active)
+                    for thread in threading.enumerate():
+                        if thread.name=='nocheh-runtime-'+identity(body)[:12]:thread.join(2)
+                agent.start(other);self.assertEqual(self.wait(agent,other)['state'],'done')
+                if state:self.assertEqual(agent.start(body)['state'],state)
+                else:
+                    # Its run never closed, so a retry launches it again in a new place.
+                    agent.start(body);self.assertEqual(self.wait(agent,body)['state'],'done')
+                    self.assertIn(text,started)
+        self.assertEqual(agent.lanes,{},'idle chats leave no lane behind')
+
     def test_a_continuation_attempt_is_its_own_run(self):
         agent=self.agent(self.replying());attempt='c1-'+LEADER[:40]
         follow=turn_body(41,attempt=attempt,continuation=LEADER);agent.start(follow)

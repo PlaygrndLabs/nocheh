@@ -2,6 +2,7 @@
 
 Receipts stay content-free like every async run. The reply lives only in the run's .outcome file."""
 import asyncio
+import collections
 import contextlib
 import json
 import re
@@ -41,18 +42,47 @@ def outcome(agent,cancelled):
     return {'state':'done','reply':{'text':text,'session_id':agent['session_id']}}
 
 
+class Arrivals:
+    """Launched turns in the order they arrived, one line per lane a turn may join, each turn until it joins its first
+    lane or is over. Only the agent's loop touches it: a turn arrives and leaves by a callback the runs' lock puts on the
+    loop in order."""
+    def __init__(self):self.lines,self.keys,self.ready={},{},{}
+
+    def arrive(self,run,keys):
+        self.keys[run]=keys
+        for key in keys:self.lines.setdefault(key,{})[run]=None
+
+    def leave(self,run):
+        self.ready.pop(run,None)
+        for key in self.keys.pop(run,()):
+            line=self.lines[key];del line[run]
+            if not line:del self.lines[key];continue
+            # Only a turn first in its line may go on, so only it is woken; it checks its other lines itself.
+            ready=self.ready.get(next(iter(line)))
+            if ready is not None and not ready.done():ready.set_result(None)
+
+    def _first(self,run):return all(next(iter(self.lines[key]))==run for key in self.keys[run])
+
+    async def first(self,run):
+        """Returns once every turn that arrived before `run` in any of its lines has joined its first lane or is over. A
+        turn that never took a place, as when the agent restarted in between, waits for no one."""
+        while run in self.keys and not self._first(run):
+            ready=self.ready[run]=asyncio.get_running_loop().create_future()
+            await ready
+
+
 class AgentTurns:
     def __init__(self,root,spool,policy,model,credentials,turn=native_turn,capacity=TURN_CAPACITY):
         self.root,self.scopes,self.model,self.credentials,self.turn,self.size=Path(root),policy,model,credentials,turn,capacity
         # Not spool/async-runs: the same Telegram attempt has the same run id on both runners.
         self.directory=Path(spool)/'agent-turns'
-        self.runs=AsyncRuns(self.directory,self._execute,self._saved)
-        self.loop=self.thread=self.capacity=None;self.lanes={}
+        self.runs=AsyncRuns(self.directory,self._execute,self._saved,self._arrived)
+        self.loop=self.thread=self.capacity=self.order=None;self.lanes={}
 
     def open(self):
-        # One loop for every turn, so lanes and capacity are plain asyncio locks.
+        # One loop for every turn, so arrival order, lanes and capacity need no thread locks.
         loop=asyncio.new_event_loop();running=threading.Event();loop.call_soon(running.set)
-        self.capacity=asyncio.Semaphore(self.size)
+        self.capacity=asyncio.Semaphore(self.size);self.order=Arrivals();self.lanes={}
         self.thread=threading.Thread(target=loop.run_forever,name='nocheh-agent',daemon=True);self.thread.start()
         running.wait(5);self.loop=loop
 
@@ -114,6 +144,29 @@ class AgentTurns:
         self._channel(body)
         return self.runs.events(body)
 
+    @staticmethod
+    def _lines(body):
+        """The lanes a turn may join, read before its pass is verified: its member's, if its pass carries a lane, and its
+        space, which the scope read takes from the request (the Telegram chat if a request names none). Only for order:
+        a wrong guess can cost order, never safety, and every place is given up when its turn joins a lane or ends."""
+        try:lane=Scopes.claims(body['archive_credential']).get('lane')
+        except Exception:lane=None
+        space=body.get('space') if isinstance(body.get('space'),str) else str(body.get('scope'))
+        return ('lane:'+lane,space) if isinstance(lane,str) else (space,)
+
+    def _arrived(self,run,body):
+        """A launched turn takes its place in arrival order, in the lines of the lanes it may join, so a slow turn holds up
+        only turns that may share a lane with it. The runs call this under their lock, so in the order turns arrive and
+        before the turn's worker thread starts; that thread, and the scope read before the lanes, may then take any time.
+        What it returns is called once the run is over, so a turn that never reached its lanes gives its place up."""
+        loop,order=self.loop,self.order
+        if loop is None:return None
+        def post(step,*values):
+            # A loop that stopped meanwhile runs no turn either.
+            with contextlib.suppress(RuntimeError):loop.call_soon_threadsafe(step,run,*values)
+        post(order.arrive,self._lines(body))
+        return lambda:post(order.leave)
+
     def _saved(self,body):
         path=self.directory/(identity(body)+'.outcome')
         return json.loads(path.read_bytes()) if path.exists() else None
@@ -127,6 +180,12 @@ class AgentTurns:
         return result
 
     async def _turn(self,body,progress,cancelled):
+        run,order=identity(body),self.order
+        # Whatever ends the turn before its first lane (no scope, a refused pass) lets the next turn go on.
+        try:return await self._ordered(body,progress,cancelled,(order,run))
+        finally:order.leave(run)
+
+    async def _ordered(self,body,progress,cancelled,arrival):
         # Group addressing and the delivery check are Nocheh's; the turn itself rechecks its space policy. Its chat, space
         # and app binding come from its pass, read here only to know whose turn it is and checked in full next (ADR-0252).
         # Off the event loop: reading the served list may wait on the app (ADR-0252), and other turns keep running meanwhile.
@@ -143,29 +202,40 @@ class AgentTurns:
         if (member_read is not None)!=isinstance(ask,dict) or member_read is not None and ask.get('ask')!=member_read:raise ValueError('invalid_member_read')
         if answer or member_read is not None:scope=replace(scope,owner=False)
         scope=Scopes.apply_revision(scope,claims)
-        # Turns in one conversation keep their arrival order; different chats
-        # and topics run side by side, up to the capacity. A member's turns, in their own private chat and in groups, run
+        # Turns in one conversation keep their arrival order: each joins its first lane only after every earlier turn that
+        # may share a lane with it joined its own (or is over), whatever order their worker threads and scope reads finished
+        # in. Different chats and topics run side by side, up to the capacity. A member's turns, in their own private chat and in groups, run
         # one at a time: their pass's lane names them (step 4). The owner's turns, an answer's and an ask's carry none.
         # Always the member's lane first, then the space's, then capacity. A member's group turn that waits for their
         # running private turn therefore holds no group, so the owner's and other members' turns there go on; Nocheh
         # still sends a group's replies in arrival order. One order for every turn, so no two turns wait on each other.
-        lane=claims.get('lane')
-        async with self._lane('lane:'+lane) if lane else contextlib.nullcontext():
-            async with self._lane(scope.space or scope.chat_id):
+        lane,space=claims.get('lane'),scope.space or scope.chat_id
+        async with self._lane('lane:'+lane if lane else space,arrival):
+            async with self._lane(space) if lane else contextlib.nullcontext():
                 async with self.capacity:
                     if cancelled.is_set():return {'state':'cancelled'}
                     return await self._run(scope,body,progress,cancelled)
 
     @contextlib.asynccontextmanager
-    async def _lane(self,key):
-        """One turn at a time under `key`, in arrival order; an idle key leaves nothing behind. Space keys are Nocheh chat
-        ids and member keys start with `lane:`, so the two never meet."""
-        lane=self.lanes.setdefault(key,{'lock':asyncio.Lock(),'users':0});lane['users']+=1
+    async def _lane(self,key,arrival=None):
+        """One turn at a time under `key`, in the order turns join it; an idle key leaves nothing behind. Space keys are Nocheh
+        chat ids and member keys start with `lane:`, so the two never meet. A turn's first lane takes its `arrival`: the turn
+        joins once every earlier arrival in its lines has joined its own, and the next may join only after it has, as no
+        await separates joining from giving up its place."""
+        if arrival:await arrival[0].first(arrival[1])
+        line=self.lanes.setdefault(key,collections.deque())
+        turn=asyncio.get_running_loop().create_future()
+        if not line:turn.set_result(None)
+        line.append(turn)
+        if arrival:arrival[0].leave(arrival[1])
         try:
-            async with lane['lock']:yield
+            await turn
+            yield
         finally:
-            lane['users']-=1
-            if not lane['users'] and self.lanes.get(key) is lane:del self.lanes[key]
+            first=line[0] is turn;line.remove(turn)
+            if not line:
+                if self.lanes.get(key) is line:del self.lanes[key]
+            elif first and not line[0].done():line[0].set_result(None)
 
     async def _run(self,scope,body,progress,cancelled):
         agent=None
