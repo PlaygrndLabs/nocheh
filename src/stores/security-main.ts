@@ -13,14 +13,14 @@ import {storageGuardService} from './guard-service.js';
 import {servedPolicy,startChatDirectory} from './chats.js';
 import {assertStorageActive,assertGuardConfiguration,restoredInactive,storageHealth,storageHeartbeat} from './lifecycle.js';
 
-const config=settings(),stores=runtimeStores(),call=withPrompts(runtimeCall(combinedAdapter(telegramAdapter({url:config.telegramUrl,token:config.token}),hermesAdapter({url:config.hermesUrl,token:config.token}))),stores.control);
+const config=settings(),stores=runtimeStores(),call=withPrompts(runtimeCall(combinedAdapter(telegramAdapter({url:config.telegramUrl,token:config.token}),hermesAdapter({url:config.hermesUrl,token:config.agentKey}))),stores.control);
 // In development nothing reads before the store setup of this build has finished (dev-schema.ts).
 await schemaReady(stores.control);
 const services=storageServices(stores,{dataDir:config.dataDir,detectorVersion:config.detectorVersion,serviceToken:config.token,
   policy:servedPolicy(()=>config.assistant),runtime:call,agent:agentWithPrompts(agent(config),stores.control),memoryEngine:memoryEngine(config)});
 // The security service reads chats as the app records them (ADR-0252); a newer guard epoch reloads them.
 await startChatDirectory(stores.control,()=>config.assistant);
-const server=brokerServer({pool:stores.control,storage:services.turns,token:config.token,model:process.env.NOCHEH_MODEL??'claude-sonnet-5-5',backupModel:process.env.NOCHEH_BACKUP_MODEL??'',
+const server=brokerServer({pool:stores.control,storage:services.turns,token:config.token,agentKey:config.agentKey,model:process.env.NOCHEH_MODEL??'claude-sonnet-5-5',backupModel:process.env.NOCHEH_BACKUP_MODEL??'',
   archive:process.env.ARCHIVE_URL??'http://nocheh-app:8780',hermes:config.hermesUrl,prepare:storageGuardService(services),
   assertActive:()=>assertStorageActive(config.dataDir),assertReady:async()=>{await assertGuardConfiguration(services.guards,config.guardMode);await services.configuration.assert(config.assistant);},health:()=>storageHealth(stores)});
 const timer=setInterval(()=>{if(!restoredInactive(config.dataDir))void storageHeartbeat(stores,'nocheh-security').catch(()=>{});},5000);timer.unref();

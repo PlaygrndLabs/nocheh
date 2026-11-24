@@ -80,7 +80,7 @@ TITLES = {
     'photo_is_read': 'Photos are read once, at their largest size, for their text',
     'hermes_is_locked_down': 'The assistant runs locked down and sees only its own folders',
     'files_upload_over_1mb': 'A large upload on the Files page is kept whole',
-    'profiles_round_trip': 'A profile is made, listed and retired',
+    'profiles_round_trip': 'Hermes\'s Profiles page lists profiles and refuses changes',
     'no_refused_writes': 'No file went unread for want of space or a refused write',
     'owner_directory_lists_conversations': 'Your chat list', 'unparseable_update_does_not_wedge_polling': 'A broken update does not stop Telegram',
     'telegram_refresh_names': 'Group names refresh', 'owner_freedom_keeps_group_cards': 'Setting: your private requests run without approval, except posts to groups',
@@ -198,6 +198,9 @@ TITLES = {
     'upgraded_copy_keeps_history': 'After an upgrade, your private chat and a group still have their history',
 }
 
+
+from tools.acceptance.attack_scenarios import TITLES as ATTACK_TITLES  # noqa: E402
+TITLES.update(ATTACK_TITLES)
 
 # Images --build makes from the checkout: (role, tag, docker build options). Honcho
 # stays the installation's own pinned build; Nocheh's Honcho code is mounted.
@@ -415,9 +418,10 @@ def main():
     if args.upgrade and (args.build or args.directory):
         parser.error('--upgrade starts its own copy on the installation\'s images; leave out --build and --directory')
     os.environ['NOCHEH_TESTER_VM_IMAGE'] = args.vm_image
-    from tools.acceptance.product_scenarios import PRODUCT_ORDER, ProductScenarios
+    from tools.acceptance.attack_scenarios import ATTACK_ORDER, AttackScenarios as ProductScenarios
+    from tools.acceptance.product_scenarios import PRODUCT_ORDER
     from tools.acceptance.telegram_scenarios import ORDER, run
-    order = args.only or ([] if args.skip_existing else ORDER)+PRODUCT_ORDER
+    order = args.only or ([] if args.skip_existing else ORDER)+PRODUCT_ORDER+ATTACK_ORDER
     if args.upgrade and 'restart_preserves_receipts' not in order:
         # It leaves the history marks the upgraded copy must still have.
         order = order+['restart_preserves_receipts']

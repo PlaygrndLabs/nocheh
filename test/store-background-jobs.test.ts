@@ -287,7 +287,7 @@ test('a background job is started with one call, approved on its card, runs as o
     const bytesStep=await step(bytes.id),bytesContext:any=await s.jobs.runs.context({event_id:bytesStep.event_id,owner_epoch:(await authority()).epoch});
     const bytesClaim:any=await s.jobs.runs.claim({...bytesContext,actor:bytesContext.actor});await s.jobs.runs.prepare({...bytesContext,actor:bytesContext.actor});
     const previousRoute=process.env.NOCHEH_REPLY_ROUTE_URL;process.env.NOCHEH_REPLY_ROUTE_URL='https://gateway.example.test/v1';
-    const sentTo:string[]=[],broker=brokerServer({pool:stores.control,storage:s.turns,token:digest(key),archive:'http://archive',hermes:'http://hermes',model:'fixture-model',
+    const sentTo:string[]=[],broker=brokerServer({agentKey:'synthetic-agent-login-only-for-tests-0001',pool:stores.control,storage:s.turns,token:digest(key),archive:'http://archive',hermes:'http://hermes',model:'fixture-model',
       prepare:storageGuardService(s),fetch:async url=>{
         if(String(url).endsWith('/internal/security/transport'))return Response.json({base_url:'https://gateway.example.test/v1',api_mode:'chat_completions',api_key:'synthetic-credential',model_context_length:100000});
         sentTo.push(String(url));return Response.json({ok:true});}});

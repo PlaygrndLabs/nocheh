@@ -1,7 +1,7 @@
 import {blockingPublications} from './publications.js';
 import {randomUUID} from 'node:crypto';
 import type pg from 'pg';
-import {admin,boundReader,type Reader} from '../access.js';
+import {adminOrAgent,boundReader,type AgentLogin,type Reader} from '../access.js';
 import {canonical,digest} from '../archive.js';
 import {ownerChat,type AssistantPolicy} from '../assistant-policy.js';
 import {cronMatches,knownZone,parseCron} from '../schedule-timing.js';
@@ -132,9 +132,10 @@ export class ScheduleRepository {
     }catch{return null;}
   }
   /**
-   * Hermes's own definition post (admin): a checkpoint of a schedule Nocheh already has, with the same execution version
-   * and never turning it back on; or a change a person's press asked for, with that press's unused edit grant, which may
-   * only pause, resume or delete. Anything else, a schedule Nocheh never recorded included, is refused.
+   * Hermes's own definition post (the agent login, ADR-0295; or the owner's admin bearer): a checkpoint of a schedule
+   * Nocheh already has, with the same execution version and never turning it back on; or a change a person's press asked
+   * for, with that press's unused edit grant, which may only pause, resume or delete. Anything else, a schedule Nocheh
+   * never recorded included, is refused.
    */
   private edits(grant:string|undefined):ScheduleAuthorizer {
     return async(db,current,document,{id,execution_hash,version})=>{
@@ -169,8 +170,8 @@ export class ScheduleRepository {
       return {set_by:{via:'turn',person:grant.person,turn},created_by:grant.person,created_turn:turn};
     };
   }
-  async definition(principal:Reader,input:unknown){
-    admin(principal);const body=object(input);
+  async definition(principal:Reader|AgentLogin,input:unknown){
+    adminOrAgent(principal);const body=object(input);
     const grant=body.grant===undefined||body.grant===null?undefined:requestId(body.grant,'invalid_schedule_definition');
     const {created:_created,...result}=await this.record(body,this.edits(grant));return result;
   }
@@ -303,8 +304,8 @@ export class ScheduleRepository {
       throw new HttpError(403,'fire_grant_time');
     if(request.event)await db.query('UPDATE schedule_grants SET used_by=$2,used_at=now() WHERE id=$1',[grant.id,request.event]);return 'clock';
   }
-  async capture(principal:Reader,input:unknown){
-    admin(principal);const body=object(input),profile=identity(body.profile),scope=string(body.scope,64),job=identity(body.job_id),fire=identity(body.id);
+  async capture(principal:Reader|AgentLogin,input:unknown){
+    adminOrAgent(principal);const body=object(input),profile=identity(body.profile),scope=string(body.scope,64),job=identity(body.job_id),fire=identity(body.id);
     await this.profile(profile,scope);const document=this.document(body.definition,profile),version=hash(body.job_revision);
     if(version!==digest(canonical(document))||body.text!==document.prompt||body.space!==scope||!Array.isArray(body.files)||body.files.length)
       throw new HttpError(400,'schedule_input_conflict');

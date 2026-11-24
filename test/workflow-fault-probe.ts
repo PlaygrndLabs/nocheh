@@ -54,7 +54,8 @@ try{
   }else if(action==='runtime'){
     const receiptDirectory=join(root,'runtime-receipts');await mkdir(receiptDirectory,{recursive:true,mode:0o700});
     const server=createServer((req,res)=>{void(async()=>{
-      authorize(req,process.env.SERVICE_TOKEN!);const body=object(await readJson(req)),path=req.url;
+      // Hermes's routes take the agent login and the bot's the master key, as in production (ADR-0295).
+      authorize(req,req.url?.startsWith('/internal/telegram/')?process.env.SERVICE_TOKEN!:process.env.AGENT_KEY!);const body=object(await readJson(req)),path=req.url;
       if(path==='/internal/telegram/file')return json(res,200,{bytes_base64:Buffer.from('Synthetic Ogg bytes').toString('base64')});
       if(path==='/internal/detect')return json(res,200,{literals:[]});
       if(!/^[a-f0-9]{64}$/.test(String(body.event_id)))throw Error('fixture_identity_required');
@@ -71,9 +72,9 @@ try{
     })().catch(()=>{if(!res.headersSent)json(res,503,{error:'fixture_runtime_failed'});else res.destroy();});});
     server.listen(8781,'0.0.0.0');close=()=>new Promise<void>(resolve=>server.close(()=>resolve()));
   }else if(action==='worker'){
-    const fake={url:'http://fault-runtime:8781',token:process.env.SERVICE_TOKEN!};
-    const client=workflowClient('pipeline'),runtime=runtimeCall(combinedAdapter(hermesAdapter(fake),telegramAdapter(fake)));
-    const agent=hermesAgent(fake);
+    const hermes={url:'http://fault-runtime:8781',token:process.env.AGENT_KEY!},bot={url:hermes.url,token:process.env.SERVICE_TOKEN!};
+    const client=workflowClient('pipeline'),runtime=runtimeCall(combinedAdapter(hermesAdapter(hermes),telegramAdapter(bot)));
+    const agent=hermesAgent(hermes);
     const connection=await connectWorkflows('pipeline',client,workflowFunctions(client,pool,pipelineOperations(pool,config,runtime,agent)));
     const report=async()=>{if(connection.state==='ACTIVE')await registerWorker(pool,'pipeline',['preparation','telegram']);};
     await report();const timer=setInterval(()=>{void report().catch(()=>{});},1000);

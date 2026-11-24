@@ -124,6 +124,36 @@ test('a long-term recall reaches a slow archive without Node fetch, which gives 
   }
 });
 
+test('the agent login reaches only the system guard, the master key never does, and Hermes gets only the agent login',async()=>{
+  const token='synthetic-service-token-only-for-tests',agentKey='synthetic-agent-login-only-for-tests-0001',source='b'.repeat(64);
+  const pool={query:async()=>({rows:[],rowCount:0})} as unknown as pg.Pool,prepared:unknown[]=[],sent:string[]=[];
+  const binding=async(principal:Reader):Promise<TurnBinding>=>({event_id:principal.turnEvent!,scope:principal.scope??'42',profile:'synthetic',logical_profile:'synthetic',owner:false,guard_epoch:1});
+  const options={pool,token,archive:'http://archive',hermes:'http://hermes',model:'synthetic',storage:{binding,assertAudience:async()=>{},turnFile:async()=>{throw Error();}},
+    prepare:async(caller:unknown,input:unknown)=>{prepared.push(caller);return {guarded:true,payload:(input as any).payload};},
+    fetch:(async(url:string|URL|Request)=>{sent.push(String(url));return Response.json({model_context_length:1000});}) as typeof fetch};
+  const open=async(server:ReturnType<typeof brokerServer>)=>{server.listen(0,'127.0.0.1');await once(server,'listening');const address=server.address();assert.ok(address&&typeof address!=='string');return 'http://127.0.0.1:'+address.port;};
+  const broker=brokerServer({...options,agentKey}),bare=brokerServer(options);
+  try {
+    const base=await open(broker),bareBase=await open(bare);
+    const call=async(url:string,key:string,method='POST',body:unknown={payload:{text:'Synthetic'}})=>{
+      const response=await fetch(url,{method,headers:{authorization:'Bearer '+key,'content-type':'application/json'},...(method==='GET'?{}:{body:JSON.stringify(body)})});
+      return {status:response.status,body:await response.json() as any};
+    };
+    assert.deepEqual(await call(base+'/v1/guard',agentKey),{status:200,body:{guarded:true,payload:{text:'Synthetic'}}});
+    assert.deepEqual(prepared,[{kind:'agent',agent:'hermes'}],'the system guard gets the agent login, never a reader');
+    assert.deepEqual(await call(base+'/v1/guard',token),{status:403,body:{error:'agent_login_required'}});
+    for(const [method,path] of [['GET','/v1/guard'],['POST','/v1/guard?destination=x'],['POST','/mcp'],['POST','/v1/chat/completions'],['GET','/v1/security/binding'],
+      ['POST','/v1/context/prepare'],['GET','/v1/security/policy'],['POST','/v1/machines/exec']] as const)
+      assert.deepEqual(await call(base+path,agentKey,method),{status:403,body:{error:'agent_route_not_allowed'}},method+' '+path);
+    // A short or empty key is no agent login, whatever the bearer says.
+    assert.equal((await call(bareBase+'/v1/guard',agentKey)).body.error,'invalid_scope_token');
+    assert.equal(prepared.length,1);
+    // Without an agent login configured, the broker asks Hermes nothing.
+    const pass=turnToken(token,'-10',Date.now()+600000,source,{space:'-10',revision:1,guard_epoch:1,purpose:'assistant'});
+    assert.deepEqual(await call(bareBase+'/v1/security/binding',pass,'GET'),{status:503,body:{error:'agent_key_unconfigured'}});
+    assert.deepEqual(sent,[]);
+  }finally{for(const server of [broker,bare]){server.closeAllConnections();server.close();await once(server,'close');}}
+});
 test('at the monthly spending limit only the owner’s own chat reaches a model',async t=>{
   const secret='synthetic-test-secret',source='b'.repeat(64);const month=new Date().toISOString().slice(0,7);
   const pool={query:async(sql:string)=>({rows:sql.includes('spending_pause')?[{month}]:sql.includes('SELECT p.revision')?[{revision:1,document:{version:1,rules:[]}}]:[],rowCount:1})} as unknown as pg.Pool;
@@ -166,7 +196,7 @@ test('PostgreSQL broker: scoped credential, exact preparation, route denial and 
   const connection={host:process.env.PGHOST,user:'nocheh',database:'nocheh',password:process.env.PGPASSWORD};
   const admin=new pg.Pool(connection),namespace='security_broker_'+Date.now();await admin.query('CREATE SCHEMA '+namespace);
   const pool=new pg.Pool({...connection,options:'-c search_path='+namespace});
-  const token='synthetic-service-token-only-for-tests',calls:{url:string;body:unknown;auth:string;agent:string}[]=[];
+  const token='synthetic-service-token-only-for-tests',agentKey='synthetic-agent-login-only-for-tests-0001',calls:{url:string;body:unknown;auth:string;agent:string}[]=[];
   const secret='synthetic-provider-credential-never-returned',gateway='https://gateway.example.test/v1';
   const previousRoute=process.env.NOCHEH_REPLY_ROUTE_URL;process.env.NOCHEH_REPLY_ROUTE_URL=gateway;
   let guardDown=false,streamRevocation=false,slowMemory=false,providerStatus=0;const preparedPrincipals:any[]=[];
@@ -190,7 +220,7 @@ test('PostgreSQL broker: scoped credential, exact preparation, route denial and 
     }}),{headers:{'content-type':'text/event-stream'}});
     return Response.json({ok:true});
   };
-  const server=brokerServer({pool,token,archive:'http://archive',prepare:async(principal,input)=>{preparedPrincipals.push(principal);if(guardDown)throw Error('detector unavailable');return {guarded:true,payload:(input as any).payload};},hermes:'http://hermes',model:'same-model',backupModel:'backup-model',fetch:mock});
+  const server=brokerServer({pool,token,agentKey,archive:'http://archive',prepare:async(principal,input)=>{preparedPrincipals.push(principal);if(guardDown)throw Error('detector unavailable');return {guarded:true,payload:(input as any).payload};},hermes:'http://hermes',model:'same-model',backupModel:'backup-model',fetch:mock});
   try {
     await initialize(pool);
     const event=await ingest(pool,{version:1,key:'security-turn',origin:'live',kind:'message',channel:'browser',bot_id:'fixture',scope:'1',source_id:'1',revision:'0',occurred_at:null,text:'exact source',payload:{profile:'owner'}},false);
@@ -215,6 +245,8 @@ test('PostgreSQL broker: scoped credential, exact preparation, route denial and 
     await assert.rejects(effectLog(pool,{admin:false,scope:null},'0',undefined,event.id),{code:'owner_required'});
     await assert.rejects(effectLog(pool,{admin:true,scope:null},'0',undefined,'bad'),{code:'invalid_event_filter'});
     const provider=calls.at(-1)!;assert.deepEqual(provider.body,payload);assert.equal(provider.auth,'Bearer '+secret);
+    // Hermes gives the provider to the agent login only, never to the master key (ADR-0295).
+    assert.deepEqual([...new Set(calls.filter(call=>call.url.endsWith('/internal/security/transport')).map(call=>call.auth))],['Bearer '+agentKey]);
     assert.equal(provider.agent,'Nocheh','a reply names its client, so a gateway bot check does not refuse it');
     assert.equal(preparedPrincipals[0].turnEvent,event.id);assert.equal(preparedPrincipals[0].admin,false);
     // The backup reply model is admitted as well, and reaches the provider unchanged.
@@ -279,7 +311,7 @@ test("PostgreSQL broker: Anthropic's Messages API gets the provider key in its o
   const connection={host:process.env.PGHOST,user:'nocheh',database:'nocheh',password:process.env.PGPASSWORD};
   const admin=new pg.Pool(connection),namespace='security_anthropic_'+Date.now();await admin.query('CREATE SCHEMA '+namespace);
   const pool=new pg.Pool({...connection,options:'-c search_path='+namespace});
-  const token='synthetic-service-token-only-for-tests',secret='synthetic-provider-credential-never-returned';
+  const token='synthetic-service-token-only-for-tests',agentKey='synthetic-agent-login-only-for-tests-0001',secret='synthetic-provider-credential-never-returned';
   const calls:{url:string;body:unknown;headers:Headers}[]=[];
   const previousRoute=process.env.NOCHEH_REPLY_ROUTE_URL;process.env.NOCHEH_REPLY_ROUTE_URL=ANTHROPIC_URL;
   const mock:typeof fetch=async(url,init)=>{
@@ -287,7 +319,7 @@ test("PostgreSQL broker: Anthropic's Messages API gets the provider key in its o
     if(String(url).endsWith('/internal/security/transport'))return Response.json({base_url:ANTHROPIC_URL,api_mode:'chat_completions',api_key:secret});
     return new Response('event: message_start\ndata: {"type":"message_start"}\n\n',{headers:{'content-type':'text/event-stream'}});
   };
-  const server=brokerServer({pool,token,archive:'http://archive',prepare:async(_principal,input)=>({guarded:true,payload:(input as any).payload}),hermes:'http://hermes',model:'same-model',fetch:mock});
+  const server=brokerServer({pool,token,agentKey,archive:'http://archive',prepare:async(_principal,input)=>({guarded:true,payload:(input as any).payload}),hermes:'http://hermes',model:'same-model',fetch:mock});
   try {
     await initialize(pool);
     const event=await ingest(pool,{version:1,key:'security-anthropic-turn',origin:'live',kind:'message',channel:'browser',bot_id:'fixture',scope:'1',source_id:'1',revision:'0',occurred_at:null,text:'exact source',payload:{profile:'owner'}},false);

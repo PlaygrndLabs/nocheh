@@ -37,6 +37,16 @@ Temporary isolated agent containers are additional.
 | `pgweb-archive` | Read-only database viewer | Docker / optional-stopped |
 | `honcho-cli` | One-shot memory inspection | Docker / optional-stopped |
 
+Nocheh's master key `SERVICE_TOKEN` (its admin bearer and the key that signs every
+pass) reaches only `nocheh-app`, `nocheh-security` and, for now, `nocheh-telegram`. The
+agent login `AGENT_KEY` reaches `nocheh-app`, `nocheh-security`, `hermes` and
+`hermes-agent-sb`; with it Nocheh and Hermes call each other, and on Nocheh's side it
+reaches only the agent's own routes. `NOCHEH_HERMES_SESSION_TOKEN`, which opens
+Hermes's own dashboard pages, reaches only `hermes`. The dashboard and executor
+get none of them from Compose, but read `.env`; `nocheh-machines` holds only `NOCHEH_MACHINE_TOKEN`. Hermes and the
+launcher refuse to start with `SERVICE_TOKEN` in their environment; see
+[ADR-0295](adr/0295-agent-login-replaces-the-master-key-in-hermes.md).
+
 `./bin/nocheh status` and Monitoring show each service's tool, purpose,
 location, observed state and expected state. The Honcho metrics probe establishes
 process availability; memory backlog and receipt observations establish progress.

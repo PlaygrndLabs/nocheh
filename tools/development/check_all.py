@@ -58,6 +58,8 @@ FILE_SECONDS = 900
 BROWSER_SECONDS = 2700
 # Synthetic credentials only: these tests never see an installation's .env.
 SERVICE_TOKEN = 'check-all-token-not-a-real-credential'
+# The agent login (ADR-0295): Hermes's suite gets it instead of SERVICE_TOKEN; Nocheh's node tests get both.
+AGENT_KEY = 'check-all-agent-key-not-a-real-credential'
 
 
 def say(text):
@@ -137,7 +139,7 @@ def load(results, only=None):
 def node_file(name, port, logs, label, seconds=FILE_SECONDS):
     """One compiled test file against a freshly emptied cluster: its failed tests."""
     reset(port)
-    environment = {**os.environ, 'PGPORT': port, 'PGDATABASE': 'nocheh', 'SERVICE_TOKEN': SERVICE_TOKEN,
+    environment = {**os.environ, 'PGPORT': port, 'PGDATABASE': 'nocheh', 'SERVICE_TOKEN': SERVICE_TOKEN, 'AGENT_KEY': AGENT_KEY,
                    'NOCHEH_STORES_FIXTURE': '1', 'TELEGRAM_ENABLED': 'false',
                    'PYTHONPATH': os.pathsep.join(filter(None, [str(ROOT), os.environ.get('PYTHONPATH')]))}
     # The workflow fixture switch also opens tests that need the Inngest acceptance fixture (workflow-bootstrap,
@@ -227,6 +229,8 @@ def python(results, only=None):
         with tempfile.TemporaryDirectory(prefix='nocheh-check-', dir='/tmp') as home:
             environment = {**os.environ, 'HERMES_HOME': home, 'SERVICE_TOKEN': SERVICE_TOKEN,
                            'PYTHONPATH': os.pathsep.join(str(path) for path in paths + [ROOT]), 'PYTHONDONTWRITEBYTECODE': '1'}
+            if name == 'hermes':
+                environment.pop('SERVICE_TOKEN'); environment['AGENT_KEY'] = AGENT_KEY
             out = logs / (name + '.json')
             with (logs / (name + '.log')).open('w') as log:
                 run([str(interpreter), '-m', 'tools.development.unittest_report', '--out', str(out)] + selection,

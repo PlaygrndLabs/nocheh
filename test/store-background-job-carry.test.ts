@@ -102,7 +102,7 @@ test('a running job run carries across reaction and learning epochs, any other c
   };
   const resumed=(title:string)=>`[Background job: ${title}] The job was interrupted and restarted. Your to-do list and the work so far are above; the last tool call may not have finished. Continue, and write the final report as your answer when done.`;
   const previousRoute=process.env.NOCHEH_REPLY_ROUTE_URL;process.env.NOCHEH_REPLY_ROUTE_URL='https://gateway.example.test/v1';
-  const broker=brokerServer({pool:stores.control,storage:s.turns,token,archive:'http://archive',hermes:'http://hermes',model:'fixture-model',prepare:storageGuardService(s),
+  const broker=brokerServer({agentKey:'synthetic-agent-login-only-for-tests-0001',pool:stores.control,storage:s.turns,token,archive:'http://archive',hermes:'http://hermes',model:'fixture-model',prepare:storageGuardService(s),
     assertReady:async()=>{await assertGuardConfiguration(s.guards,'on');await s.configuration.assert(policy());},
     fetch:async url=>String(url).endsWith('/internal/security/transport')?Response.json({base_url:'https://gateway.example.test/v1',api_mode:'chat_completions',
       api_key:'synthetic-credential',model_context_length:100000}):Response.json({ok:true})});

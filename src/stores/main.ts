@@ -25,7 +25,7 @@ import {schemaReady} from './dev-schema.js';
 // The members' app checks Telegram's launch data with the public bot id and Telegram's key; a fixture key set where it
 // may not be honoured stops the app here, before anything starts (ADR-0265 D2).
 const memberBot=process.env.TELEGRAM_BOT_ID??'',memberKey=launchKey(process.env,memberBot);
-const config=settings(),pools=runtimeStoreGroups(),adapter=combinedAdapter(telegramAdapter({url:config.telegramUrl,token:config.token}),hermesAdapter({url:config.hermesUrl,token:config.token})),call=withPrompts(runtimeCall(adapter),pools.api.control);
+const config=settings(),pools=runtimeStoreGroups(),adapter=combinedAdapter(telegramAdapter({url:config.telegramUrl,token:config.token}),hermesAdapter({url:config.hermesUrl,token:config.agentKey})),call=withPrompts(runtimeCall(adapter),pools.api.control);
 // Chats are served as the chat directory holds them (ADR-0252): the owner adds Nocheh to a group or turns it on (ADR-0253).
 const options={dataDir:config.dataDir,detectorVersion:config.detectorVersion,serviceToken:config.token,
   policy:servedPolicy(()=>config.assistant),runtime:call,agent:agentWithPrompts(agent(config),pools.api.control),memoryEngine:memoryEngine(config)};
