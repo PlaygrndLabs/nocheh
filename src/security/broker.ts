@@ -35,10 +35,10 @@ export interface BrokerStorage {
 /** `agentKey` is the agent login (ADR-0295): the broker calls Hermes with it and takes it on POST /v1/guard alone; without it
  * no agent login is accepted and no transport call is sent. */
 export interface BrokerOptions {pool:pg.Pool; token:string; agentKey?:string; archive:string; prepare:(principal:Reader|AgentLogin,input:unknown)=>Promise<any>; hermes:string; model:string; backupModel?:string; fetch?:typeof fetch;storage?:BrokerStorage;assertActive?:()=>void;assertReady?:()=>Promise<void>;health?:()=>Promise<unknown>;}
-/** Why Nocheh did not save a schedule a turn set (ADR-0290); any other refusal stays opaque. */
+/** Why Nocheh did not save a schedule a turn set (ADR-0290), or saves it only paused (ADR-0294); any other refusal stays opaque. */
 export const scheduleErrors=new Set(['schedule_turn_required','schedule_turn_not_allowed','schedule_limit_reached','schedule_cron_unsupported',
   'invalid_schedule_definition','invalid_schedule_prompt','invalid_schedule_preference','profile_scope_denied','schedule_sequence_conflict',
-  'schedule_execution_version_conflict']);
+  'schedule_execution_version_conflict','schedule_start_needed']);
 /** A fixed label for preparation-only guard requests; nothing is sent there. */
 const PREPARATION_DESTINATION='https://preparation.nocheh.invalid';
 const relayRoutes:[string,RegExp][]=[
