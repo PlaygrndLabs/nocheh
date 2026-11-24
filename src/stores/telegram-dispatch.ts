@@ -396,7 +396,7 @@ export class TelegramDispatchRepository {
     if(!own)return [];
     // Under every Telegram id the chat has had, so a group Telegram upgraded keeps the lines from before (ADR-0252).
     const rows=(await this.archive.pool.query(`SELECT id,payload FROM events WHERE scope=ANY($1::text[]) AND id<>$2 AND channel='telegram' AND kind='telegram_update' AND origin='live'
-      AND received_at<=$3 AND received_at>$3::timestamptz-interval '12 hours' AND convert_from(payload,'UTF8')::jsonb ? 'message'
+      AND received_at<=$3 AND received_at>$3::timestamptz-interval '24 hours' AND convert_from(payload,'UTF8')::jsonb ? 'message'
       ORDER BY received_at DESC,id DESC LIMIT 100`,[this.scopes(space,own.scope),source.id,own.received_at])).rows;
     if(!rows.length)return [];
     const states=new Map((await this.control.query('SELECT event_id,state,error_code FROM dispatches WHERE event_id=ANY($1::text[])',
