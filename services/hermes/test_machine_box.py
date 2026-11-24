@@ -512,7 +512,8 @@ body,folder,url=json.loads(sys.argv[1]),Path(sys.argv[2]),sys.argv[3]
 os.environ.update(NOCHEH_ISOLATED_TURN='1',TERMINAL_ENV='nocheh_machine',NOCHEH_MACHINE_RUN='1',TERMINAL_CWD='~',ARCHIVE_URL=url)
 from services.hermes import archive_tools,assistant_turn,job_box,request_boundary,subscription
 def archive(path,value=None):
-    if path=='/v1/context/prepare':return value
+    # A tool result names what it read in the query (ADR-0293).
+    if path.split('?')[0]=='/v1/context/prepare':return value
     return {'imports':[]} if path=='/v1/imports/pending' else {'hits':[]}
 install=request_boundary.install
 with patch.object(request_boundary,'install',lambda:install(request_boundary.Boundary('on',transform=lambda url,payload:payload))),\\
