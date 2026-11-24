@@ -1684,7 +1684,7 @@ test('moving a task into a project’s list names the chats that will see it fir
 test('a project ticks the groups that share memory, and a group joins one only after seeing the groups already there', async () => {
   // No box on a group makes groups share (ADR-0247); the project's tick list does, every group ticked by default
   // (ADR-0267, ADR-0287). The list and the save are answered here, so the fixture's own project is left as it was.
-  const tickPage = await browser.newPage({viewport: {width: 1440, height: 900}});
+  const tickPage = await newPage({viewport: {width: 1440, height: 900}});
   const saves = [];
   let saved = {share_chats: true, own_groups: []};
   await tickPage.route(/\/api\/nocheh\/projects\?after=$/, async route => {
