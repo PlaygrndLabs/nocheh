@@ -7,6 +7,7 @@ import {CheckCircle2, KeyRound, Loader2, Pencil, Plus, Server, Trash2, XCircle} 
 import {apiPost} from '../../lib/api';
 import {useParam} from '../../lib/navigation';
 import {setParams} from '../../lib/routes';
+import {useResource} from '../../lib/resource';
 import {useSettings, type ProviderPart, type ProviderRow} from '../../lib/settings';
 import {cn} from '../../lib/utils';
 import {Badge, Button, Card, CardHeader, Empty, Field, Input, Notice, Select, Table, Td, Th} from '../../ui/core';
@@ -738,6 +739,7 @@ function ModelChoices({providers, name}: {providers: Provider[]; name: (id: stri
         {parts.map(part => (
           <PartRow key={part.id} part={part} providers={providers} name={name} providerOptions={providerOptions} />
         ))}
+        <BackupRow providers={providers} name={name} />
         <div className="grid gap-3 border-t border-line px-5 py-2.5 sm:grid-cols-[minmax(0,2fr)_minmax(0,1fr)_minmax(0,1.2fr)] sm:items-start">
           <div>
             <p className="text-sm font-medium">Memory search</p>
@@ -847,8 +849,98 @@ function ModelChoices({providers, name}: {providers: Provider[]; name: (id: stri
             </Select>
           </Field>
         </div>
+        <SpendingRow />
       </div>
     </Card>
+  );
+}
+
+type Spending = {
+  month: string;
+  spent_usd: number;
+  unpriced: number;
+  last_month_usd: number;
+  last_month_unpriced: number;
+  paused: boolean;
+};
+
+/** One monthly dollar limit over every model call: a warning at 80%, and at the limit only the owner's private chat. */
+function SpendingRow() {
+  const settings = useSettings();
+  const {data} = useResource<Spending>('/spending', 120000);
+  const value = settings.value('NOCHEH_MONTHLY_LIMIT_USD');
+  const valid = value === '' || /^(?:[1-9]\d{0,4}|100000)$/.test(value);
+  const usd = (n: number, unpriced: number) => `$${n.toFixed(2)}${unpriced ? ' + unpriced' : ''}`;
+  return (
+    <div className="grid gap-3 border-t border-line px-5 py-2.5 sm:grid-cols-[minmax(0,2fr)_minmax(0,1fr)_minmax(0,1.2fr)] sm:items-start">
+      <div>
+        <p className="text-sm font-medium">Monthly spending limit</p>
+        <p className="text-[13px] text-muted">
+          Counts every model call: replies, memory, the secret check, images and voice notes. You get a warning in your
+          private chat at 80%. At the limit only your private chat gets answers; schedules, background jobs, members,
+          groups and memory learning wait until next month or until you raise it. Leave empty for no limit.
+        </p>
+      </div>
+      <p className="text-[13px] text-muted sm:pt-2">
+        {data
+          ? `This month ${usd(data.spent_usd, data.unpriced)}. Last month ${usd(data.last_month_usd, data.last_month_unpriced)}.`
+          : 'Spend not read yet.'}
+        {data?.paused ? ' Paused now.' : ''}
+      </p>
+      <Field
+        labelHidden
+        label="Monthly limit in dollars"
+        htmlFor="monthly-limit"
+        error={valid ? undefined : 'Enter whole dollars from 1 to 100000, or leave empty.'}
+      >
+        <Input
+          id="monthly-limit"
+          inputMode="numeric"
+          placeholder="No limit"
+          value={value}
+          disabled={settings.busy}
+          onChange={e => settings.set('NOCHEH_MONTHLY_LIMIT_USD', e.target.value.replace(/\D/g, ''))}
+        />
+      </Field>
+    </div>
+  );
+}
+
+/** A second reply model on the replies provider, used only when the replies model cannot answer. */
+function BackupRow({providers, name}: {providers: Provider[]; name: (id: string) => string}) {
+  const settings = useSettings();
+  const provider = settings.value('NOCHEH_REPLY_PROVIDER') || settings.value('NOCHEH_PROVIDER');
+  const listing = useProviderModels(providers.find(p => p.id === provider));
+  const replyModel = settings.value('NOCHEH_REPLY_MODEL') || settings.value('NOCHEH_MODEL');
+  const backup = settings.value('NOCHEH_REPLY_BACKUP_MODEL');
+  return (
+    <div className="grid gap-3 border-t border-line px-5 py-2.5 sm:grid-cols-[minmax(0,2fr)_minmax(0,1fr)_minmax(0,1.2fr)] sm:items-start">
+      <div>
+        <p className="text-sm font-medium">Backup for replies</p>
+        <p className="text-[13px] text-muted">
+          Answers instead when the replies model fails after its retries, such as during a provider outage. Leave empty
+          for none.
+        </p>
+      </div>
+      <p className="text-[13px] text-muted sm:pt-2">
+        {provider ? `Same as replies (${name(provider)})` : 'Same as replies'}
+      </p>
+      <Field
+        labelHidden
+        label="Backup model"
+        htmlFor="reply-backup-model"
+        error={backup && backup === replyModel ? 'Choose a model other than the replies model.' : undefined}
+      >
+        <ModelInput
+          id="reply-backup-model"
+          value={backup}
+          listing={provider ? listing : null}
+          disabled={settings.busy || !provider}
+          inherit="None"
+          onChange={value => settings.set('NOCHEH_REPLY_BACKUP_MODEL', value)}
+        />
+      </Field>
+    </div>
   );
 }
 
