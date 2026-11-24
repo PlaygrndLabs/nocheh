@@ -45,9 +45,9 @@ class PreparedContextTests(unittest.TestCase):
         from tools.memory_tool import MemoryStore
         from run_agent import AIAgent
         from .prepared_context import install
-        seen=[]
-        def prepare(value):
-            seen.append(value)
+        seen,reads=[],[]
+        def prepare(value,read=None):
+            seen.append(value);reads.append(read)
             return json.loads(json.dumps(value).replace('synthetic-secret','***'))
         with tempfile.TemporaryDirectory() as folder,patch('services.hermes.prepared_context.prepare',side_effect=prepare):
             file=Path(folder)/'MEMORY.md';file.write_text('password: synthetic-secret')
@@ -58,5 +58,11 @@ class PreparedContextTests(unittest.TestCase):
                 MemoryStore._write_file(file,['new password: synthetic-secret'])
                 self.assertEqual(file.read_text(),'new password: ***')
                 self.assertEqual(AIAgent._tool_result_content_for_active_model(None,'fixture','tool synthetic-secret'),'tool ***')
+                # Each tool result names what it read before the model sees it; a command's own output reads nothing.
+                self.assertEqual(reads[-1],'other')
+                AIAgent._tool_result_content_for_active_model(None,'mcp__nocheh__browser','page')
+                self.assertEqual(reads[-1],'web')
+                AIAgent._tool_result_content_for_active_model(None,'mcp__nocheh__shell','output')
+                self.assertIsNone(reads[-1])
                 self.assertIn(['new password: synthetic-secret'],seen,'new unmodified note content reaches preparation for durable capture')
             finally:restore()
