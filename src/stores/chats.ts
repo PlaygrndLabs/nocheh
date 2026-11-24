@@ -526,7 +526,9 @@ export class ChatRepository {
       } else if(project)projectId=project.mode==='assigned'?project.project_id:null;
       if(project)await writeAssignment(db,{space_id:chat,project_id:projectId,mode:project.mode==='none'?'none':'assigned',expected_revision:expected});
       return {chat_id:chat,state,project_id:projectId};
-    });
+    // Turning a group on takes nothing from any chat's notes. Turning it off stops the project's other groups reading it,
+    // and moving it between projects can too, so only the owner's chat keeps its notes then (ADR-0289).
+    },{notes:project||state==='off'?'owner':'all'});
     await reloadChats();
     return result;
   }

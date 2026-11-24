@@ -436,6 +436,16 @@ class TurnTests(unittest.TestCase):
                 origin=stored(folder)['entries'][key('memory','Learned today.')]['origins'][0]
                 self.assertEqual((origin['by'],origin['event'],origin['complete']),('turn',EVENT,complete))
 
+    def test_a_turns_new_note_rests_on_its_message_and_the_long_term_memory_it_was_given(self):
+        # ADR-0289: no stored row holds the memory a turn was given, so the parent records it; the next turn looks it up.
+        from services.hermes.retired_history import load_dependencies
+        with tempfile.TemporaryDirectory() as folder:
+            write(folder,['Old.']);self.database(folder,[])
+            watch=sources.before(folder,'chat-family',Path(folder)/'native-state'/'state.db')
+            write(folder,['Old.','Learned today.'])
+            sources.after_turn(folder,{'event_id':EVENT,'channel':'telegram'},'s',watch,{'state':'done'},[OTHER,'not an id'])
+            self.assertEqual(load_dependencies(folder),{'checked':None,'entries':{key('memory','Learned today.'):{'turn':[EVENT],'sources':[OTHER]}}})
+
     def test_a_turn_whose_messages_could_not_be_read_counts_once_when_it_wrote_a_note(self):
         def run(folder,corrupt=False,broken=False,wrote=True,result=None):
             write(folder,['Old.']);self.database(folder,[])

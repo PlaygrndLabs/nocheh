@@ -54,6 +54,18 @@ def sidecar_ok(path,root=None):
     return ok
 
 
+DEPENDENCIES='nocheh-note-dependencies.json'
+
+
+def dependencies_ok(path):
+    """Whether an exported note dependencies file is as export writes it (services/hermes/retired_history.py)."""
+    from services.hermes.retired_history import load_dependencies
+    try:value=json.loads(Path(path).read_text(encoding='utf-8'))
+    except (OSError,ValueError):return False
+    return (isinstance(value,dict) and set(value)=={'version','checked','entries'} and value['version']==1 and value['checked'] is None
+            and isinstance(value['entries'],dict) and load_dependencies(Path(path).parent)['entries']==value['entries'])
+
+
 def export_native(root,directory):
     from services.hermes.native_memory import registered_profiles
     from services.hermes.isolated_profile import database_path
@@ -68,7 +80,7 @@ def export_native(root,directory):
         lock=lock_path.open('rb') if lock_path.exists() else None
         try:
             if lock:fcntl.flock(lock,fcntl.LOCK_SH)
-            for name in ('memories/MEMORY.md','memories/USER.md','space.json','nocheh-owner-profile.json','cron/jobs.json',SIDECAR):
+            for name in ('memories/MEMORY.md','memories/USER.md','space.json','nocheh-owner-profile.json','cron/jobs.json',SIDECAR,DEPENDENCIES):
                 source=profile/name
                 if source.is_symlink() or not source.resolve().is_relative_to(profile.resolve()):raise ValueError('native_export_path_denied')
                 if not source.is_file():continue
@@ -76,6 +88,12 @@ def export_native(root,directory):
                 # so its notes read as not recorded, never as anyone's (ADR-0257).
                 if name==SIDECAR and not sidecar_ok(source,root):continue
                 target=destination/name;target.parent.mkdir(parents=True,exist_ok=True,mode=0o700)
+                if name==DEPENDENCIES:
+                    # What each carried note rests on travels with it, checked again on the first turn after a restore (ADR-0289).
+                    from services.hermes.retired_history import load_dependencies
+                    entries=load_dependencies(profile)['entries']
+                    if entries:target.write_text(json.dumps({'version':1,'checked':None,'entries':entries},sort_keys=True),encoding='utf-8');target.chmod(0o600)
+                    continue
                 shutil.copyfile(source,target);target.chmod(0o600)
                 if name.startswith('memories/'):item['notes'].append(name)
             database=database_path(profile)
@@ -168,8 +186,9 @@ def _validate_package(directory,manifest):
         notes=item.get('notes')
         if not isinstance(notes,list) or len(set(notes))!=len(notes) or any(note not in ('memories/MEMORY.md','memories/USER.md') for note in notes):raise ValueError('portable_notes_invalid')
         allowed.update('native/'+name+'/'+note for note in notes)
-        for marker in ('space.json','nocheh-owner-profile.json','cron/jobs.json',SIDECAR):
+        for marker in ('space.json','nocheh-owner-profile.json','cron/jobs.json',SIDECAR,DEPENDENCIES):
             if 'native/'+name+'/'+marker in files:allowed.add('native/'+name+'/'+marker)
+        if 'native/'+name+'/'+DEPENDENCIES in files and not dependencies_ok(directory/'native'/name/DEPENDENCIES):raise ValueError('portable_note_dependencies_invalid')
         if item['sessions']:
             path=directory/'native'/name/'state.db';allowed.add('native/'+name+'/state.db')
             database=sqlite3.connect(path.as_uri()+'?mode=ro&immutable=1',uri=True)

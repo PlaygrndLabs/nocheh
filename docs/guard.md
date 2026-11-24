@@ -45,8 +45,10 @@ and its report ([ADR-0201](adr/0201-job-reports-survive-reaction-epochs.md))
 continue across them. Owner corrections, hides, guarded-copy and selection
 replacements, project organization, schedule and knowledge changes, Honcho attach and
 mode changes still stop them.
-New native profiles preserve preferences, with
-fresh MEMORY.md, USER.md and sessions; rebuilding memory is tracked in phase G6.
+New native profiles preserve preferences and carry the recent conversation
+([ADR-0163](adr/0163-chat-conversation-carries-into-new-guard-epochs.md)) and, unless the change took
+something away from the chat, its MEMORY.md and USER.md notes minus those resting on a hidden message
+([ADR-0289](adr/0289-chat-notes-carry-into-new-guard-epochs.md)); rebuilding memory is tracked in phase G6.
 Preparing an import does not grant learning consent. Honcho activation and its live
 provider checks are tracked separately in TASK.md.
 

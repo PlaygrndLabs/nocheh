@@ -81,7 +81,7 @@ export class MemoryAccessRepository {
         VALUES($1,$2,$3,$4,$5,$6,$7) ON CONFLICT(destination) DO UPDATE SET suggestions=$2,notify_owner=$3,auto_followup=$4,request_ttl_seconds=$5,default_grant_mode=$6,revision=$7,updated_at=now()`,
         [destination,values.suggestions??null,values.notify_owner??null,values.auto_followup??null,values.request_ttl_seconds??null,values.default_grant_mode??null,next]);
       return {destination,revision:next};
-    });
+    },{notes:'all'});
   }
   private async fence(db:pg.PoolClient,binding:GuardBinding,fact:Fact) {
     const state=(await db.query('SELECT i.generation,g.epoch,g.mode FROM installation i CROSS JOIN guard_state g WHERE i.singleton AND g.singleton FOR SHARE OF i,g')).rows[0];
@@ -315,7 +315,7 @@ export class MemoryAccessRepository {
   }
   async revoke(principal:Reader,id:string,input:unknown) {const body=exact(input,['expected_revision','operation_id']),expected=revision(body.expected_revision),grant=identity(id);
     return this.commands.run(principal,string(body.operation_id,200),{kind:'memory_fact_grant_revoke',grant,expected},async db=>{const row=(await db.query(`UPDATE memory_fact_grants SET state='revoked',revision=revision+1,revoked_at=now(),updated_at=now()
-      WHERE id=$1 AND revision=$2 AND state IN ('active','suspended') RETURNING revision`,[grant,expected])).rows[0];if(!row)throw new HttpError(409,'memory_fact_grant_changed');return {id:grant,state:'revoked',revision:row.revision};});}
+      WHERE id=$1 AND revision=$2 AND state IN ('active','suspended') RETURNING revision`,[grant,expected])).rows[0];if(!row)throw new HttpError(409,'memory_fact_grant_changed');return {id:grant,state:'revoked',revision:row.revision};},{notes:'owner'});}
   async reconcile() {
     // A pre-atomic handoff may have linked the grant but not the request before
     // interruption. A confirmed, exactly bound receipt repairs bookkeeping only.

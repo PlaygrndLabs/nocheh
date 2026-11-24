@@ -9,6 +9,7 @@ import {telegramAddress} from '../frontdoor/telegram.js';
 import {canonical,digest,envelope} from '../archive.js';
 import type {Settings} from '../config.js';
 import {HttpError,authorize,json,object,readJson,string} from '../http.js';
+import {notesCarry} from './notes-epochs.js';
 import {archiveFilters,matchesArchiveFilters,privateChatsParams,type ArchiveFilters} from '../archive-filters.js';
 import {actionReviews} from '../action-review-summary.js';
 import {sourceContentTypes} from '../source-content.js';
@@ -101,6 +102,14 @@ export function storageServer(s:StorageServices,config:Settings,call:RuntimeCall
       authorize(req,config.token);const ids=object(await readJson(req,64*1024)).event_ids;
       if(!Array.isArray(ids)||ids.length>500||ids.some(id=>typeof id!=='string'||!/^[a-f0-9]{64}$/.test(id)))throw new HttpError(400,'invalid_event_ids');
       return json(res,200,await s.retirements.historyRetirements(ids as string[]));
+    }
+    if(req.method==='POST'&&path==='/internal/notes/carry') {
+      // Hermes asks before a chat's new profile takes the notes of its earlier one (ADR-0289): whether every epoch since
+      // let notes through for this chat. It names no chat, only whether it is the owner's.
+      authorize(req,config.token);const body=object(await readJson(req,1024));
+      if(Object.keys(body).some(key=>!['generation','from','to','owner'].includes(key))||typeof body.generation!=='string'||typeof body.owner!=='boolean'||
+        !Number.isSafeInteger(body.from)||!Number.isSafeInteger(body.to))throw new HttpError(400,'invalid_notes_carry');
+      return json(res,200,{carry:await notesCarry(s.stores.control,body.generation,Number(body.from),Number(body.to),body.owner)});
     }
     if(req.method==='POST'&&path==='/internal/notes/sources') {
       // Hermes asks where its notes came from before each turn and review (ADR-0257). The labels name groups only as

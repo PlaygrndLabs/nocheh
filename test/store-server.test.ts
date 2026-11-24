@@ -45,7 +45,7 @@ test('separated application captures through control outages, exposes owner repo
     if(operation==='telegram.status')return {ok:true,telegram:'connected',telegram_details:{state:'connected'}};
     if(operation==='guard.detect')return {literals:[]};
     if(operation==='prompts.defaults')return {defaults:{'reply.common':'Common','reply.owner':'Owner','reply.group':'Group','reply.private':'Private answer','reply.member':'Member','reply.member_read':'Member read','memory.limited':'Limited',
-      'memory.evidence':'Evidence','memory.notes_review':'Review','guard.secret_check':'Secrets','sharing.group_filter':'Filter','images.read':'Images','reply.scheduled':'Scheduled','reply.schedules':'Schedules'}};
+      'memory.evidence':'Evidence','memory.notes_review':'Review','guard.secret_check':'Secrets','sharing.group_filter':'Filter','images.read':'Images','reply.scheduled':'Scheduled','reply.schedules':'Schedules','reply.member_schedules':'Member schedules'}};
     if(operation.startsWith('persona.')||operation==='config.read')return {operation,input};
     if(operation==='memory.read')return {scope:input.scope,profile:'p-owner',memories:[{name:'MEMORY.md',text:'Juniper',
       entries:[{target:'memory',text:'Juniper',key:'e'.repeat(64),origins:[{by:'unknown'}],more:0,cites:[]}]}],sessions:[]};
@@ -116,8 +116,15 @@ test('separated application captures through control outages, exposes owner repo
     assert.deepEqual((await request('/v1/prompts',{texts:{'reply.owner':null},revision:saved.revision})).texts,{});
     assert.equal((await request('/v1/security/policy')).source,'owner security policy');
     await request('/v1/security/preview',{action_id:digest(key)},404);
+    const unchanged=await services.guards.state();
     const project=await request('/v1/projects',{name:key,description:'HTTP rehearsal',state:'active',expected_revision:0,operation_id:key+':project'});
     assert.equal(project.name,key);
+    // Hermes asks whether a chat's notes cross the epochs since; a project change keeps only the owner's chat's (ADR-0289).
+    const across={generation:unchanged.generation,from:unchanged.epoch,to:(await services.guards.state()).epoch};
+    assert.deepEqual(await request('/internal/notes/carry',{...across,owner:true}),{carry:true});
+    assert.deepEqual(await request('/internal/notes/carry',{...across,owner:false}),{carry:false});
+    await request('/internal/notes/carry',{...across,owner:true},401,scopeToken(token,'123',Date.now()+60000));
+    await request('/internal/notes/carry',{...across,owner:'yes'},400);
     const event:Envelope={version:1,key,origin:'live',bot_id:'fixture',kind:'telegram_update',scope:'123',source_id:String(Date.now()),revision:'1',occurred_at:null,text:'Original HTTP observation',
       payload:{message:{message_id:Date.now(),chat:{id:123,type:'private'},from:{id:123},text:'Original HTTP observation'}}};
     controlDown=true;archiveDown=true;

@@ -123,6 +123,6 @@ export class RuntimeProfileRepository {
       await db.query(`INSERT INTO runtime_profiles(id,name,owner_id,state,revision) VALUES($1,$2,$3,$4,$5)
         ON CONFLICT(id) DO UPDATE SET name=$2,state=$4,revision=$5,updated_at=now()`,[id,label,owner,body.state,result.revision]);
       return result;
-    });
+    },{notes:'all'});
   }
 }

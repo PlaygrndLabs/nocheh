@@ -4,17 +4,21 @@ import {canonical,digest} from '../archive.js';
 import {HttpError,string} from '../http.js';
 import {requestWorkflow} from '../workflows/store.js';
 import {foregroundReplyActive} from './automatic-publication.js';
+import {keepNotes,type NotesKept} from './notes-epochs.js';
 
 /** Atomic control-only changes publish policy and revoke contexts in one commit.
  * A command pauses Honcho reads until its epoch's correction sweep finishes (ADR-0149), unless
  * its caller passes `holdsMemory: false` because it changes nothing a written receipt's validity reads (ADR-0223).
  * A command that changes no policy, memory or guard state passes `epoch: false` (a member command, step 3): it keeps
  * the admin check, the receipt, idempotency by operation id and request hash, and the conflict error, but moves no guard
- * epoch and requests no Honcho or memory review refresh; its receipt keeps the current epoch and never holds memory. */
+ * epoch and requests no Honcho or memory review refresh; its receipt keeps the current epoch and never holds memory.
+ * A command whose epoch takes nothing away from a chat passes `notes` to let chats keep their Hermes notes across it:
+ * every chat (`all`), or only the owner's private chat (`owner`) when it can take something away from a group. Without it
+ * every chat's notes start fresh (ADR-0289). */
 export class OwnerCommands {
   constructor(readonly control:pg.Pool){}
   async run<T>(principal:Reader,operationId:string,request:unknown,change:(client:pg.PoolClient)=>Promise<T>,
-    options:{holdsMemory?:boolean;epoch?:boolean}={}):Promise<T> {
+    options:{holdsMemory?:boolean;epoch?:boolean;notes?:NotesKept}={}):Promise<T> {
     admin(principal);string(operationId,200);if(!operationId.trim())throw new HttpError(400,'operation_id_required');
     const hash=digest(canonical(request)),client=await this.control.connect();
     try {
@@ -32,7 +36,10 @@ export class OwnerCommands {
       }
       const result=await change(client),moves=options.epoch!==false;
       const epoch=moves?Number((await client.query('UPDATE guard_state SET epoch=epoch+1 WHERE singleton RETURNING epoch')).rows[0].epoch):Number(guard.epoch);
-      if(moves){await requestWorkflow(client,'honcho','refresh',epoch);await requestWorkflow(client,'memory_review','refresh',epoch);}
+      if(moves){
+        await requestWorkflow(client,'honcho','refresh',epoch);await requestWorkflow(client,'memory_review','refresh',epoch);
+        if(options.notes)await keepNotes(client,epoch,options.notes);
+      }
       await client.query('INSERT INTO owner_commands(id,request_hash,result,epoch,holds_memory) VALUES($1,$2,$3,$4,$5)',[operationId,hash,JSON.stringify(result),epoch,moves&&options.holdsMemory!==false]);
       await client.query('COMMIT');return result;
     } catch(error) {await client.query('ROLLBACK');throw error;}

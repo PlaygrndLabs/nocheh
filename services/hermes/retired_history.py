@@ -28,7 +28,10 @@ would be, and its notice names the record by its memory ID.
 Hermes native notes (``MEMORY.md``, ``USER.md`` and Hermes' drift backups of
 them) are a third copy. An entry is removed when it cites a retired source or
 a turn whose delivered answer is retired, or when it is exactly the text a
-withheld turn's memory tool call wrote.
+withheld turn's memory tool call wrote. Notes carried from an earlier guard
+epoch's profile leave the rows of the turns that wrote them behind, so what
+each such turn rests on is kept beside the notes (``DEPENDENCIES``) and checked
+the same way (ADR-0289).
 """
 import fcntl
 import json
@@ -63,6 +66,11 @@ LOOKUP_BATCH=200
 # Hermes' MemoryStore files and their entry delimiter (tools/memory_tool_store.py).
 NOTE_FILES=('MEMORY.md','USER.md')
 NOTE_DELIMITER='\n§\n'
+# What each note carried from an earlier guard epoch rests on (ADR-0289), by note key (note_sources.key): the turn that
+# wrote it, checked like a turn's message (retired, or its delivered answer retired), and the sources it read or quoted,
+# checked like a cited source. Ids only, no text, in the profile root, which a turn cannot write.
+DEPENDENCIES='nocheh-note-dependencies.json'
+HEX=re.compile(r'[a-f0-9]{64}')
 # The lines of the frame turn_process.py writes before a message's own text. Member text in it reads every opening
 # bracket of these words as a parenthesis (turn_process.unframed), so none of these lines comes from what someone wrote.
 RECENT_START,RECENT_END='[Recent messages in this group','[End of recent messages]'
@@ -186,8 +194,9 @@ def _withhold(row,content):
     return change
 
 
-def _lookup(lookup,event_ids):
-    """Retired and answer-retired events among the given IDs, in bounded batches."""
+def _lookup(lookup,event_ids,extra=None):
+    """Retired and answer-retired events among the given IDs, in bounded batches. `extra`, when given, also gathers the
+    owner's grants among them that have lapsed (`lapsed`), which only a group's notes leave with (ADR-0289)."""
     revision=lookup([])['revision'] if not event_ids else None
     retired,answered=set(),{}
     ordered=sorted(event_ids)
@@ -195,6 +204,7 @@ def _lookup(lookup,event_ids):
         value=lookup(ordered[start:start+LOOKUP_BATCH])
         revision=revision or value['revision']
         retired.update(value['retired']);answered.update(value['answered'])
+        if extra is not None:extra.setdefault('lapsed',set()).update(value.get('lapsed_grants') or ())
     return revision,retired,answered
 
 
@@ -276,22 +286,180 @@ def note_citations(notes):
     return cited
 
 
-def withhold_notes(notes,retired,written=(),spans=()):
-    """Remove native note entries derived from retired sources; return how many."""
+def withhold_notes(notes,retired,written=(),spans=(),dependent=frozenset()):
+    """Remove native note entries derived from retired sources, and those whose key is in `dependent`; return how many."""
     # A very short span would match unrelated entries; such a patch is left to the entry's own citation (withheld_note).
+    from .note_sources import key
     removed=0
     for file in _note_files(notes):
+        target='user' if file.name.split('.bak.')[0]=='USER.md' else 'memory'
         # Hermes' own writers lock this sibling file and replace the note atomically.
         with file.with_name(file.name.split('.bak.')[0]+'.lock').open('a') as lock:
             fcntl.flock(lock,fcntl.LOCK_EX)
             entries=_note_entries(file)
-            kept=[entry for entry in entries if not set(IDENTIFIER.findall(entry))&retired and not withheld_note(entry,written,spans)]
+            kept=[entry for entry in entries if not set(IDENTIFIER.findall(entry))&retired and not withheld_note(entry,written,spans)
+                  and not (dependent and key(target,entry) in dependent)]
             if len(kept)==len(entries):continue
             with tempfile.NamedTemporaryFile('w',encoding='utf-8',dir=file.parent,prefix='.mem_',delete=False) as output:
                 output.write(NOTE_DELIMITER.join(kept));output.flush();os.fsync(output.fileno())
             os.replace(output.name,file)
             removed+=len(entries)-len(kept)
     return removed
+
+
+def load_dependencies(profile,strict=False):
+    """A profile's note dependencies (DEPENDENCIES): {'checked': the retirement revision they were last checked at, or
+    None, 'entries': {note key: {'turn': [ids], 'sources': [ids]}}}. A missing file reads as none. A file that is a
+    link, cannot be read, or is not one reads as none too, as does any entry that is not well formed; `strict` raises
+    instead (a read error as it came, anything else note_dependencies_unreadable), for a reader that would otherwise
+    carry notes without them or write over them."""
+    path=Path(profile)/DEPENDENCIES;empty={'checked':None,'entries':{}}
+    if not path.exists() and not path.is_symlink():return empty
+    try:
+        if path.is_symlink():raise ValueError('note_dependencies_path_denied')
+        text=path.read_text(encoding='utf-8')
+    except (OSError,ValueError):
+        if strict:raise
+        return empty
+    try:value=json.loads(text)
+    except ValueError:value=None
+    entries={};bad=not isinstance(value,dict) or value.get('version')!=1 or not isinstance(value.get('entries'),dict)
+    for name,item in ({} if bad else value['entries']).items():
+        ids=[item.get('turn'),item.get('sources')] if isinstance(item,dict) else [None,None]
+        if not isinstance(name,str) or not HEX.fullmatch(name) or not all(isinstance(found,list) and all(isinstance(one,str) and HEX.fullmatch(one) for one in found) for found in ids):
+            bad=True;continue
+        entries[name]={'turn':sorted(set(ids[0])),'sources':sorted(set(ids[1]))}
+    if bad and strict:raise ValueError('note_dependencies_unreadable')
+    if bad and not entries:return empty
+    checked=value.get('checked')
+    return {'checked':checked if isinstance(checked,str) else None,'entries':entries}
+
+
+def save_dependencies(profile,checked,entries):
+    from .native_memory import save_receipt
+    path=Path(profile)/DEPENDENCIES
+    if path.is_symlink():raise ValueError('note_dependencies_path_denied')
+    save_receipt(path,json.dumps({'version':1,'checked':checked,'entries':entries},sort_keys=True,separators=(',',':')))
+
+
+def dependent(entries,retired,answered):
+    """The note keys whose writing turn is retired or had its delivered answer retired, or which rest on a retired source."""
+    replied={event for event,replies in answered.items() if replies}
+    return {name for name,item in entries.items() if set(item['turn'])&(retired|replied) or set(item['sources'])&retired}
+
+
+def _note_keys(notes):
+    """The keys of the notes in a profile's MEMORY.md and USER.md, as withhold_notes reads them."""
+    from .note_sources import key
+    found=set()
+    for file in _note_files(notes):
+        if '.bak.' not in file.name:found|={key('user' if file.name=='USER.md' else 'memory',entry) for entry in _note_entries(file)}
+    return found
+
+
+def _withhold_dependent(notes,depends,revision,lookup):
+    """Remove carried notes that rest on a source retired since they were last checked; return how many (ADR-0289).
+    Every retirement starts a new epoch, whose carry checks them all, so this asks storage again only when the
+    retirement revision moved since."""
+    if notes is None or not depends['entries'] or depends['checked']==revision:return 0
+    ids=set().union(*(set(item['turn'])|set(item['sources']) for item in depends['entries'].values()))
+    _,retired,answered=_lookup(lookup,ids)
+    removed=withhold_notes(notes,set(),dependent=dependent(depends['entries'],retired,answered))
+    present=_note_keys(notes)
+    save_dependencies(Path(notes).parent,revision,{name:item for name,item in depends['entries'].items() if name in present})
+    return removed
+
+
+def note_dependencies(rows):
+    """What each stored memory call rests on, without asking storage: [(whole entries, patched spans, turn ids, source
+    ids)], one per assistant row whose memory call wrote something (_memory_writes). plan() withholds that row, and with
+    it the notes it wrote, when its turn's message or delivered answer is retired (turn ids), or when any source id is
+    retired: an id the row cites, an id a tool result before it in its turn cites, a message the turn's row quotes in
+    Nocheh's frame, or an earlier text of the session the turn's memory writes copy. The last two are read as if every
+    such message were retired, which can only add an id plan() would not have counted (ADR-0289)."""
+    from .note_sources import _plain,_written
+    # Each earlier text once, in its plain form, with every id it is read as: a tool result can cite many.
+    found=[];earlier={};session=object()
+    def keep(cause,text):
+        if isinstance(text,str):earlier.setdefault(_plain(text),set()).add(cause)
+    for event,user,following in _turns(rows):
+        first=user or (following[0] if following else None)
+        if first is not None and first['session_id']!=session:session=first['session_id'];earlier={}
+        ops=[op for row in following if row['role']=='assistant' and not _summary(row) for op in memory_ops(row)]
+        written=_written(ops) if ops and earlier else None
+        copied=set().union(*(causes for plain,causes in earlier.items() if _plain_copied(plain,written))) if written else set()
+        spans=_spans(user['content']) if user else []
+        quoted={span for kind,span,_,_ in spans if kind!='part'}
+        turn={event} if event else set();tools=set()
+        for row in following:
+            if _summary(row):continue
+            if row['role']=='assistant':
+                entries,patched=_memory_writes(row)
+                if entries or patched:found.append((entries,patched,turn,_cites(row)|tools|quoted|copied))
+            elif row['role']=='tool':tools|=_cites(row)
+        # What later turns of the session may copy from: this turn's message, the messages it quoted, its tool results.
+        if user and isinstance(user['content'],str):
+            if event:keep(event,user['content'])
+            lines=user['content'].split('\n')
+            for kind,span,start,end in spans:
+                if kind!='part':keep(span,'\n'.join(lines[start+1:end] if kind=='reply' else lines[start+1:end+1]))
+        for row in following:
+            if row['role']=='tool':
+                for cause in _cites(row):keep(cause,row['content'])
+    return found
+
+
+def _plain_copied(plain,written):
+    """note_sources._reply_copied for a text already in its plain form: whether what a run wrote shares a run of text or
+    a distinctive token with it, or holds a short one whole. Each written run is looked for in the text, so a long text
+    costs one search per run, not one set lookup per character."""
+    from .note_sources import RUN,SHORT_COPY
+    runs,tokens,plains=written
+    return (any(token in plain for token in tokens) or any(run in plain for run in runs)
+            or SHORT_COPY<=len(plain)<RUN and any(plain in whole for whole in plains))
+
+
+def add_dependencies(profile,before,turn=(),sources=()):
+    """Record what the notes a turn added or changed rest on beyond its stored rows: the message it answered (`turn`) and
+    the long-term memory it was given (`sources`), which no stored row holds (ADR-0289). They are looked up on the next
+    turn, as the memory may already rest on a retired message."""
+    from .note_sources import entries,key
+    turn=[one for one in turn if isinstance(one,str) and HEX.fullmatch(one)]
+    sources=[one for one in sources if isinstance(one,str) and HEX.fullmatch(one)]
+    found=entries(profile)
+    if before is None or found is None or not turn and not sources:return 0
+    old={key(target,entry) for target,items in before.items() for entry in items}
+    new={key(target,entry) for target,items in found.items() for entry in items}-old
+    if not new:return 0
+    depends=load_dependencies(profile,strict=True)['entries']
+    for name in new:
+        item=depends.get(name,{'turn':[],'sources':[]})
+        depends[name]={'turn':sorted(set(item['turn'])|set(turn)),'sources':sorted(set(item['sources'])|set(sources))}
+    save_dependencies(profile,None,depends)
+    return len(new)
+
+
+def entry_dependencies(found,notes):
+    """Each note's dependencies, by key, from note_dependencies(): the turn and source ids of every memory call that
+    wrote it, as withheld_note matches a note to a withheld call. A note no stored call wrote has none."""
+    from .note_sources import key
+    depends={}
+    for target,items in notes.items():
+        for entry in items:
+            turn,sources=set(),set()
+            for written,spans,ids,cited in found:
+                if withheld_note(entry,written,spans):turn|=ids;sources|=cited
+            if turn or sources:depends[key(target,entry)]={'turn':sorted(turn),'sources':sorted(sources)}
+    return depends
+
+
+def stored_rows(database):
+    """A profile's stored rows, read only, as plan() takes them; none when it has no database."""
+    database=Path(database)
+    if not database.is_file():return []
+    connection=_read_only(database)
+    try:return _rows(connection)
+    finally:connection.close()
 
 
 def plan(rows,lookup):
@@ -415,10 +583,12 @@ def withheld_note(entry,written,spans):
 def withhold_retired(database,lookup,notes=None):
     """Bring one profile's stored native history and notes current; run only while its turn lock is held."""
     database=Path(database);cited=note_citations(notes)
-    if not database.is_file() and not cited:return 0
+    depends=load_dependencies(Path(notes).parent) if notes is not None else {'checked':None,'entries':{}}
+    if not database.is_file() and not cited and not depends['entries']:return 0
     # Notes are checked on every turn: a note written after the last check can cite a source retired before it.
     revision,retired,answered=_lookup(lookup,cited)
     removed=withhold_notes(notes,retired|set(answered))
+    removed+=_withhold_dependent(notes,depends,revision,lookup)
     if not database.is_file():return removed
     connection=_read_only(database)
     try:

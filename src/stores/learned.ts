@@ -11,6 +11,7 @@ import {ProjectRepository} from './projects.js';
 import {revokeBeforePublication} from './publications.js';
 import {foregroundReplyActive} from './automatic-publication.js';
 import {requestWorkflow} from '../workflows/store.js';
+import {keepNotes} from './notes-epochs.js';
 
 export interface PreparedDependency {source_id:string;revision:number|null;value_hash:string;selection?:{id:string;revision:number}}
 export interface LearnedPublication {entry_id:string;revision:number;expected_revision:number|null;operation_id:string;input_binding:GuardBinding;request_hash:string}
@@ -139,6 +140,8 @@ export class LearnedMemoryRepository {
       // reports carry across its epoch, as across a reaction (ADR-0200). Owner corrections go through
       // revokeBeforePublication and stay unrecorded. Only an epoch advanced here is recorded.
       if(changed)await db.query("INSERT INTO guard_quiet_epochs(generation,epoch,reason) VALUES($1,$2,'learning') ON CONFLICT DO NOTHING",[state.generation,epoch]);
+      // Every chat keeps its Hermes notes across it, as across an owner correction (ADR-0289).
+      if(changed)await keepNotes(db,epoch,'all');
       for(const version of versions) {
         await db.query(`INSERT INTO guard_publications(id,operation_kind,source_id,revision,expected_revision,epoch) VALUES($1,'memory',$2,$3,$4,$5)`,
           [version.operation_id,version.entry_id,version.revision,version.expected_revision,epoch]);

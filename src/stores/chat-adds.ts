@@ -217,7 +217,8 @@ export class ChatAdds {
         if(row.project_id&&(await this.control.query(`SELECT 1 FROM projects p WHERE p.id=$1 AND p.state='active'
             AND NOT EXISTS(SELECT 1 FROM project_assignments a WHERE a.project_id=p.id AND a.mode='assigned')`,[row.project_id])).rowCount)
           await this.commands.run(asOwner,'chat-add-archive:'+row.event_id,{kind:'chat_add_archive',event_id:row.event_id,project_id:row.project_id},
-            async db=>({project_id:row.project_id,archived:await archiveEmpty(db,row.project_id!)}));
+            // Archiving a project with no group in it takes nothing from any chat (ADR-0289).
+            async db=>({project_id:row.project_id,archived:await archiveEmpty(db,row.project_id!)}),{notes:'all'});
         await this.finish(row,{});return;
       }
     }
@@ -306,7 +307,7 @@ export class ChatAdds {
           await writeAssignment(db,{space_id:row.chat_id,project_id:project,mode:project?'assigned':'none',expected_revision:Number(own?.revision??0)});
           await archiveEmpty(db,row.project_id!);
           return {chat_id:row.chat_id,project_id:project};
-        });
+        },{notes:'owner'});
         const name=project?labelName((await this.control.query('SELECT name FROM projects WHERE id=$1',[project])).rows[0]?.name):null;
         reply=project?fillLine(lines.moved,{group,project:name===null?lines.unnamed_project:quotedName(name)}):fillLine(lines.unassigned,{group});
       }

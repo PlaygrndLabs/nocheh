@@ -3,6 +3,7 @@ import {HttpError} from '../http.js';
 import {requestWorkflow} from '../workflows/store.js';
 import {canonical} from '../archive.js';
 import type {GuardBinding} from './guards.js';
+import {keepNotes} from './notes-epochs.js';
 
 // Preparing the first guarded copy or first derivative selection cannot revoke
 // an unrelated authorized context. Their own reads still require a ready
@@ -37,6 +38,9 @@ export async function revokeBeforePublication(control:pg.Pool,change:Representat
       await client.query(`INSERT INTO guard_publications(id,operation_kind,source_id,revision,expected_revision,epoch) VALUES($1,$2,$3,$4,$5,$6)`,
         [change.operation_id,change.kind,change.source_id,change.revision,change.expected_revision,epoch]);
       if(changed) {
+        // A learned memory correction keeps every chat's Hermes notes; a new guarded copy or selection may mask what a
+        // note copied, so it starts them fresh (ADR-0289).
+        if(change.kind==='memory')await keepNotes(client,epoch,'all');
         await client.query('INSERT INTO guard_invalidations(source_id,epoch) VALUES($1,$2)',[change.source_id,epoch]);
         await requestWorkflow(client,'honcho','refresh',epoch);await requestWorkflow(client,'memory_review','refresh',epoch);
       }

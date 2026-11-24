@@ -373,7 +373,8 @@ export class SourceAccessRepository {
       await db.query(`INSERT INTO learning_consent(event_id,enabled,reason,revision) VALUES($1,$2,'owner',$3)
         ON CONFLICT(event_id) DO UPDATE SET enabled=$2,reason='owner',revision=$3,updated_at=now()`,[reference.id,body.enabled,revision]);
       return {event_id:reference.id,enabled:body.enabled,revision};
-    });
+    // Learning turned on takes nothing away; turned off, every chat's notes start fresh (ADR-0289).
+    },body.enabled?{notes:'all'}:{});
   }
   async consent(principal:Reader,reference:SourceReference) {
     admin(principal);const source=await this.archive.verify(reference),binding=await this.guards.state();

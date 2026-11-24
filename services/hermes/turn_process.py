@@ -66,13 +66,14 @@ async def run_process(root, scope, body, model, credentials, session_id, emit=No
             # does a member's private chat (step 4).
             from . import note_sources
             watch=None if scope.answer or scope.member or scope.member_read else await asyncio.to_thread(note_sources.before, profile, scope.space or scope.chat_id, database_path(profile), body.get('event_id'))
-            result=None
+            result=None;memory=[]
             try:
-                result=await _run_process(profile, scope, body, model, credentials, session_id, emit, cancelled, progress, watch and watch['sources'])
+                result=await _run_process(profile, scope, body, model, credentials, session_id, emit, cancelled, progress, watch and watch['sources'], memory=memory)
                 return result
             finally:
-                # Also after a cancelled or failed turn: its notes may have changed before it stopped.
-                if watch is not None:await asyncio.to_thread(note_sources.after_turn, profile, body, session_id, watch, result)
+                # Also after a cancelled or failed turn: its notes may have changed before it stopped. They rest on the
+                # long-term memory it was given too (`memory`, the ids it cited), which stays here.
+                if watch is not None:await asyncio.to_thread(note_sources.after_turn, profile, body, session_id, watch, result, memory)
         finally:
             await asyncio.to_thread((profile/'.foreground').touch)
 
@@ -230,7 +231,7 @@ def job_run(limits):
     return limits
 
 
-async def _run_process(profile, scope, body, model, credentials, session_id, emit, cancelled, progress=None, note_sources=None):
+async def _run_process(profile, scope, body, model, credentials, session_id, emit, cancelled, progress=None, note_sources=None, memory=None):
     if cancelled and cancelled.is_set(): return {'state':'cancelled','text':'','session_id':session_id}
     # A background job run lasts until its job's hard deadline: its box commands end then, and the process a minute
     # later if nothing stopped it before. Every other turn has the usual reply time.
@@ -365,6 +366,10 @@ async def _run_process(profile, scope, body, model, credentials, session_id, emi
                 if isinstance(value.get('text'),str): emit(value['text'])
             elif isinstance(value,dict) and value.get('event') == 'heartbeat':
                 continue
+            elif isinstance(value,dict) and value.get('event') == 'memory_sources':
+                # The ids the turn's long-term memory cited, kept for its notes (ADR-0289); only well-formed ones.
+                ids=value.get('ids')
+                if memory is not None and isinstance(ids,list):memory[:]=[one for one in ids[:500] if isinstance(one,str) and re.fullmatch(r'[a-f0-9]{64}',one)]
             elif isinstance(value,dict) and value.get('event') == 'progress' and background:
                 # A job run's counts and to-do list so far, for its heartbeat; checked, since the turn runs the model's tools.
                 from .job_progress import progress_line

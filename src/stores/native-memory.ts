@@ -227,7 +227,7 @@ export class NativeMemoryRepository {
         attached_at=CASE WHEN $1 AND NOT attached AND NOT $3 THEN now() ELSE coalesce(attached_at,now()) END WHERE singleton`,
         [body.attached,body.include_history,body.catch_up]);
       return {revision:row.revision+1};
-    });return this.status();
+    },{notes:'all'});return this.status();
   }
   /** Honcho memory is on by default: an installation with Honcho enabled attaches it once,
    * unless the owner has already attached or detached it. Earlier history is not ingested. */
@@ -242,7 +242,7 @@ export class NativeMemoryRepository {
         await db.query(`UPDATE memory_engine_connection SET attached=true,include_history=false,revision=revision+1,
           attached_at=coalesce(attached_at,now()) WHERE singleton`);
         return {revision:1};
-      });
+      },{notes:'all'});
     } catch(error) {if(!(error instanceof HttpError&&error.code==='memory_connection_conflict'))throw error;}
     return this.status();
   }
@@ -758,6 +758,7 @@ export class NativeMemoryRepository {
     // requests pages the archive, and a retired or withdrawn message is refused as it is for any new write.
     const history=body.from_archive===true;
     // Only spaces Nocheh recorded as its own memory generations are deleted; anything else in the engine is left alone.
+    // Hermes notes do not rest on the memory engine, so chats keep them (ADR-0289).
     await new OwnerCommands(this.control).run(principal,string(body.operation_id,200),body,async db=>{
       const row=(await db.query('SELECT * FROM memory_engine_connection WHERE singleton FOR UPDATE')).rows[0];
       if(row.revision!==body.expected_revision)throw new HttpError(409,'memory_connection_conflict');
@@ -769,7 +770,7 @@ export class NativeMemoryRepository {
         await requestWorkflow(db,'honcho','retire:'+id);
       }
       return {revision:row.revision+1};
-    });
+    },{notes:'all'});
     return this.status();
   }
   private async attachedWorkspace() {

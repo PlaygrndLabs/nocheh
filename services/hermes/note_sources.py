@@ -524,9 +524,11 @@ def turn_origin(body,reads,complete,now=None):
             'reads':[read for read in reads if read in READS][:12],'complete':bool(complete)}
 
 
-def after_turn(profile,body,session,watch,result):
+def after_turn(profile,body,session,watch,result,memory=()):
     """Record the notes a turn wrote, with what it read; reads it could not read in full are incomplete. A turn whose
-    stored messages could not be read counts once, when it added or changed a note, whose label that made less exact."""
+    stored messages could not be read counts once, when it added or changed a note, whose label that made less exact.
+    The notes it wrote also rest on the message it answered and the long-term memory it was given (`memory`, the ids
+    that memory cited), so a later hide of either removes them (retired_history.add_dependencies, ADR-0289)."""
     try:
         from .isolated_profile import database_path
         reads,ops,ok=turn_reads(database_path(profile),session,watch['last'],body)
@@ -535,4 +537,10 @@ def after_turn(profile,body,session,watch,result):
     complete=ok and isinstance(result,dict) and result.get('state')=='done'
     recorded=after(profile,watch,turn_origin(body,reads,complete),ops)
     if not ok and recorded:failed('read')
+    if recorded:
+        try:
+            from .retired_history import add_dependencies
+            with held(profile) as locked:
+                if locked:add_dependencies(profile,watch['before'],[body.get('event_id')],memory)
+        except Exception:failed('record')
     return recorded

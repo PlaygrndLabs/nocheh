@@ -233,6 +233,10 @@ def install_tool_search_policy():
 RUNS=[]
 # Long-term memory this turn could not read in full, for the parent to count (memory_problem).
 PROBLEMS=[]
+# The ids the long-term memory this turn was given cites (nocheh:<kind>:<id>), sent to the parent as soon as it is read
+# (a memory_sources line), so the turn's notes rest on them even when the turn stops early (ADR-0289).
+CITED=re.compile(r'nocheh:[a-z_]+:([a-f0-9]{64})(?![a-f0-9])')
+SEND=None
 
 
 def conversation_result(result, session_id):
@@ -376,6 +380,7 @@ def run(body, emit=None, relay=None):
                 isinstance(part,dict) and isinstance(part.get('limitations'),list) and 'forwards_unavailable' in part['limitations'] for part in parts):
             PROBLEMS.append('memory_read')
         long_term='\nPrimary memory context (derived inferences):\n'+json.dumps(memory,ensure_ascii=False)
+        if SEND:SEND({'event':'memory_sources','ids':list(dict.fromkeys(CITED.findall(json.dumps(memory))))[:500]})
     record('memory_recall',phase);phase=perf_counter()
     session_id=body['session_id']
     history=prepare(native_store.conversation(database,session_id)) if native_store.session_row(database,session_id) else []
@@ -516,6 +521,8 @@ def main():
                     # A job run sends a line now and then, even during a long model call, so the bridge does not take silence for a lost turn.
                     while not finished.wait(20):emit({'event':'heartbeat'})
                 if body.get('heartbeat') is True:threading.Thread(target=heartbeat,daemon=True).start()
+                global SEND
+                SEND=emit
                 try:result=run(body, emit if body.get('stream') else None, emit if body.get('channel')=='background' else None)
                 finally:finished.set()
     except Exception as error:

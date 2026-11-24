@@ -7,6 +7,7 @@ import type {SourceAccessRepository} from './access.js';
 import type {StorePools} from './connections.js';
 import type {GuardBinding} from './guards.js';
 import {OwnerCommands} from './owner-commands.js';
+import type {NotesKept} from './notes-epochs.js';
 import type {Project,ProjectRepository} from './projects.js';
 import type {PreparedLearningContext} from './learning-context.js';
 import {resultItems,withoutNulls,type LearningRejection} from '../interpretations.js';
@@ -404,7 +405,7 @@ export class EntityRepository {
     admin(principal);const body=exact(input,['decision','entity_id','expected_revision','operation_id']),decision=String(body.decision);
     if(!['confirm','reject'].includes(decision))throw new HttpError(400,'invalid_entity_decision');
     const expected=revision(body.expected_revision),suggestionId=entityId(id),target=body.entity_id===undefined?null:entityId(body.entity_id);
-    const operationId=string(body.operation_id,200);
+    const operationId=string(body.operation_id,200),options:{notes:NotesKept;holdsMemory:false}={notes:'all',holdsMemory:false};
     return this.commands.run(principal,operationId,{kind:'entity_suggestion',suggestionId,decision,target,expected},async db=>{
       const suggestion=(await db.query('SELECT * FROM memory_entity_suggestions WHERE id=$1 FOR UPDATE',[suggestionId])).rows[0];
       if(!suggestion)throw new HttpError(404,'entity_suggestion_not_found');
@@ -435,6 +436,10 @@ export class EntityRepository {
             WHERE event_id=$1 AND kind='authored_by' ORDER BY target_id LIMIT 2`,[suggestion.source_reference.id])).rows:[];
           if(authored.length===1) {
             const binding=digest(canonical([protocol,'confirmed-source',authored[0].target_id]));
+            // Moving a sender from one person to another can stop a group seeing the first: only the owner's chat keeps
+            // its Hermes notes then (ADR-0289). `run` reads the options after this change.
+            const before=(await db.query('SELECT entity_id FROM memory_entity_bindings WHERE id=$1',[binding])).rows[0];
+            if(before&&before.entity_id!==entity.id)options.notes='owner';
             await db.query(`INSERT INTO memory_entity_bindings(id,entity_id,binding_kind,source_object_id,label,state)
               VALUES($1,$2,'source_identity',$3,$4,'confirmed') ON CONFLICT(id) DO UPDATE SET entity_id=$2,state='confirmed',revision=memory_entity_bindings.revision+1,updated_at=now()`,
               [binding,entity.id,authored[0].target_id,suggestion.name]);
@@ -456,7 +461,7 @@ export class EntityRepository {
         [suggestionId,status]);
       return {id:suggestionId,status,entity,...(folded.length?{folded:folded.map(row=>row.id)}:{})};
       // An answer only adds an active entity, project and bindings: no written receipt becomes invalid (ADR-0223).
-    },{holdsMemory:false});
+    },options);
   }
   async merge(principal:Reader,id:string,input:unknown) {
     admin(principal);const body=exact(input,['target_id','expected_revision','operation_id']),source=entityId(id),target=entityId(body.target_id),expected=revision(body.expected_revision);
@@ -471,7 +476,7 @@ export class EntityRepository {
       await db.query('UPDATE memory_entity_bindings SET entity_id=$2,revision=revision+1,updated_at=now() WHERE entity_id=$1',[source,target]);
       await db.query("UPDATE memory_entities SET state='merged',merged_into=$2,revision=revision+1,updated_at=now() WHERE id=$1",[source,target]);
       return {id:source,state:'merged',merged_into:target,revision:expected+1};
-    });
+    },{notes:'all'});
   }
   async rename(principal:Reader,id:string,input:unknown) {
     admin(principal);const body=exact(input,['name','expected_revision','operation_id']),target=entityId(id),expected=revision(body.expected_revision),name=string(body.name,200).trim();
@@ -483,7 +488,7 @@ export class EntityRepository {
       await db.query('UPDATE memory_entities SET name=$2,revision=revision+1,updated_at=now() WHERE id=$1',[target,name]);
       return {id:target,name,revision:expected+1};
       // A new name keeps the entity active: no written receipt becomes invalid (ADR-0223).
-    },{holdsMemory:false});
+    },{notes:'all',holdsMemory:false});
   }
   /**
    * The owner's private note about a person (ADR-0274): only the owner writes or reads it, and nothing sends it to the
@@ -525,7 +530,8 @@ export class EntityRepository {
       await db.query('UPDATE memory_entity_binding_moves SET undone=true WHERE from_entity_id=$1 AND merge_revision=$2 AND NOT undone',[source,expected]);
       await db.query("UPDATE memory_entities SET state='active',merged_into=NULL,revision=revision+1,updated_at=now() WHERE id=$1",[source]);
       return {id:source,state:'active',revision:expected+1};
-    });
+    // Bindings moving back can stop a group seeing the person it saw through them: only the owner's chat keeps its notes.
+    },{notes:'owner'});
   }
   async publishClaim(input:EntityClaimInput,binding:unknown,operation:string,author:'honcho'|'owner'='honcho') {
     const subject=await this.row(input.subject_id);if(subject.state!=='active')throw new HttpError(409,'entity_not_active');
@@ -671,7 +677,7 @@ export class EntityRepository {
             JSON.stringify(prior.evidence),JSON.stringify(prior.dependencies),JSON.stringify(prior.input_binding)]);
         await db.query('UPDATE entity_claims SET active_revision=$2 WHERE id=$1',[claim,next]);await db.query('COMMIT');return {id:claim,revision:next,retired:body.retired};
       }catch(error){await db.query('ROLLBACK');throw error;}finally{db.release();}
-    });
+    },{notes:'all'});
   }
   /**
    * Who can read a fact's current wording, the same way a group's turn reads people-facts: only when it can read every
