@@ -198,6 +198,17 @@ names, passes, failures, skips, image IDs, source revision, commands and elapsed
 times. Preserve failed runs before repairs. A skipped fixture-dependent test is
 pending until its separate fixture succeeds; a green process exit is insufficient.
 
+`python3 -m tools.development.check_all` runs every suite in one go: a compile
+check of every tracked Python file, every compiled Node test file against a
+freshly reset synthetic cluster (one worker per cluster named in
+`NOCHEH_CHECK_PGPORTS`), the dashboard browser tests, and the Python unit tests
+of `services/hermes`, `services/telegram`, `services/reader`, `services/honcho`
+and `test/`. `--setup` makes its two Python environments under `data/test-env/`.
+A failure listed with its reason in `test/known-failures.json` is shown but does
+not fail the run; any other failure does, and a listed test that passes again is
+named so it comes off the list. GitHub runs it on every pull request and on main
+(`.github/workflows/checks.yml`), with synthetic data and no secrets.
+
 After a repair, rerun affected behavior and adjacent contracts. Integrate verified
 increments under the shared Git lock without activating the operating services.
 Carry unrelated evidence forward with its original revision and limitations.
@@ -222,6 +233,12 @@ itself fails, its logs are kept in `full-<time>-first-start/` and one fresh
 start is tried; the report names the containers that stopped. The owner
 allowed it to run beside the live installation (2026-10-26): it never reads the
 live state, credentials or volumes and never stops the live stack.
+
+After the scenarios, `end_of_run_health` counts missing tables or columns,
+deadlocks, Python tracebacks and unhandled Node errors in every container's log,
+and lists the work Nocheh and Honcho's learning queue still hold. For now only a
+container that ran out of memory or restarted three times or more fails it; the
+report shows the rest until a few runs show which lines scenarios cause on purpose.
 
 The fake Telegram plays every person. It stores inline keyboards, edits cards
 with `editMessageText`, and answers `answerCallbackQuery` only for button
