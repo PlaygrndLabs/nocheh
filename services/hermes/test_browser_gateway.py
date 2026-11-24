@@ -214,6 +214,7 @@ class BrowserGatewayTests(unittest.TestCase):
         self.assertTrue(entered.wait(2));self.invoke('session.interrupt');self.server._sessions['sid']['_nocheh_thread'].join(2)
         self.assertEqual(cancelled,['event-one']);self.assertEqual(self.run_count,0)
 
+    @unittest.skipUnless(os.path.exists('/opt/venv/bin/python'), 'starts the Hermes image\'s own TUI')
     def test_actual_native_tui_capture_failure_keeps_composer(self):
         import fcntl,select,struct,termios,time
         from .browser_launch import launch
