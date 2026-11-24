@@ -97,6 +97,17 @@ export function storageServer(s:StorageServices,config:Settings,call:RuntimeCall
       if(owner)zones[owner]=zone;
       return json(res,200,{zones});
     }
+    if(req.method==='POST'&&path==='/internal/spending-pause') {
+      // The dashboard's spending check (ADR-0298): the month the monthly limit was reached, or null once it is not.
+      // The security service reads it before each model call.
+      authorize(req,config.token);
+      const month=object(await readJson(req,1024)).month;
+      if(month!==null&&(typeof month!=='string'||!/^\d{4}-\d{2}$/.test(month)))throw new HttpError(400,'invalid_spending_pause');
+      if(month===null)await s.stores.control.query('DELETE FROM spending_pause');
+      else await s.stores.control.query(`INSERT INTO spending_pause(singleton,month) VALUES(true,$1)
+        ON CONFLICT(singleton) DO UPDATE SET month=EXCLUDED.month,updated_at=now()`,[month]);
+      return json(res,200,{month});
+    }
     if(req.method==='GET'&&path==='/internal/chats') {
       // What the Python services may act for (ADR-0252): the served chats with their topics, and the owner's private
       // chat apart from the owner's account; and each member's own private chat that is open now, marked member_private

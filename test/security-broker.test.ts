@@ -4,7 +4,7 @@ import pg from 'pg';
 import {initialize} from '../src/database.js';
 import {ingest} from '../src/archive.js';
 import {turnToken,type Reader} from '../src/access.js';
-import {ANTHROPIC_MESSAGES,ANTHROPIC_URL,anthropicCredential,anthropicHeaders,brokerServer,configuredReplyUrl,FIXTURE_PROVIDER_URL,jobErrors,machineErrors,providerTarget,scopedRoute,type TurnBinding} from '../src/security/broker.js';
+import {ANTHROPIC_MESSAGES,ANTHROPIC_URL,anthropicCredential,anthropicHeaders,brokerServer,configuredReplyUrl,FIXTURE_PROVIDER_URL,jobErrors,machineErrors,providerTarget,scopedRoute,spendingPause,type TurnBinding} from '../src/security/broker.js';
 import {createServer,type IncomingMessage} from 'node:http';
 import {once} from 'node:events';
 import {effectLog} from '../src/security/store.js';
@@ -122,6 +122,44 @@ test('a long-term recall reaches a slow archive without Node fetch, which gives 
   }finally{
     for(const server of [broker,archive]){server.closeAllConnections();server.close();await once(server,'close');}
   }
+});
+
+test('at the monthly spending limit only the owner’s own chat reaches a model',async t=>{
+  const secret='synthetic-test-secret',source='b'.repeat(64);const month=new Date().toISOString().slice(0,7);
+  const pool={query:async(sql:string)=>({rows:sql.includes('spending_pause')?[{month}]:sql.includes('SELECT p.revision')?[{revision:1,document:{version:1,rules:[]}}]:[],rowCount:1})} as unknown as pg.Pool;
+  const binding=async(principal:Reader):Promise<TurnBinding>=>({event_id:principal.turnEvent!,scope:principal.scope??'42',profile:'synthetic',logical_profile:'synthetic',owner:principal.scope===null,guard_epoch:1,
+    ...(principal.space==='job'?{job:'synthetic-job'}:{})});
+  const previous=process.env.NOCHEH_REPLY_ROUTE_URL;process.env.NOCHEH_REPLY_ROUTE_URL='https://provider.example.test/v1';
+  const realFetch=globalThis.fetch;t.mock.method(globalThis,'fetch',async()=>{throw Error('no upstream in this test');});
+  const broker=brokerServer({pool,token:secret,archive:'http://archive',hermes:'http://hermes',model:'synthetic',prepare:async()=>({}),
+    storage:{binding,assertAudience:async()=>{},turnFile:async()=>{throw Error();}}});
+  broker.listen(0,'127.0.0.1');await once(broker,'listening');
+  try {
+    const address=broker.address();assert.ok(address&&typeof address!=='string');
+    const ask=async(scope:string|null,space:string)=>{
+      const credential=turnToken(secret,scope,Date.now()+600000,source,{space,revision:1,guard_epoch:1,purpose:'assistant'});
+      const response=await realFetch('http://127.0.0.1:'+address.port+'/v1/chat/completions',{method:'POST',
+        headers:{authorization:'Bearer '+credential,'content-type':'application/json'},body:JSON.stringify({model:'synthetic',messages:[{role:'user',content:'Synthetic'}]})});
+      return {status:response.status,body:await response.text()};
+    };
+    const group=await ask('-10','-10');
+    assert.equal(group.status,402);assert.equal(JSON.parse(group.body).error,'monthly_spend_limit');
+    assert.equal((await ask(null,'job')).status,402,'a scheduled run waits too');
+    assert.notEqual((await ask(null,'1')).status,402,'the owner\'s own chat still reaches the model');
+  }finally{
+    if(previous===undefined)delete process.env.NOCHEH_REPLY_ROUTE_URL;else process.env.NOCHEH_REPLY_ROUTE_URL=previous;
+    broker.closeAllConnections();broker.close();await once(broker,'close');
+  }
+});
+test('a spending pause from an earlier month has passed, and is read again after 15 seconds',async()=>{
+  let month:string|null='2000-01',now=Date.parse('2026-03-20T12:00:00Z'),reads=0;
+  const pool={query:async()=>{reads++;return {rows:month?[{month}]:[]};}} as unknown as pg.Pool;
+  const paused=spendingPause(pool,()=>now);
+  assert.equal(await paused(),false);
+  month='2026-03';assert.equal(await paused(),false,'read at most every 15 seconds');
+  now+=16_000;assert.equal(await paused(),true);
+  month=null;now+=16_000;assert.equal(await paused(),false);
+  assert.equal(reads,3);
 });
 
 test('PostgreSQL broker: scoped credential, exact preparation, route denial and every-attempt epoch checks',{skip:!process.env.PGHOST},async t=>{

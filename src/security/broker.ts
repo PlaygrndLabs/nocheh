@@ -128,6 +128,18 @@ async function boundedJson(response:Response,max=2*1024*1024):Promise<unknown> {
   if(response.body)for await(const part of response.body){size+=part.length;if(size>max)throw new HttpError(413,'security_response_limit');chunks.push(Buffer.from(part));}
   try{return JSON.parse(Buffer.concat(chunks).toString());}catch{throw new HttpError(503,'invalid_security_upstream');}
 }
+/** The month the monthly spending limit was reached (ADR-0298), read at most every 15 seconds; null when nothing is paused. */
+export function spendingPause(pool:pg.Pool,now=()=>Date.now()):()=>Promise<boolean> {
+  let read=0,month:string|null=null;
+  return async()=>{
+    if(now()-read>15_000){
+      try{month=(await pool.query<{month:string}>('SELECT month FROM spending_pause WHERE singleton')).rows[0]?.month??null;read=now();}
+      // A store that cannot answer keeps the last answer; the next call asks again.
+      catch{}
+    }
+    return month!==null&&month===new Date(now()).toISOString().slice(0,7);
+  };
+}
 export function brokerServer(options:BrokerOptions) {
   const call=options.fetch??fetch;
   // A long-term recall may wait on the archive for up to ten minutes, longer than Node's own fetch waits.
@@ -137,6 +149,7 @@ export function brokerServer(options:BrokerOptions) {
   // So do machine jobs (ADR-0231). This service holds no machine token: storage refuses each command without one.
   const machines=options.storage instanceof RuntimeTurnRepository?new MachineRepository(options.storage.access):null;
   // A job's run goes on across reaction and learning epochs; each of its checks waits out a publication still pending (ADR-0208).
+  const paused=spendingPause(options.pool);
   const assertCurrent=(principal:Reader)=>afterPending(jobRun(principal),async()=>options.storage?options.storage.assertAudience(principal):assertAudience(options.pool,principal));
   return createServer((req,res)=>{void handle(req,res).catch(error=>{
     if(res.headersSent){res.destroy();return;}
@@ -287,6 +300,9 @@ export function brokerServer(options:BrokerOptions) {
         }
         throw error;
       }
+      // At the monthly spending limit only the owner's own private chat reaches a model; schedules, background work,
+      // members and groups wait for next month or a higher limit (ADR-0298). 402 reads as out of credit, so Hermes stops at once.
+      if((!binding.owner||binding.job)&&await paused())throw new HttpError(402,'monthly_spend_limit');
       const attempt=await authorizeEffect('model.request',payload);
       const prepareStarted=performance.now();
       const transport=object(await rpc(options.hermes,'/internal/security/transport',{},'Bearer '+options.token));

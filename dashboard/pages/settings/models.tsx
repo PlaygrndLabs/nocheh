@@ -7,6 +7,7 @@ import {CheckCircle2, KeyRound, Loader2, Pencil, Plus, Server, Trash2, XCircle} 
 import {apiPost} from '../../lib/api';
 import {useParam} from '../../lib/navigation';
 import {setParams} from '../../lib/routes';
+import {useResource} from '../../lib/resource';
 import {useSettings, type ProviderPart, type ProviderRow} from '../../lib/settings';
 import {cn} from '../../lib/utils';
 import {Badge, Button, Card, CardHeader, Empty, Field, Input, Notice, Select, Table, Td, Th} from '../../ui/core';
@@ -848,8 +849,60 @@ function ModelChoices({providers, name}: {providers: Provider[]; name: (id: stri
             </Select>
           </Field>
         </div>
+        <SpendingRow />
       </div>
     </Card>
+  );
+}
+
+type Spending = {
+  month: string;
+  spent_usd: number;
+  unpriced: number;
+  last_month_usd: number;
+  last_month_unpriced: number;
+  paused: boolean;
+};
+
+/** One monthly dollar limit over every model call: a warning at 80%, and at the limit only the owner's private chat. */
+function SpendingRow() {
+  const settings = useSettings();
+  const {data} = useResource<Spending>('/spending', 120000);
+  const value = settings.value('NOCHEH_MONTHLY_LIMIT_USD');
+  const valid = value === '' || /^(?:[1-9]\d{0,4}|100000)$/.test(value);
+  const usd = (n: number, unpriced: number) => `$${n.toFixed(2)}${unpriced ? ' + unpriced' : ''}`;
+  return (
+    <div className="grid gap-3 border-t border-line px-5 py-2.5 sm:grid-cols-[minmax(0,2fr)_minmax(0,1fr)_minmax(0,1.2fr)] sm:items-start">
+      <div>
+        <p className="text-sm font-medium">Monthly spending limit</p>
+        <p className="text-[13px] text-muted">
+          Counts every model call: replies, memory, the secret check, images and voice notes. You get a warning in your
+          private chat at 80%. At the limit only your private chat gets answers; schedules, background jobs, members,
+          groups and memory learning wait until next month or until you raise it. Leave empty for no limit.
+        </p>
+      </div>
+      <p className="text-[13px] text-muted sm:pt-2">
+        {data
+          ? `This month ${usd(data.spent_usd, data.unpriced)}. Last month ${usd(data.last_month_usd, data.last_month_unpriced)}.`
+          : 'Spend not read yet.'}
+        {data?.paused ? ' Paused now.' : ''}
+      </p>
+      <Field
+        labelHidden
+        label="Monthly limit in dollars"
+        htmlFor="monthly-limit"
+        error={valid ? undefined : 'Enter whole dollars from 1 to 100000, or leave empty.'}
+      >
+        <Input
+          id="monthly-limit"
+          inputMode="numeric"
+          placeholder="No limit"
+          value={value}
+          disabled={settings.busy}
+          onChange={e => settings.set('NOCHEH_MONTHLY_LIMIT_USD', e.target.value.replace(/\D/g, ''))}
+        />
+      </Field>
+    </div>
   );
 }
 

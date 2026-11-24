@@ -424,6 +424,7 @@ export async function startManagement() {
       // POST so a key being typed travels in the body, never in a URL or access log.
       if (req.method === 'POST' && route === '/settings/provider-models') return json(res, 200, await python({operation: 'settings.provider_models', request: object(await readJson(req))}));
       if (req.method === 'GET' && route === '/honcho/status') return json(res, 200, await python({operation: 'honcho.status'}));
+      if (req.method === 'GET' && route === '/spending') return json(res, 200, await python({operation: 'spending.view'}));
       if (req.method === 'GET' && route === '/usage') return json(res, 200, await python({operation: 'usage.view', days: Number(url.searchParams.get('days') ?? 30)}));
       if (req.method === 'GET' && route === '/honcho/budget') return json(res, 200, await python({operation: 'honcho.budget'}));
       if (req.method === 'POST' && route === '/honcho/budget') return exclusive('honcho-budget',async()=>
