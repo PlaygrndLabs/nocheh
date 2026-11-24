@@ -28,7 +28,7 @@ class ScriptedAgent:
     This tests the tool, guard and audience pipeline, never model judgement.
     Requests without a directive keep the deterministic mock behaviour.
     """
-    DIRECTIVE = re.compile(r'\[\[(search|recall|action|owner|long|silent|empty-once|context_split|context|turn|notes|note_from|note_open|memory_about|memory_blocks|replied)'
+    DIRECTIVE = re.compile(r'\[\[(search|recall|action|owner|long|silent|empty-once|context_split|context|history|turn|notes|note_from|note_open|memory_about|memory_blocks|replied)'
                            r'(?::([^\]]*))?\]\]')
     # A notes review (its one tool is memory) that reads [[review-note:TEXT]] in a message saves TEXT as a native note,
     # as a model notes what it read, so a scenario sees which messages a review read and how the note is labelled.
@@ -336,6 +336,14 @@ class ScriptedAgent:
             present = bool(argument) and any(argument in block['text'] for block in blocks)
             self.record(directive=kind, argument=argument, phase='final', present=present, blocks=blocks)
             return {'content': '[agent] memory_blocks ' + argument + (' present' if present else ' absent')}
+        if kind == 'history':
+            # The chat's own earlier messages as the agent's session holds them, never the memory evidence or the system
+            # prompt: present after a restart or an upgrade only when the session loaded again.
+            earlier = '\n'.join(text for message in messages if message is not messages[index] and message.role in ('user', 'assistant')
+                                for text in [self.text(message.content)] if not text.startswith(self.EVIDENCE))
+            present = bool(argument) and argument in earlier
+            self.record(directive=kind, argument=argument, phase='final', present=present)
+            return {'content': '[agent] history ' + argument + (' present' if present else ' absent')}
         if kind in ('context', 'context_split'):
             earlier = '\n'.join(self.text(message.content) for message in body.messages
                                 if message is not messages[index])

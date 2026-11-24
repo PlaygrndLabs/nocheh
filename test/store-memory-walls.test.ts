@@ -53,12 +53,25 @@ test('a wall holds every learned session of its chats, is reused while nothing c
     assert.deepEqual(await walls.of(workspace,A),[opened!.wall,project!.wall].sort());
     assert.deepEqual(await walls.of(workspace,B),[project!.wall]);
     assert.deepEqual(await walls.of(workspace,'123'),[]);
-    // A copy not done in time refuses the read; a failed copy says so.
+    // A copy not done in time is read as it is, and the next read checks it again; a failed copy refuses the read.
     await session(B);state='pending';
-    await assert.rejects(walls.open(workspace,[A,topic,B]),{code:'memory_wall_syncing'});
-    await assert.rejects(walls.open(workspace,[A,topic,B]),{code:'memory_wall_syncing'},'a wall that was not ready stays unread');
+    assert.equal((await walls.open(workspace,[A,topic,B]))!.sessions.length,5,'read as it is');
+    calls.length=0;assert.equal((await walls.open(workspace,[A,topic,B]))!.sessions.length,5);
+    assert.ok(calls.length>0&&calls.every(call=>call.path.endsWith('/status')),'a wall that was not ready is checked again, and nothing is added again');
     state='failed';await assert.rejects(walls.open(workspace,[A,topic,B]),{code:'memory_wall_copy_failed'});
     state='completed';assert.equal((await walls.open(workspace,[A,topic,B]))!.sessions.length,5);
+    calls.length=0;await walls.open(workspace,[A,topic,B]);assert.equal(calls.length,0,'ready again');
+    // A session that joined a wall as it was opened is named on no later write, and no read adds it again (each add of a
+    // session with messages queues a copy on the engine).
+    const fresh=digest(`walls:${run}:fresh`);
+    assert.deepEqual(await walls.of(workspace,B,fresh),[project!.wall]);
+    await walls.joined(workspace,[project!.wall],fresh);
+    assert.deepEqual(await walls.of(workspace,B,fresh),[],'joined once');
+    await stores.control.query('INSERT INTO memory_sessions(workspace,key,audience,kind,session_id) VALUES($1,$2,$3,$4,$5)',[workspace,fresh,B,'conversation',fresh]);
+    await stores.control.query(`INSERT INTO memory_ingestion_receipts(id,generation,audience,source_reference,guard_source_id,prepared_id,content_hash,state,session_id)
+      VALUES($1,$2,$3,'{}','fixture','fixture',$4,'done',$5)`,[digest(`walls:${run}:receipt:fresh`),workspace,B,digest('fixture'),fresh]);
+    calls.length=0;assert.ok((await walls.open(workspace,[A,topic,B]))!.sessions.includes(fresh));
+    assert.deepEqual(calls.map(call=>call.path.split('/').at(-1)),['status'],'checked once, never added again');
     // Without wall support in the engine, reads go by sessions as before.
     assert.equal(await new MemoryWalls(stores.control,{...engine,openWall:undefined} as any).open(workspace,[A]),null);
   } finally {

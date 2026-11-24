@@ -70,7 +70,7 @@ export function AllowedActions({chat, group, context}: {chat: Chat; group: boole
         ) : (
           <p className="text-sm text-muted">
             {group
-              ? 'Web pages and outside tools other than Notion run without a card when you ask here, or a member with “Web pages and outside tools” on asks, and a message for this chat asked for here goes out without one. Commands still wait for your approval in the '
+              ? 'Web pages and outside tools other than Notion run without a card when you ask here, or a member with “Web pages and outside tools” on asks, unless the model built an address or input that could carry data. A message for this chat asked for here goes out without one. Commands still wait for your approval in the '
               : 'Nothing without asking. Each action waits for your approval in the '}
             <a href={href('inbox')} className="font-medium text-accent-text hover:underline">
               Inbox

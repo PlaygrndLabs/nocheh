@@ -127,6 +127,10 @@ before(async () => {
 });
 
 after(async () => {
+  // A page a test left open may still have a route reading its answer; closing the browser under it fails after the end.
+  for (const context of browser?.contexts() ?? []) {
+    for (const page of context.pages()) await page.unrouteAll({behavior: 'ignoreErrors'});
+  }
   await browser?.close();
   server?.kill();
 });
@@ -1684,7 +1688,7 @@ test('moving a task into a project’s list names the chats that will see it fir
 test('a project ticks the groups that share memory, and a group joins one only after seeing the groups already there', async () => {
   // No box on a group makes groups share (ADR-0247); the project's tick list does, every group ticked by default
   // (ADR-0267, ADR-0287). The list and the save are answered here, so the fixture's own project is left as it was.
-  const tickPage = await browser.newPage({viewport: {width: 1440, height: 900}});
+  const tickPage = await newPage({viewport: {width: 1440, height: 900}});
   const saves = [];
   let saved = {share_chats: true, own_groups: []};
   await tickPage.route(/\/api\/nocheh\/projects\?after=$/, async route => {
@@ -3294,7 +3298,7 @@ test('a change whose answer was lost is applied when made again after a later ch
 
 test('the owner reads where group web pages and outside tools skip the card, and that members are chosen on Members', async () => {
   const groupTools =
-    'In a group, web pages and outside tools run without a card when you ask, or a member with “Web pages and outside tools” on asks; commands still wait, and Notion is never used in a group.';
+    'In a group, web pages and outside tools run without a card when you ask, or a member with “Web pages and outside tools” on asks, unless the model built an address or input that could carry data; commands still wait, and Notion is never used in a group.';
   const {page, problems} = await open('home');
   await page.getByText('Turn Nocheh on in a group and see who are members there.').waitFor();
   // The preview keeps no owner freedom setting, and the Inbox has no allowed action left here.
@@ -3317,7 +3321,7 @@ test('the owner reads where group web pages and outside tools skip the card, and
   await page.goto(origin + '/#chats?chat=-10073&tab=tools');
   const allowed = page.locator('section', {has: page.getByRole('heading', {name: 'Allowed actions'})});
   const groupAllowed =
-    'Web pages and outside tools other than Notion run without a card when you ask here, or a member with “Web pages and outside tools” on asks, and a message for this chat asked for here goes out without one. Commands still wait for your approval in the Inbox.';
+    'Web pages and outside tools other than Notion run without a card when you ask here, or a member with “Web pages and outside tools” on asks, unless the model built an address or input that could carry data. A message for this chat asked for here goes out without one. Commands still wait for your approval in the Inbox.';
   await allowed.getByText(groupAllowed).waitFor();
   assert.equal(await allowed.getByText('Anything else waits', {exact: false}).count(), 0);
   const privateAllowed = 'Nothing without asking. Each action waits for your approval in the Inbox.';
