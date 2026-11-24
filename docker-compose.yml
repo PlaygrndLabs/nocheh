@@ -644,7 +644,6 @@ services:
       # Caches only; make dev keeps its mounted home instead (docker-compose.dev.yml).
       HOME: /tmp/home
       NOCHEH_DASHBOARD_HOME: /dashboard-state/home
-      NOCHEH_BROWSER_CHAT: '1'
       # Chat scopes for routing turns; polling and sending belong to nocheh-telegram.
       TELEGRAM_ENABLED: ${TELEGRAM_ENABLED:-false}
       TELEGRAM_OWNER_ID: ${TELEGRAM_OWNER_ID:-}
@@ -680,12 +679,12 @@ services:
       # Documents, pictures and recordings are parsed by nocheh-reader, never here (ADR-0285).
       NOCHEH_READER_SOCKET: /run/reader/reader.sock
     # Only the folders Hermes uses: the dashboard's look (not its token) and its own agent-turn journal (not the
-    # rest of the spool). ./bin/nocheh makes them at 0700, so Docker never makes them as root.
+    # rest of the spool). ./bin/nocheh makes them at 0700, so Docker never makes them as root. Stored files are not
+    # mounted: a turn reads only its own pictures, through nocheh-security with its pass.
     volumes:
       - ${NOCHEH_STATE_DIR:-./data/local}/admin/dashboard/home:/dashboard-state/home
       - ${NOCHEH_STATE_DIR:-./data/local}/hermes:/workspace/data/local/hermes
       - ${NOCHEH_STATE_DIR:-./data/local}/reports:/reports
-      - ${NOCHEH_STATE_DIR:-./data/local}/files:/data/files:ro
       - ${NOCHEH_STATE_DIR:-./data/local}/spool/agent-turns:/data/spool/agent-turns
       - reader_socket:/run/reader
     depends_on:

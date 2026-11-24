@@ -1,9 +1,9 @@
 /**
  * Opens every dashboard page and tab of a running fixture in Chromium and
  * reports what the owner would see: the page heading, uncaught errors, console
- * errors and owner API calls that failed; then Hermes's Chat, Sessions and Files pages, which must carry their
- * reported script rules and draw no report. Runs inside the tester's browser
- * container on the fixture network (deploy/acceptance/browser.Dockerfile).
+ * errors and owner API calls that failed; then Hermes's Sessions and Files pages, which must carry their
+ * reported script rules and draw no report, and Hermes's chat page, which the dashboard refuses while it is off.
+ * Runs inside the tester's browser container on the fixture network (deploy/acceptance/browser.Dockerfile).
  *
  * The dashboard answers only its own local address, so a small relay on
  * 127.0.0.1 inside this container forwards to the fixture's dashboard.
@@ -89,7 +89,7 @@ for (const [route, title] of routes) {
 // Hermes's own pages carry script rules that are only reported for now (ADR-0251). The browser fires a
 // securitypolicyviolation event for each report too, so a missing rule or any report fails here: a Hermes update
 // that adds a script the rules would block is caught before they are enforced.
-for (const route of ['chat', 'sessions', 'files']) {
+for (const route of ['sessions', 'files']) {
   const page = await context.newPage();
   const problems = [];
   await page.addInitScript(() => {
@@ -104,7 +104,7 @@ for (const route of ['chat', 'sessions', 'files']) {
     const policy = response?.headers()['content-security-policy-report-only'] ?? '';
     if (!/^script-src 'self' 'nonce-[A-Za-z0-9+/]+=*';/.test(policy)) problems.push('no script rules: ' + (policy || 'none'));
     await page.locator('#root *').first().waitFor({timeout: 30000});
-    // Chat opens its live connections and loads its parts after the first paint.
+    // A page loads its parts after the first paint.
     await page.waitForTimeout(4000);
     for (const report of await page.evaluate(() => window.__nochehScriptReports)) problems.push('script rule report: ' + report);
     await page.screenshot({path: `${out}/hermes-${route}.png`});
@@ -112,6 +112,23 @@ for (const route of ['chat', 'sessions', 'files']) {
     problems.push('did not open: ' + String(error.message).split('\n')[0]);
   }
   results.push({route: 'hermes/' + route, heading: null, passed: !problems.length, problems});
+  await page.close();
+}
+// The dashboard chat page is off until Nocheh has its own chat page; Telegram only. The dashboard answers with its own
+// page, which runs no script and points to Telegram, and Hermes's chat never opens.
+{
+  const page = await context.newPage();
+  const problems = [];
+  try {
+    const response = await page.goto(`http://127.0.0.1:${port}/hermes/chat`, {timeout: 60000});
+    if (response?.status() !== 404) problems.push('chat page answered ' + response?.status());
+    const body = (await response?.text()) ?? '';
+    if (!/Telegram/.test(body) || /<script/i.test(body)) problems.push('not the chat-off page: ' + body.slice(0, 200));
+    await page.screenshot({path: `${out}/hermes-chat-off.png`});
+  } catch (error) {
+    problems.push('did not open: ' + String(error.message).split('\n')[0]);
+  }
+  results.push({route: 'hermes/chat', heading: null, passed: !problems.length, problems});
   await page.close();
 }
 await browser.close();

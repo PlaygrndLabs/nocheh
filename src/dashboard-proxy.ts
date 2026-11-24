@@ -1,6 +1,5 @@
 import {randomBytes} from 'node:crypto';
 import {request, type IncomingMessage, type IncomingHttpHeaders, type ServerResponse} from 'node:http';
-import type {Duplex} from 'node:stream';
 
 export function nativePath(raw:string):string {
   const url=new URL(raw,'http://local');
@@ -13,8 +12,7 @@ const responseHeaders={'cache-control':'no-store','x-frame-options':'DENY','refe
 export const CSP_REPORT_PATH='/api/nocheh/csp-report';
 /**
  * The script rules of a Hermes page, reported only: scripts from the dashboard's own address and the inline
- * scripts this response names by its nonce. There is no connect-src, so Chat's live connections stay open in
- * every browser, and no default-src or style-src.
+ * scripts this response names by its nonce. There is no connect-src, default-src or style-src.
  */
 export const pagePolicy=(nonce:string)=>`script-src 'self' 'nonce-${nonce}'; worker-src 'self' blob:; object-src 'none'; base-uri 'none'; frame-ancestors 'none'; report-uri ${CSP_REPORT_PATH}`;
 /** Any other HTML from Hermes runs no script at all. */
@@ -63,21 +61,4 @@ export function proxyNative(req:IncomingMessage,res:ServerResponse,port:number,t
     res.end('<!doctype html><html lang="en"><title>Hermes unavailable</title><body><h1>Hermes is unavailable</h1><p>Your archive and management tools are still available in Nocheh.</p><a href="/">Back to Nocheh</a></body></html>');
   });
   req.pipe(proxy);
-}
-
-export function proxyNativeSocket(req:IncomingMessage,socket:Duplex,head:Buffer,port:number,token:string,host='127.0.0.1') {
-  const url=new URL(nativePath(req.url??''),'http://local');url.searchParams.set('token',token);
-  const headers:IncomingHttpHeaders={...req.headers,host:`127.0.0.1:${port}`,origin:`http://127.0.0.1:${port}`};
-  delete headers.cookie;delete headers.authorization;delete headers['x-nocheh-csrf'];
-  const proxy=request({hostname:host,port,path:url.pathname+url.search,headers});
-  proxy.on('upgrade',(response,upstream,initial)=>{
-    socket.write('HTTP/1.1 101 Switching Protocols\r\n'+Object.entries(response.headers).map(([k,v])=>`${k}: ${v}`).join('\r\n')+'\r\n\r\n');
-    if(initial.length)socket.write(initial);if(head.length)upstream.write(head);
-    socket.pipe(upstream);upstream.pipe(socket);
-    socket.on('error',()=>upstream.destroy());upstream.on('error',()=>socket.destroy());
-    socket.on('close',()=>upstream.destroy());upstream.on('close',()=>socket.destroy());
-    socket.on('end',()=>upstream.destroy());upstream.on('end',()=>socket.destroy());
-  });
-  proxy.on('response',response=>{socket.end(`HTTP/1.1 ${response.statusCode??502} Rejected\r\nConnection: close\r\n\r\n`);response.resume();});
-  proxy.on('error',()=>socket.destroy());socket.on('close',()=>proxy.destroy());proxy.end();
 }

@@ -92,7 +92,7 @@ Checks and follow-ups:
 Next:
 - After go-live: members connect their own accounts, then Slack.
 - After MVP: undo an import, Notion "Switch account", approval-card rule notes and "No, do this
-  instead", Nocheh's own chat page in place of the temporary Hermes chat link.
+  instead", Nocheh's own chat page (the dashboard chat page is off until then, [ADR-0288](docs/adr/0288-chat-page-off-and-hermes-reads-passes-without-the-master-key.md)).
 - At go-live, production rules start: no data loss, data-keeping schema changes and tested
   upgrades.
 

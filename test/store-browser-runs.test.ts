@@ -109,6 +109,14 @@ test('browser execution separates originals, prepared inputs, receipts and same-
     native.delete(running.event_id);assert.equal((await run(running.event_id)).state,'ambiguous');assert.equal(calls.filter(c=>c.body.event_id===running.event_id&&c.op==='run.start').length,1);
     const late={event_id:running.event_id,actor:contexts.get(running.event_id).actor,state:'done',text:'Late evidence',session:running.conversation};
     assert.equal((await s.browser.finish(late)).state,'interrupted');assert.equal((await s.browser.observe(running)).visible,false);
+    // ADR-0288: once the agent no longer runs the browser channel, runs left open close without asking the agent.
+    const open=await capture();await s.browser.admit(owner,open);await prepare(open.event_id);mode='running';assert.equal((await run(open.event_id)).state,'running');
+    const waiting=await capture();await s.browser.admit(owner,waiting);
+    const agent=(s.browser as any).agent;(s.browser as any).agent={...agent,channels:agent.channels.filter((c:string)=>c!=='browser')};
+    const beforeOff=calls.length;
+    assert.equal((await run(waiting.event_id)).state,'cancelled');assert.equal((await run(open.event_id)).state,'ambiguous');
+    assert.equal((await saved(open.event_id)).error_code,'runtime_channel_unavailable');assert.equal(calls.length,beforeOff,'a channel the agent no longer runs is never called');
+    (s.browser as any).agent=agent;
     const cancelled=await capture();await s.browser.admit(owner,cancelled);await prepare(cancelled.event_id);await run(cancelled.event_id);await s.browser.cancel(cancelled);
     await assert.rejects(s.browser.prepare(contexts.get(cancelled.event_id)),{code:'run_lease_lost'});
     await assert.rejects(s.turns.binding(reader({headers:{authorization:'Bearer '+claims.get(cancelled.event_id).archive_credential}} as any,token)),{code:'runtime_turn_changed'});

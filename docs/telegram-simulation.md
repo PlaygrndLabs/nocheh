@@ -116,7 +116,7 @@ Hermes services, preserving state; `--verify-only` skips those setup changes. Ti
 reports retain each attempt, including startup and protocol failures. The ordinary
 private/topic/General reply checks, exact archived originals and causal delivery
 receipts, unselected-chat silence and restart receipts
-are separate from the ingestion/browser rehearsal. Parallel execution beside an
+are separate from the installation (ingestion) rehearsal, which runs no agent turn. Parallel execution beside an
 operating stack requires the owner's explicit single-stack exception.
 
 Select `--scenario faults-and-files` to exercise a documented `429` response and

@@ -51,26 +51,6 @@ class PolicyTests(unittest.TestCase):
 
 
 class NativeAdminTests(unittest.TestCase):
-    def test_recovery_uses_authenticated_current_profile_and_bounded_cursor(self):
-        from types import SimpleNamespace
-        from fastapi.testclient import TestClient
-        from .native_admin import Administration
-        calls=[]
-        def resolve(profile):
-            calls.append(('resolve',profile))
-            if profile!='research':raise ValueError('profile_scope_denied')
-            return {'logical_profile':'profile-'+'a'*48,'space':'42'}
-        def request(route,body):calls.append((route,body));return {'items':[],'next':None}
-        app=Administration(self.app,self.root,'model',self.policy,self.token,browser_enabled=True,
-            profile_catalog=SimpleNamespace(resolve=resolve,request=request))
-        client=TestClient(app,base_url='http://127.0.0.1')
-        url='/api/nocheh/browser-undelivered?profile=research&after='+'a'*64
-        self.assertEqual(client.get(url).status_code,401);self.assertEqual(calls,[])
-        self.assertEqual(client.get(url,headers=self.headers).status_code,200)
-        self.assertEqual(calls[-1],('/v1/browser/undelivered',{'profile':'profile-'+'a'*48,'space':'42','after':'a'*64}))
-        self.assertEqual(client.get(url+'&scope=-10',headers=self.headers).status_code,400)
-        self.assertEqual(client.get('/api/nocheh/browser-undelivered?profile=retired',headers=self.headers).status_code,400)
-
     def setUp(self):
         from fastapi.testclient import TestClient
         from .native_admin import create_app
@@ -101,18 +81,19 @@ class NativeAdminTests(unittest.TestCase):
                              ('POST','/api/mcp/test')]:
             self.assertEqual(self.client.request(method, path, headers=self.headers).status_code, 409)
 
-    def test_browser_receipt_needs_owner_auth_and_survives_profile_generation_change(self):
-        from fastapi.testclient import TestClient
-        from .native_admin import Administration
-        app=Administration(self.app,self.root,'model',self.policy,self.token,browser_enabled=True)
-        client=TestClient(app,base_url='http://127.0.0.1');body={'receipt':'a'*64,'sha256':'b'*64}
-        with patch('services.hermes.native_admin.acknowledge_browser_delivery',return_value={'state':'spooled'}) as capture:
-            self.assertEqual(client.post('/api/nocheh/browser-delivered',json=body).status_code,401);capture.assert_not_called()
-            with patch.object(app,'profile',side_effect=ValueError('profile_policy_changed')):
-                result=client.post('/api/nocheh/browser-delivered',headers=self.headers,json=body)
-            self.assertEqual(result.status_code,200,result.text);capture.assert_called_once_with(self.token,body)
-            capture.side_effect=RuntimeError('database outage')
-            self.assertEqual(client.post('/api/nocheh/browser-delivered',headers=self.headers,json=body).status_code,503)
+    def test_chat_page_routes_are_refused(self):
+        # The dashboard chat page is off until Nocheh has its own chat page (Telegram only): its delivery receipts,
+        # recovery reads and picture uploads never reach Nocheh or write the profile, even with the session token.
+        receipt={'receipt':'a'*64,'sha256':'b'*64}
+        with patch('urllib.request.urlopen',side_effect=AssertionError('no call to Nocheh')):
+            for method,path,body in (('POST','/api/nocheh/browser-delivered',receipt),('GET','/api/nocheh/browser-undelivered?after='+'a'*64,None),
+                                     ('POST','/api/chat/image-upload',{'data_url':'data:image/png;base64,AAAA','filename':'a.png'})):
+                self.assertEqual(self.client.request(method,path,json=body).status_code,401)
+                response=self.client.request(method,path,headers=self.headers,json=body)
+                self.assertEqual((response.status_code,response.json()['error']),(409,'managed_operation_unavailable'),path)
+            large=self.client.post('/api/chat/image-upload',headers=self.headers,content=b'{"data_url":"'+b'A'*(1024*1024)+b'"}')
+            self.assertEqual(large.json()['error'],'body_size_limit')
+        self.assertFalse((self.owner/'images').exists())
 
     def test_dashboard_preferences_do_not_write_runtime_profiles(self):
         before=(self.owner/'config.yaml').read_bytes()
@@ -218,7 +199,7 @@ class BrowserBoundaryTests(unittest.TestCase):
                 logical=root/'profiles'/Scopes.profile('-10')
                 original=configure_profile(logical,'model')
                 configure_profile(logical,'model',{'agent.reasoning_effort':'high','agent.max_iterations':7},original['revision'])
-                admin=Administration(None,root,'model',policy,'fixture',True,lambda _:2)
+                admin=Administration(None,root,'model',policy,'fixture',lambda _:2)
                 name,home=admin.profile(logical.name);home.mkdir(parents=True)
                 (home/'space.json').write_text(json.dumps({'space':'-10','revision':2,'owner':False}))
                 values=configure_profile(home,'model')['values']
@@ -234,7 +215,7 @@ class BrowserBoundaryTests(unittest.TestCase):
         from .scopes import Scopes
         with tempfile.TemporaryDirectory() as folder:
             root=Path(folder);policy=Scopes({'enabled':True},Served.of('42',groups=['-10']));revision=[1]
-            admin=Administration(None,root,'model',policy,'fixture',True,lambda _:revision[0])
+            admin=Administration(None,root,'model',policy,'fixture',lambda _:revision[0])
             name,path=admin.profile(Scopes.profile('-10'))
             self.assertEqual(name,Scopes.profile('-10:policy:1'));self.assertFalse(path.exists())
             path.mkdir(parents=True);(path/'space.json').write_text(json.dumps({'space':'-10','revision':1,'owner':False}))
@@ -246,46 +227,35 @@ class BrowserBoundaryTests(unittest.TestCase):
             with self.assertRaisesRegex(ValueError,'profile_policy_changed'):admin.profile(name)
             self.assertEqual((path/'memories/MEMORY.md').read_text(),'Old audience fixture')
 
-    def test_profile_bound_channels_explicit_resume_and_authentication(self):
+    def test_every_socket_closes_even_with_the_session_token(self):
         import asyncio
-        from urllib.parse import urlencode,parse_qs
+        from urllib.parse import urlencode
         from .native_admin import Administration
-        from .native_store import writer
-        from .store_fixture import add_session
         with tempfile.TemporaryDirectory() as folder:
             root=Path(folder);policy=Scopes({'enabled':False},Served.of('42',groups=['-10']))
-            owner=root/'profiles'/Scopes.profile('42');owner.mkdir(parents=True)
-            group=root/'profiles'/Scopes.profile('-10');group.mkdir(parents=True)
-            with writer(owner) as db:add_session(db,'private-session','browser')
             forwarded=[];sent=[]
-            async def app(scope,receive,send): forwarded.append(parse_qs(scope['query_string'].decode()))
-            admin=Administration(app,root,'model',policy,'fixture',True)
+            async def app(scope,receive,send): forwarded.append(scope)
+            admin=Administration(app,root,'model',policy,'fixture')
             async def send(value): sent.append(value)
             async def receive(): return {'type':'websocket.connect'}
-            def request(**query):
-                scope={'type':'websocket','path':'/api/pty','query_string':urlencode({'token':'fixture','channel':'same-channel','attach':'same-token',**query}).encode()}
-                asyncio.run(admin(scope,receive,send))
-            request();request(profile=group.name)
-            self.assertNotEqual(forwarded[0]['channel'],forwarded[1]['channel'])
-            self.assertEqual(forwarded[0]['profile'],[owner.name])
-            request(profile=group.name,resume='private-session');self.assertEqual(len(forwarded),2)
-            self.assertEqual(sent[-1]['code'],1008)
-            request(resume='private-session');self.assertEqual(len(forwarded),3)
-            request(token='wrong');self.assertEqual(len(forwarded),3)
+            for path in ('/api/pty','/api/ws','/api/pub','/api/events'):
+                for token in ('fixture','wrong'):
+                    scope={'type':'websocket','path':path,'query_string':urlencode({'token':token,'channel':'same-channel'}).encode()}
+                    asyncio.run(admin(scope,receive,send))
+            self.assertEqual(forwarded,[])
+            self.assertEqual(sent,[{'type':'websocket.close','code':1008}]*8)
 
-    def test_native_sidebar_has_metadata_but_cannot_start_a_model(self):
+    def test_chat_page_cannot_open_or_launch(self):
         from fastapi.testclient import TestClient
+        from starlette.websockets import WebSocketDisconnect
+        from hermes_cli import web_server as native, web_server_chat
         from .native_admin import create_app
         with tempfile.TemporaryDirectory() as folder:
             root=Path(folder);policy=Scopes({'enabled':False},Served.of('42',groups=['-10']))
-            app=create_app(root,'model',policy,'fixture',True)
+            app=create_app(root,'model',policy,'fixture')
+            self.assertFalse(native._DASHBOARD_EMBEDDED_CHAT_ENABLED)
+            with self.assertRaisesRegex(ValueError,'browser_chat_off'):web_server_chat._resolve_chat_argv(profile=Scopes.profile('42'))
             with TestClient(app,base_url='http://127.0.0.1:8785') as client:
-                with client.websocket_connect('/api/ws?token=fixture') as ws:
-                    self.assertEqual(ws.receive_json()['params']['type'],'gateway.ready')
-                    ws.send_json({'id':1,'method':'session.create','params':{'source':'tool','profile':Scopes.profile('-10')}})
-                    info=ws.receive_json();created=ws.receive_json()
-                    self.assertTrue(info['params']['payload']['read_only'])
-                    self.assertEqual(info['params']['payload']['profile_name'],Scopes.profile('-10'))
-                    ws.send_json({'id':2,'method':'prompt.submit','params':{'session_id':created['result']['session_id'],'text':'must never execute'}})
-                    self.assertEqual(ws.receive_json()['error']['message'],'managed_metadata_only')
+                for path in ('/api/ws','/api/pty'):
+                    with self.subTest(path=path),self.assertRaises(WebSocketDisconnect),client.websocket_connect(path+'?token=fixture'):pass
             self.assertFalse(list(root.rglob('state.db')))

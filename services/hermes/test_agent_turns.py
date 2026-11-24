@@ -297,11 +297,23 @@ class AgentTurnTests(unittest.TestCase):
         self.assertEqual({key:value for key,value in self.wait(agent,body).items() if key!='run_id'},{'state':'failed','error_code':'provider_not_configured'})
         silent=self.agent(self.replying(),resolve=lambda body,claims:None);body=turn_body(71);silent.start(body)
         self.assertEqual({key:value for key,value in self.wait(silent,body).items() if key!='run_id'},{'state':'suppressed'})
-        forged=turn_body(72,secret='another-synthetic-secret-123456');agent.start(forged);state=self.wait(agent,forged)
+        # A pass whose claims bind another turn (here another event's) is refused before the turn starts.
+        mismatched=turn_body(72);mismatched['archive_credential']=credential('-20','f'*64)
+        agent.start(mismatched);state=self.wait(agent,mismatched)
         self.assertEqual((state['state'],state.get('error_code')),('ambiguous','runtime_execution_interrupted'),'a refused pass never reaches the turn')
         self.assertFalse((self.folder/(state['run_id']+'.outcome')).exists())
         self.assertEqual(self.calls,[])
         self.content_free('private',kept=('.request',))
+
+    def test_a_pass_is_read_by_its_claims_not_its_signature(self):
+        # Hermes does not check the signature: Nocheh's own services check the signature on every call the pass makes. A pass
+        # signed with another key but carrying this turn's claims runs; one for another chat does not.
+        agent=self.agent(self.replying())
+        body=turn_body(74,secret='another-synthetic-secret-123456');agent.start(body)
+        self.assertEqual(self.wait(agent,body)['reply']['text'],'Synthetic answer')
+        self.assertEqual(len(self.calls),1)
+        other=turn_body(75);other['archive_credential']=credential('-30',other['event_id']);agent.start(other)
+        self.assertEqual(self.wait(agent,other)['state'],'ambiguous');self.assertEqual(len(self.calls),1)
 
     def test_a_private_answer_runs_as_the_owners_private_chat_never_as_the_owner(self):
         def signed(event,**extra):
@@ -399,10 +411,11 @@ class AgentTurnTests(unittest.TestCase):
             handler.path='/internal/turn/events'
             self.assertEqual(handler.dispatch({**observe(body),'after':2})['events'][-1]['state'],'done')
             handler.path='/internal/turn/cancel';self.assertEqual(handler.dispatch(observe(body)),state)
-            # A Telegram turn has only the turn routes; the run routes refuse it, with or without a channel.
+            # A Telegram turn has only the turn routes; the run routes refuse it, with or without a channel. The
+            # dashboard chat page is off, so a browser run is refused too.
             for route in ('start','resume','events','cancel'):
                 handler.path='/internal/run/'+route
-                for value in (body,{key:item for key,item in body.items() if key!='channel'}):
+                for value in (body,{key:item for key,item in body.items() if key!='channel'},{**body,'channel':'browser'}):
                     with self.assertRaisesRegex(ValueError,'runtime_channel_unavailable'):handler.dispatch(value)
 
     def test_the_service_answers_turn_routes_and_reports_active_turns(self):
@@ -430,7 +443,7 @@ class AgentTurnTests(unittest.TestCase):
                 self.assertFalse({'telegram','telegram_details'}&set(health))
                 # Nothing that reached Telegram is left: these are unknown routes.
                 for route in ('/internal/dispatch','/internal/action','/internal/file','/internal/telegram/approval','/internal/telegram/refusal',
-                              '/internal/telegram/notice','/internal/telegram/chat'):
+                              '/internal/telegram/notice','/internal/telegram/chat','/internal/browser/events','/internal/browser-credentials'):
                     self.assertEqual(call(route,{'chat_id':'-20'}),(400,{'error':'invalid_request'}),route)
                 self.assertEqual(call('/internal/run/start',turn_body(42)),(400,{'error':'invalid_request'}))
         finally:server.shutdown();server.server_close();thread.join()

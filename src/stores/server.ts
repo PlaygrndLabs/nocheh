@@ -30,7 +30,6 @@ import {controlStorageWorkflow,retryFailedWorkflows} from './workflow-owner.js';
 import {claimHostWorkflow,renewHostWorkflow,finishHostWorkflow,continueHostWorkflow} from '../workflows/host-coordinator.js';
 import {confirmImport,cancelImport,enterImportWrite,importProgress,pendingImports,reconcileImportReceipt} from '../workflows/imports.js';
 import {registerWorker} from '../workflows/store.js';
-import {drainSourceSpool} from './capture.js';
 import {fillTemplate,labeledLines,ownerPrompts,problemButtons,problemNotice} from '../prompts.js';
 import {retryButton} from './action-commands.js';
 import {archiveReplyPreviews} from './archive-reply-links.js';
@@ -67,6 +66,9 @@ export function storageServer(s:StorageServices,config:Settings,call:RuntimeCall
       databases:await storageHealth(s.stores),inactive:restoredInactive(config.dataDir),workers:status()});
     // The members' app has its own listener (MEMBER_APP_PORT, ADR-0265 D3): never here, whatever the caller holds.
     if(path===MEMBER_APP_CORE_PREFIX||path.startsWith(MEMBER_APP_CORE_PREFIX+'/'))throw new HttpError(404,'not_found');
+    // The dashboard chat page is off until Nocheh has its own chat page; Telegram only. No browser input, run or
+    // delivery is taken, whatever the caller holds, so no browser run is ever admitted.
+    if(path.startsWith('/v1/browser/'))throw new HttpError(404,'browser_chat_off');
     assertStorageActive(config.dataDir);
     if(transport?.handle(req,res))return;
     if(req.method==='POST'&&path==='/internal/actions/authorize') {
@@ -191,12 +193,6 @@ export function storageServer(s:StorageServices,config:Settings,call:RuntimeCall
     if(req.method==='POST'&&path==='/v1/memory/reviews'){admin(principal);return json(res,200,await s.imports.approveLearning(principal,await readJson(req)));}
     if(/^\/v1\/artifacts\/[a-f0-9]{64}\/bytes$/.test(path)&&req.method==='POST'){admin(principal);return json(res,200,await s.imports.upload(principal,path.split('/')[3]!,await readJson(req,70*1024*1024)));}
 
-    if(req.method==='POST'&&path==='/v1/browser/input') {
-      admin(principal);return json(res,200,await s.browserCapture.capture(principal,await readJson(req,40*1024*1024)));
-    }
-    if(req.method==='POST'&&path==='/v1/browser/delivered') {
-      admin(principal);return json(res,202,await s.browserDelivery.acknowledge(principal,await readJson(req,1024)));
-    }
     // Durable admission depends only on the owned filesystem. Database and
     // workflow outages leave an acknowledged observation available for replay.
     if(req.method==='POST'&&path==='/v1/ingest') {
@@ -313,23 +309,6 @@ export function storageServer(s:StorageServices,config:Settings,call:RuntimeCall
       if(operation==='prepare')return json(res,200,await runs.prepare(body));
       if(operation==='heartbeat')return json(res,200,await runs.heartbeat(body));
       throw new HttpError(404,'not_found');
-    }
-    if(req.method==='POST'&&path.startsWith('/v1/browser/')) {
-      admin(principal);const body=object(await readJson(req,2*1024*1024)),operation=path.slice('/v1/browser/'.length);
-      if(operation==='finish')return json(res,200,await s.browser.finish(body));
-      if(operation==='cancel')return json(res,200,await s.browser.cancel(body));
-      if(operation==='observe')return json(res,200,await s.browser.observe(body));
-      if(operation==='active')return json(res,200,await s.browser.active(body));
-      if(operation==='undelivered')return json(res,200,await s.browser.undelivered(principal,body));
-      await assertGuardConfiguration(s.guards,config.guardMode);await s.configuration.assert(config.assistant);
-      if(operation==='admit') {
-        await drainSourceSpool(s.capture,config.dataDir,string(body.event_id,64));
-        return json(res,200,await s.browser.admit(principal,body));
-      }
-      if(operation==='workflow-context')return json(res,200,await s.browser.context(body));
-      if(operation==='claim')return json(res,200,await s.browser.claim(body));
-      if(operation==='prepare')return json(res,200,await s.browser.prepare(body));
-      if(operation==='heartbeat')return json(res,200,await s.browser.heartbeat(body));
     }
     if(await ownerSecurityRoute(s.stores.control,principal,req,res,url,{separated:true,preview:input=>s.controlledActions.preview(principal,input)}))return;
     if(path==='/v1/workflows'||path.startsWith('/v1/workflows/')) {

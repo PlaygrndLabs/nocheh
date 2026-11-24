@@ -13,8 +13,7 @@ from pathlib import Path
 from .assistant_gateway import TURN_CAPACITY,continuation_id,native_turn,render_reply_citations
 from .async_runs import CLOSED,AsyncRuns,identity
 from services.durable import canonical,digest,immutable_file
-from .environment import secret
-from .scopes import Scopes,verify_capability
+from .scopes import Scopes,check_claims
 from .subscription import ProviderNotConfigured
 from .timing import safe
 
@@ -129,11 +128,11 @@ class AgentTurns:
 
     async def _turn(self,body,progress,cancelled):
         # Group addressing and the delivery check are Nocheh's; the turn itself rechecks its space policy. Its chat, space
-        # and app binding come from its pass, read here only to know whose turn it is and verified in full next (ADR-0252).
+        # and app binding come from its pass, read here only to know whose turn it is and checked in full next (ADR-0252).
         # Off the event loop: reading the served list may wait on the app (ADR-0252), and other turns keep running meanwhile.
         scope=await asyncio.to_thread(self.scopes.resolve,body,Scopes.claims(body['archive_credential'])) if self.scopes.enabled else None
         if scope is None:return {'state':'suppressed'}
-        claims=verify_capability(body['archive_credential'],secret('SERVICE_TOKEN'),scope,body['event_id'])
+        claims=check_claims(body['archive_credential'],scope,body['event_id'])
         # A private answer runs as the owner's private chat but never as the owner: its own scoped profile, the project's
         # role and read tools only (ADR-0249). Its pass and its framed question must come together.
         answer=claims.get('answer') is not None

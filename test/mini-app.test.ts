@@ -46,7 +46,7 @@ test('the mini app reaches only home, Inbox decisions, tasks with their chats an
     ['POST','/tasks/time-zone']])
     assert.equal(miniAppRoute(method!,route!),true,method+' '+route);
   for(const [method,route] of [['POST','/settings'],['POST','/settings/apply'],['GET','/database-browser'],['POST','/shutdown'],['POST','/tools/revoke'],
-    ['GET','/storage'],['POST','/memory/longterm/fresh-start'],['GET','/tasks/'+id+'/../../settings'],['POST','/ws-ticket'],['POST','/entities/'+id+'/merge'],
+    ['GET','/storage'],['POST','/memory/longterm/fresh-start'],['GET','/tasks/'+id+'/../../settings'],['POST','/entities/'+id+'/merge'],
     ['POST','/workflows/'+id+'/cancel'],['GET','/workflows'],['POST','/monitoring'],['POST','/tasks/'+id+'/audience'],['POST','/tasks/settings'],['GET','/tasks/time-zone']])
     assert.equal(miniAppRoute(method!,route!),false,method+' '+route);
 });

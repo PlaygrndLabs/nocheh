@@ -202,6 +202,23 @@ class ManagedAsyncTests(unittest.TestCase):
         with patch.object(managed_async,'HEARTBEAT_SECONDS',.01):
             self.runtime.runs.start(self.body);self.assertEqual(self.settle()['state'],'ambiguous')
         self.assertEqual(self.finished['state'],'interrupted')
+    def test_flush_retires_browser_receipts_and_one_refused_receipt_holds_back_no_other(self):
+        # ADR-0288: Nocheh refuses the browser channel for good, so its leftover receipt is retired without a call.
+        def write(body):
+            run=identity(body);(self.runtime.directory/(run+'.request')).write_text(json.dumps(body));(self.runtime.directory/(run+'.receipt')).write_text(json.dumps({'state':'done'}));return run
+        browser=write({'channel':'browser','event_id':'b'*64,'attempt':1})
+        jobs=[write({'channel':'background','event_id':c*64,'attempt':1}) for c in 'cd']
+        published=[];refused=[]
+        def background(route,payload):
+            if not refused:refused.append(route);raise ServiceError(409,'refused')
+            published.append(route);return {}
+        self.runtime.background_call=background
+        self.runtime.call=lambda route,body:self.fail('a browser receipt must not reach Nocheh')
+        with self.assertRaises(ServiceError):self.runtime.flush()
+        self.assertTrue((self.runtime.directory/(browser+'.published')).exists())
+        self.assertEqual(published,['finish'],'the other job still publishes')
+        self.runtime.flush();self.assertEqual(published,['finish','finish'])
+        self.assertTrue(all((self.runtime.directory/(run+'.published')).exists() for run in jobs))
     def test_storage_answers_keep_their_status_and_code(self):
         from io import BytesIO
         from urllib.error import HTTPError

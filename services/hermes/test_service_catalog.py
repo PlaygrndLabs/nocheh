@@ -56,12 +56,15 @@ class ServiceCatalogTests(unittest.TestCase):
         state='${NOCHEH_STATE_DIR:-./data/local}'
         self.assertEqual(hermes['volumes'],[state+'/admin/dashboard/home:/dashboard-state/home',
                                             state+'/hermes:/workspace/data/local/hermes',state+'/reports:/reports',
-                                            state+'/files:/data/files:ro',state+'/spool/agent-turns:/data/spool/agent-turns',
-                                        'reader_socket:/run/reader'])
-        # Not the dashboard's token beside its home, nor the rest of the spool, such as incoming Telegram updates.
+                                            state+'/spool/agent-turns:/data/spool/agent-turns','reader_socket:/run/reader'])
+        # Not the dashboard's token beside its home, nor the rest of the spool, such as incoming Telegram updates, nor
+        # the stored files: a turn reads only its own pictures, through nocheh-security with its pass.
         sources={volume.split(':')[0].removeprefix(state+'/') for volume in hermes['volumes']}
-        self.assertFalse(sources&{'admin','admin/dashboard','spool'})
+        self.assertFalse(sources&{'admin','admin/dashboard','spool','files'})
+        self.assertFalse([volume for volume in hermes['volumes'] if ':/data/files' in volume])
         self.assertEqual(hermes['environment']['NOCHEH_DASHBOARD_HOME'],'/dashboard-state/home')
+        # The dashboard chat page is off until Nocheh has its own chat page (Telegram only).
+        self.assertNotIn('NOCHEH_BROWSER_CHAT',hermes['environment'])
         # make dev keeps its mounted home and the base service's lockdown.
         class Loader(yaml.SafeLoader):pass
         Loader.add_constructor('!reset',lambda loader,node:None)
