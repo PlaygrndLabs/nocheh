@@ -188,7 +188,7 @@ def _annotate(job,home,selected,bound,served=None):
 def manage(admin,path,method,query,body,headers,call=None):
     """Hermes's Cron page reads (ADR-0290: it changes nothing), and the owner adapter's pause, resume, run now and delete,
     each carrying the request id Nocheh granted."""
-    call=call or (lambda route,payload:archive(route,payload,admin.token))
+    call=call or (lambda route,payload:archive(route,payload,admin.agent_key))
     if path=='/api/cron/delivery-targets':return {'targets':[
         {'id':'local','name':'Local (save only)','home_target_set':True,'home_env_var':None},
         {'id':'telegram','name':'Telegram to this chat (no card in your private chat; a group\'s results wait for your card)',

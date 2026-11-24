@@ -105,8 +105,8 @@ test('the broker binds an answer pass through storage, refuses it without storag
   const storage={binding,assertAudience:async()=>{},turnFile:async()=>{throw new HttpError(404,'turn_file_not_found');},
     bindReads:async(principal:Reader)=>{bound.push(principal.answer??'none');if(!open)throw new HttpError(409,'private_answer_closed');return {...principal,reads};}};
   const fetcher=(async(url:string|URL)=>{relayed.push(new URL(String(url)).pathname);return Response.json([]);}) as typeof fetch;
-  const server=brokerServer({pool,token:secret,archive:'http://archive',hermes:'http://hermes',model:'synthetic',prepare:async()=>({}),storage,fetch:fetcher});
-  const bare=brokerServer({pool,token:secret,archive:'http://archive',hermes:'http://hermes',model:'synthetic',prepare:async()=>({}),fetch:fetcher});
+  const server=brokerServer({agentKey:'synthetic-agent-login-only-for-tests-0001',pool,token:secret,archive:'http://archive',hermes:'http://hermes',model:'synthetic',prepare:async()=>({}),storage,fetch:fetcher});
+  const bare=brokerServer({agentKey:'synthetic-agent-login-only-for-tests-0001',pool,token:secret,archive:'http://archive',hermes:'http://hermes',model:'synthetic',prepare:async()=>({}),fetch:fetcher});
   const base=await listen(server),bareBase=await listen(bare);
   const call=(method:string,path:string,at=base)=>fetch(at+path,{method,headers:{authorization:'Bearer '+answerPass(),'content-type':'application/json'},...(method==='POST'?{body:'{}'}:{})});
   try {

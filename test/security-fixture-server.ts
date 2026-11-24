@@ -4,7 +4,7 @@ import {readFile,writeFile} from 'node:fs/promises';
 import {settings} from '../src/config.js';
 import {connectDatabase,initialize} from '../src/database.js';
 import {ingest} from '../src/archive.js';
-import {turnToken,reader,assertAudience} from '../src/access.js';
+import {turnToken,reader,assertAudience,isAgentLogin} from '../src/access.js';
 import {readJson,json,HttpError,object} from '../src/http.js';
 import {prepareContext} from '../src/prepared-context.js';
 import {prepareGuarded} from '../src/guarded.js';
@@ -42,7 +42,7 @@ const backend=createServer((req,res)=>{void(async()=>{
   throw new HttpError(403,'fixture_route_denied');
 })().catch(error=>json(res,error instanceof HttpError?error.status:503,{error:error instanceof HttpError?error.code:'fixture_failed'}));});
 await new Promise<void>(resolve=>backend.listen(8799,'127.0.0.1',resolve));
-const server=brokerServer({pool,token:config.token,model:provider.model,archive:'http://127.0.0.1:8799',prepare:async(principal,input)=>{inspectRequest(object(input).payload);return {guarded:true,payload:await prepareContext(pool,principal,object(input).payload,detect)};},hermes:'http://127.0.0.1:8799'});
+const server=brokerServer({pool,token:config.token,agentKey:config.agentKey,model:provider.model,archive:'http://127.0.0.1:8799',prepare:async(principal,input)=>{if(isAgentLogin(principal))throw new HttpError(403,'fixture_route_denied');inspectRequest(object(input).payload);return {guarded:true,payload:await prepareContext(pool,principal,object(input).payload,detect)};},hermes:'http://127.0.0.1:8799'});
 await new Promise<void>(resolve=>server.listen(8786,'0.0.0.0',resolve));
 await writeFile('/fixture/ready.json',JSON.stringify({...binding,credential,model:provider.model,api_mode:provider.api_mode,source:'nocheh:event:'+source.id}));
 const timer=setInterval(()=>{void(async()=>{

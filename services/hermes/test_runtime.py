@@ -27,7 +27,7 @@ class RuntimeConcurrencyTests(unittest.TestCase):
             credentials.assert_not_called();observe.assert_called_once()
 
     def test_extraction_and_detector_requests_progress_while_chat_is_waiting(self):
-        with tempfile.TemporaryDirectory() as folder, patch.dict(os.environ,{'HERMES_HOME':folder,'SERVICE_TOKEN':'synthetic-service-token-123456789'}):
+        with tempfile.TemporaryDirectory() as folder, patch.dict(os.environ,{'HERMES_HOME':folder,'AGENT_KEY':'synthetic-agent-key-0123456789abcdef'}):
             from . import runtime
             entered=threading.Event();release=threading.Event()
             class Fixture(runtime.Handler):
@@ -54,7 +54,7 @@ class RuntimeConcurrencyTests(unittest.TestCase):
             finally:release.set();server.shutdown();server.server_close();thread.join()
 
     def test_detector_requests_run_side_by_side_up_to_the_guard_check_setting(self):
-        with tempfile.TemporaryDirectory() as folder, patch.dict(os.environ,{'HERMES_HOME':folder,'SERVICE_TOKEN':'synthetic-service-token-123456789'}):
+        with tempfile.TemporaryDirectory() as folder, patch.dict(os.environ,{'HERMES_HOME':folder,'AGENT_KEY':'synthetic-agent-key-0123456789abcdef'}):
             from . import runtime
             lock=threading.Lock();state={'active':0,'peak':0};release=threading.Event()
             class Fixture(runtime.Handler):
@@ -84,7 +84,7 @@ class RuntimeConcurrencyTests(unittest.TestCase):
             finally:release.set();server.shutdown();server.server_close();thread.join()
 
     def test_reply_checks_go_before_background_learning_checks(self):
-        with tempfile.TemporaryDirectory() as folder, patch.dict(os.environ,{'HERMES_HOME':folder,'SERVICE_TOKEN':'synthetic-service-token-123456789'}):
+        with tempfile.TemporaryDirectory() as folder, patch.dict(os.environ,{'HERMES_HOME':folder,'AGENT_KEY':'synthetic-agent-key-0123456789abcdef'}):
             from . import runtime
             slots=runtime.DetectorSlots(2);order=[];held=threading.Event()
             def check(name,background):
@@ -116,7 +116,7 @@ class RuntimeConcurrencyTests(unittest.TestCase):
             self.assertEqual((slots.used,slots.background,slots.waiting),(0,0,0))
 
     def test_unconfigured_provider_answers_provider_not_configured(self):
-        with tempfile.TemporaryDirectory() as folder, patch.dict(os.environ,{'HERMES_HOME':folder,'SERVICE_TOKEN':'synthetic-service-token-123456789',
+        with tempfile.TemporaryDirectory() as folder, patch.dict(os.environ,{'HERMES_HOME':folder,'AGENT_KEY':'synthetic-agent-key-0123456789abcdef',
                                                                               'NOCHEH_REPLY_ROUTE_URL':'','NOCHEH_GUARD_ROUTE_URL':''}):
             from . import runtime
             server=ThreadingHTTPServer(('127.0.0.1',0),runtime.Handler)
@@ -132,7 +132,7 @@ class RuntimeConcurrencyTests(unittest.TestCase):
 
     def test_chat_route_reaches_the_chat_function(self):
         # A local named chat elsewhere in dispatch() once shadowed the function.
-        with tempfile.TemporaryDirectory() as folder, patch.dict(os.environ,{'HERMES_HOME':folder,'SERVICE_TOKEN':'synthetic-service-token-123456789'}):
+        with tempfile.TemporaryDirectory() as folder, patch.dict(os.environ,{'HERMES_HOME':folder,'AGENT_KEY':'synthetic-agent-key-0123456789abcdef'}):
             from . import runtime
             handler=object.__new__(runtime.Handler);handler.path='/internal/chat'
             with patch.object(runtime,'chat',return_value={'text':'synthetic reply'}) as called:
@@ -140,7 +140,7 @@ class RuntimeConcurrencyTests(unittest.TestCase):
             called.assert_called_once_with('synthetic')
 
     def test_price_route_gives_the_reply_models_rates_as_replies_use_it(self):
-        with tempfile.TemporaryDirectory() as folder, patch.dict(os.environ,{'HERMES_HOME':folder,'SERVICE_TOKEN':'synthetic-service-token-123456789',
+        with tempfile.TemporaryDirectory() as folder, patch.dict(os.environ,{'HERMES_HOME':folder,'AGENT_KEY':'synthetic-agent-key-0123456789abcdef',
                                                                             'NOCHEH_REPLY_ROUTE_PROVIDER':'anthropic','NOCHEH_REPLY_ROUTE_URL':'https://api.anthropic.com/v1'}):
             from . import runtime
             handler=object.__new__(runtime.Handler);handler.path='/internal/usage/price'
@@ -156,3 +156,42 @@ class RuntimeConcurrencyTests(unittest.TestCase):
             runtime.configure()
             config=(Path(folder)/'config.yaml').read_text()
         self.assertIn('provider: openai\n',config);self.assertIn('stt:\n  enabled: false\n',config)
+
+
+class StartupKeyTests(unittest.TestCase):
+    """Hermes's processes hold the agent login and refuse Nocheh's master key (ADR-0291)."""
+    KEY,SESSION='synthetic-agent-key-0123456789abcdef','synthetic-session-token-0123456789abcd'
+
+    def refused(self,start,environment):
+        from . import environment as keys
+        with tempfile.TemporaryDirectory() as folder,patch.dict(os.environ,{'HERMES_HOME':folder,**environment},clear=False),\
+             patch.object(keys,'_AGENT_KEY',None):
+            for name in ('SERVICE_TOKEN','SERVICE_TOKEN_FILE','AGENT_KEY','AGENT_KEY_FILE','NOCHEH_HERMES_SESSION_TOKEN'):
+                if name not in environment:os.environ.pop(name,None)
+            with self.assertRaises(SystemExit) as raised:start()
+        return str(raised.exception.code)
+
+    def test_every_hermes_process_refuses_the_master_key_and_weak_keys(self):
+        with patch.dict(os.environ,{'AGENT_KEY':self.KEY}):from . import runtime,native_admin,security_launcher
+        good={'AGENT_KEY':self.KEY,'NOCHEH_HERMES_SESSION_TOKEN':self.SESSION}
+        for start in (runtime.main,native_admin.main):
+            with self.subTest(start=start.__module__):
+                self.assertIn('SERVICE_TOKEN must not reach Hermes',self.refused(start,{**good,'SERVICE_TOKEN':'s'*40}))
+                self.assertIn('SERVICE_TOKEN must not reach Hermes',self.refused(start,{**good,'SERVICE_TOKEN_FILE':'/nowhere'}))
+                self.assertIn('Missing AGENT_KEY',self.refused(start,{'NOCHEH_HERMES_SESSION_TOKEN':self.SESSION}))
+                self.assertIn('at least 32',self.refused(start,{**good,'AGENT_KEY':'k'*31}))
+                for session in ('', 't'*31, self.KEY):
+                    reason=self.refused(start,{**good,'NOCHEH_HERMES_SESSION_TOKEN':session})
+                    self.assertIn('NOCHEH_HERMES_SESSION_TOKEN',reason);self.assertNotIn(self.KEY,reason)
+        self.assertIn('SERVICE_TOKEN must not reach Hermes',self.refused(security_launcher.main,{'AGENT_KEY':self.KEY,'SERVICE_TOKEN':'s'*40}))
+        self.assertIn('at least 32',self.refused(security_launcher.main,{'AGENT_KEY':'k'*31}))
+
+    def test_the_agent_login_outlives_its_environment_entry(self):
+        from . import environment as keys
+        with patch.object(keys,'_AGENT_KEY',None),patch.dict(os.environ,{'AGENT_KEY':self.KEY}):
+            self.assertEqual(keys.agent_key(),self.KEY)
+            os.environ.pop('AGENT_KEY')
+            self.assertEqual(keys.agent_key(),self.KEY)
+        with patch.object(keys,'_AGENT_KEY',None),patch.dict(os.environ,{},clear=False):
+            os.environ.pop('AGENT_KEY',None);os.environ.pop('AGENT_KEY_FILE',None)
+            with self.assertRaisesRegex(ValueError,'Missing AGENT_KEY'):keys.agent_key()

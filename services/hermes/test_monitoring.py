@@ -285,7 +285,7 @@ class MonitoringTests(unittest.TestCase):
                 'error_message':'private token must stay out','recorded_at':'2026-09-11T07:04:41Z'}))
             config={'TELEGRAM_ENABLED':'true','NOCHEH_PROVIDERS':json.dumps([{'id':'gateway','name':'Synthetic gateway','url':'https://gateway.example.test/v1'}]),
                     'NOCHEH_PROVIDER_KEYS':'{"gateway":"private-key"}','NOCHEH_REPLY_PROVIDER':'gateway','NOCHEH_MODEL':'synthetic-model',
-                    'SERVICE_TOKEN':'private-service-token'}
+                    'SERVICE_TOKEN':'private-service-token','AGENT_KEY':'private-agent-key-not-a-real-credential'}
             with patch.object(monitoring,'load',return_value=config),\
                  patch.object(monitoring,'compose',return_value=(['docker'],{})),\
                  patch.object(monitoring.subprocess,'check_output',return_value='{"Service":"nocheh-telegram","State":"running","Health":"healthy"}\n'),\
@@ -300,5 +300,9 @@ class MonitoringTests(unittest.TestCase):
             keys={row['name']:row for row in result['keys']}
             self.assertEqual((keys['SERVICE_TOKEN']['service'],keys['SERVICE_TOKEN']['present']),('Nocheh services',True))
             self.assertFalse(keys['INNGEST_SIGNING_KEY']['present'])
+            # The agent login and Hermes's session token are listed by holder, never by value (ADR-0291).
+            self.assertEqual((keys['AGENT_KEY']['service'],keys['AGENT_KEY']['present']),('Agent (Hermes)',True))
+            self.assertEqual((keys['NOCHEH_HERMES_SESSION_TOKEN']['service'],keys['NOCHEH_HERMES_SESSION_TOKEN']['present']),('Hermes dashboard',False))
+            self.assertIn('never given to the agent',keys['SERVICE_TOKEN']['usage'])
             self.assertTrue(all(row['usage'] for row in result['keys']))
             self.assertNotIn('private',json.dumps(result))

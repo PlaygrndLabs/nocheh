@@ -6,15 +6,15 @@ import os
 import subprocess
 from pathlib import Path
 try:
-    from tools.operations.installation.configuration import load, validate, write_env, env_path, DEFAULTS
+    from tools.operations.installation.configuration import load, validate, write_env, env_path, DEFAULTS, GENERATED
 except ImportError:
-    from tools.operations.installation.configuration import load, validate, write_env, env_path, DEFAULTS
+    from tools.operations.installation.configuration import load, validate, write_env, env_path, DEFAULTS, GENERATED
 
 from tools.operations.installation import mini_app
 WORKFLOW_INTERNAL={'INNGEST_EVENT_KEY','INNGEST_SIGNING_KEY','INNGEST_POSTGRES_PASSWORD'}
 STORE_INTERNAL={'NOCHEH_ARCHIVE_PASSWORD','NOCHEH_DERIVED_PASSWORD','NOCHEH_CONTROL_PASSWORD'}
 from tools.operations.provider import routes as provider_routes
-SECRETS = {'TELEGRAM_BOT_TOKEN', 'CLOUDFLARE_TUNNEL_TOKEN', 'POSTGRES_PASSWORD', 'SERVICE_TOKEN', 'NOCHEH_OFFSITE_SECRET_ACCESS_KEY', 'NOCHEH_OFFSITE_PASSPHRASE'} | provider_routes.KEY_SETTINGS | WORKFLOW_INTERNAL | STORE_INTERNAL
+SECRETS = {'TELEGRAM_BOT_TOKEN', 'CLOUDFLARE_TUNNEL_TOKEN', 'POSTGRES_PASSWORD', 'SERVICE_TOKEN', 'AGENT_KEY', 'NOCHEH_HERMES_SESSION_TOKEN', 'NOCHEH_OFFSITE_SECRET_ACCESS_KEY', 'NOCHEH_OFFSITE_PASSPHRASE'} | provider_routes.KEY_SETTINGS | WORKFLOW_INTERNAL | STORE_INTERNAL
 # Providers, keys and the provider and model of each part are chosen in
 # Settings › Models; Apply also refreshes Honcho when its routes change.
 MODEL_SETTINGS = {'NOCHEH_MODEL', 'NOCHEH_EMBEDDING_PROVIDER', 'NOCHEH_EMBEDDING_MODEL',
@@ -42,9 +42,23 @@ RETIRED_DEFAULTS = {'TELEGRAM_GROUP_IDS': '', 'TELEGRAM_GROUP_ACCESS': '{}'}
 
 def service_revision(values):
     """What the running services use; Apply records it. Settings that work live are left out, and so
-    are settings at their default, so a newly added or retired setting does not ask for Apply."""
+    are settings at their default, so a newly added or retired setting does not ask for Apply. Generated keys are no
+    settings: a cutover or rotate-keys (ADR-0291) applies them itself, so a new one never asks for Apply."""
     defaults = {**RETIRED_DEFAULTS, **DEFAULTS}
-    return revision({key: value for key, value in values.items() if key not in LIVE and defaults.get(key) != value})
+    return revision({key: value for key, value in values.items() if key not in LIVE and key not in GENERATED and defaults.get(key) != value})
+
+
+def carry_applied(state, before):
+    """Builds before ADR-0291 counted generated keys in the applied revision. When a cutover changes only those, the record
+    follows the settings, so the cutover asks for no Apply: init, up or make dev restarts the services with the new keys."""
+    applied = Path(state) / 'admin/applied.json'
+    try: recorded = json.loads(applied.read_text()).get('revision')
+    except (OSError, ValueError, AttributeError): return
+    defaults = {**RETIRED_DEFAULTS, **DEFAULTS}
+    if recorded != revision({key: value for key, value in before.items() if key not in LIVE and defaults.get(key) != value}): return
+    temporary = applied.with_name('applied.tmp')
+    temporary.write_text(json.dumps({'revision': service_revision(before)})); temporary.chmod(0o600)
+    temporary.replace(applied)
 
 
 def view(state):
@@ -244,6 +258,53 @@ def apply(state, progress=lambda step: None):
             temporary.replace(directory / 'applied.json')
         previous.unlink(missing_ok=True)
     return {'status': 'applied', 'honcho': honcho, 'memory_rebuild': memory, 'mini_app': menu, **view(state)}
+
+
+def restart_cached(state):
+    """The dashboard and executor read the keys once (ADR-0291) and up does not recreate them, so after a key change they
+    restart here. A stopped one stays stopped; the marker goes either way."""
+    from tools.operations.installation.operations import compose, environment
+    from tools.operations.installation.configuration import RESTART_MARKER
+    # Compose's restart would start a stopped one too, such as an executor stopped on purpose.
+    listed = subprocess.run(compose(state) + ['ps', '--status', 'running', '--services'], env=environment(state),
+                            stdout=subprocess.PIPE, stderr=subprocess.DEVNULL, text=True, timeout=60)
+    running = [name for name in ('nocheh-dashboard', 'nocheh-executor') if name in (listed.stdout or '').split()]
+    if running:
+        subprocess.run(compose(state) + ['restart', *running], env=environment(state),
+                       stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL, timeout=300)
+    (Path(state) / RESTART_MARKER).unlink(missing_ok=True)
+
+
+ROTATED_NOTICE = ('New SERVICE_TOKEN, AGENT_KEY and Hermes session token are in use. Anything signed with the old key stops '
+                  'working: turns and scheduled or background runs in progress fail, Answer privately buttons on replies still '
+                  'being delivered fail (buttons already sent may too), and replies Nocheh was still delivering are not sent. '
+                  'Ask again where needed.')
+
+
+def rotate_keys(state, print=print):
+    """./bin/nocheh rotate-keys: new master key, agent login and Hermes session token, applied at once. Apply rolls back
+    to the old keys when the services do not come back with the new ones."""
+    import secrets
+    from tools.operations.installation.configuration import ROTATED, mark_restart
+    directory = Path(state) / 'admin'; directory.mkdir(exist_ok=True, mode=0o700)
+    with (directory / 'settings.lock').open('a') as lock:
+        fcntl.flock(lock, fcntl.LOCK_EX)
+        current = load(state)
+        previous = directory / 'previous.env'
+        # The last applied baseline stays when unapplied settings already left one.
+        if not previous.exists(): write_env(previous, current)
+        updated = {**current, **{name: secrets.token_hex(32) for name in ROTATED}}
+        validate(updated)
+        write_env(env_path(state), updated)
+        mark_restart(state)
+    result = apply(state)
+    if result.get('status') == 'applied':
+        restart_cached(state)
+        print(ROTATED_NOTICE)
+        return 0
+    print('Rotation failed; the old keys are back' if result.get('rolled_back') else
+          'Rotation failed and the services did not come back: run ./bin/nocheh up')
+    return 1
 
 
 def telegram_api(token, method, **params):

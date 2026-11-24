@@ -24,6 +24,7 @@ services:
       PGDATABASE: nocheh
       PGPASSWORD: ${POSTGRES_PASSWORD}
       SERVICE_TOKEN: ${SERVICE_TOKEN:?Synthetic token required}
+      AGENT_KEY: dashboard-preview-agent-key-not-a-real-credential
       NOCHEH_WORKFLOW_FIXTURE: "1"
       NOCHEH_DASHBOARD_PORT: ${NOCHEH_DASHBOARD_PORT:?Unique preview port required}
       TELEGRAM_ENABLED: "false"

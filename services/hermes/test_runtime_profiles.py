@@ -67,17 +67,20 @@ class RuntimeProfileTests(unittest.TestCase):
         self.env = patch.dict(os.environ, {'NOCHEH_RUNTIME_HOME': str(self.root), 'NOCHEH_STORAGE_LAYOUT': 'original-only-v1'})
         self.env.start(); self.control = ControlFixture()
         self.policy = Scopes({'enabled': True}, Served.of('42', groups=['-10'], topics=[['-10/topic/7', '-10', '7']]))
-        self.catalog = ProfileCatalog(self.root, self.policy, 'fixture', self.control.request)
-        self.app = create_app(self.root, 'gpt-5.6-sol', self.policy, 'fixture', profile_catalog=self.catalog)
+        self.catalog = ProfileCatalog(self.root, self.policy, 'fixture-agent-key', self.control.request)
+        self.app = create_app(self.root, 'gpt-5.6-sol', self.policy, 'fixture-agent-key', 'fixture', profile_catalog=self.catalog)
         self.client = TestClient(self.app, base_url='http://127.0.0.1')
         self.headers = {'X-Hermes-Session-Token': 'fixture'}
 
     def tearDown(self): self.env.stop(); self.temp.cleanup()
 
     def create(self):
+        # Made on Nocheh's side: Hermes's Profiles page only reads (ADR-0291), and the agent login cannot save profiles.
         response = self.client.post('/api/profiles', headers=self.headers, json={'name': 'research', 'operation_id': 'create-research'})
-        self.assertEqual(response.status_code, 200, response.text)
-        return response.json()['profile']
+        self.assertEqual((response.status_code, response.json()['error']), (403, 'profiles_read_only'))
+        self.assertEqual([call for call in self.control.calls if call[0] == '/v1/runtime/profiles' and call[1] is not None], [])
+        self.control.request('/v1/runtime/profiles', {'name': 'research', 'state': 'active', 'expected_revision': 0, 'operation_id': 'create-research'})
+        return next(entry for entry in self.app.profiles()['profiles'] if entry['name'] == 'research')
 
     def test_current_control_identity_and_read_only_inspection(self):
         entries = self.client.get('/api/profiles', headers=self.headers).json()['profiles']
@@ -120,9 +123,11 @@ class RuntimeProfileTests(unittest.TestCase):
         # prepare_profile returns the profile path; native content never becomes preferences.
         old = self.root / 'profiles' / bound.profile
         (old / 'memories').mkdir(exist_ok=True); (old / 'memories/MEMORY.md').write_text('Old context')
-        changed = self.client.patch('/api/profiles/research', headers=self.headers,
+        refused = self.client.patch('/api/profiles/research', headers=self.headers,
             json={'new_name': 'planning', 'expected_revision': 1, 'operation_id': 'rename-research'})
-        self.assertEqual(changed.status_code, 200, changed.text)
+        self.assertEqual(refused.status_code, 403, refused.text)
+        self.control.request('/v1/runtime/profiles', {'id': identity, 'name': 'planning', 'state': 'active', 'expected_revision': 1,
+                                                      'operation_id': 'rename-research'})
         fresh = self.catalog.resolve('planning'); self.assertEqual(fresh['logical_profile'], identity)
         self.assertNotEqual(fresh['native_profile'], bound.profile)
         prepare_profile(self.root, self.app.binding('planning'), 'gpt-5.6-sol')
@@ -135,12 +140,12 @@ class RuntimeProfileTests(unittest.TestCase):
         configure_profile(pref, 'gpt-5.6-sol', {'agent.max_iterations': 6}, inspect_profile(pref, 'gpt-5.6-sol')['revision'])
         prepare_profile(self.root, self.app.binding('planning'), 'gpt-5.6-sol')
         self.assertEqual(read(current / 'config.yaml')['agent']['max_iterations'], 6)
-        conflict = self.client.patch('/api/profiles/planning', headers=self.headers,
-            json={'new_name': 'stale', 'expected_revision': 1, 'operation_id': 'stale-edit'})
-        self.assertEqual(conflict.status_code, 409, conflict.text)
-        retired = self.client.request('DELETE', '/api/profiles/planning', headers=self.headers,
+        refused = self.client.request('DELETE', '/api/profiles/planning', headers=self.headers,
             json={'expected_revision': 2, 'operation_id': 'retire-planning'})
-        self.assertEqual(retired.status_code, 200, retired.text)
+        self.assertEqual(refused.status_code, 403, refused.text)
+        self.assertEqual(self.catalog.resolve('planning')['logical_profile'], identity)
+        self.control.request('/v1/runtime/profiles', {'id': identity, 'name': 'planning', 'state': 'retired', 'expected_revision': 2,
+                                                      'operation_id': 'retire-planning'})
         self.assertTrue((pref / 'config.yaml').exists()); self.assertTrue(old.exists())
         with self.assertRaisesRegex(ValueError, 'profile_not_found'): self.app.profile(identity)
 

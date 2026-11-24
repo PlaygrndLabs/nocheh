@@ -55,7 +55,7 @@ test('separated application captures through control outages, exposes owner repo
     throw Error('unexpected external operation');
   };
   const services=fixtureServices(stores,{dataDir:root,detectorVersion:'fixture',policy:()=>policy,serviceToken:token,runtime,memoryEngine:honchoEngine(async()=>{throw Error('no native provider calls');})});
-  const settings:Settings={service:'nocheh-app',host:'127.0.0.1',port:0,token,databasePassword:'',storageLayout:'original-only-v1',dataDir:root,
+  const settings:Settings={service:'nocheh-app',host:'127.0.0.1',port:0,token,agentKey:digest('agent:'+token),databasePassword:'',storageLayout:'original-only-v1',dataDir:root,
     hermesUrl:'http://fixture',telegramUrl:'http://fixture',honchoUrl:'http://fixture',honchoEnabled:false,memoryToken:'',guardMode:'on',detectorVersion:'fixture',assistant:policy};
   await mkdir(join(root,'workflows'),{recursive:true});await writeFile(join(root,'workflows/inactive'),'fixture: no Inngest connection');
   await services.guards.reconcile();await services.guards.setMode('on');
@@ -104,7 +104,7 @@ test('separated application captures through control outages, exposes owner repo
     await request('/v1/agent/manage',{action:'unknown'},400);
     // The Notes page reads each note's source in the owner's words; what Hermes recorded stays behind (ADR-0257).
     assert.deepEqual((await request('/v1/agent/manage',{action:'memory',scope:'123'})).memories[0].entries,[{target:'memory',text:'Juniper',from:'unknown',label:'Source not recorded',day:null,originals:[]}]);
-    // Hermes's lookup takes the service token only, and a body not as Hermes writes it is refused.
+    // Hermes's lookup takes the agent login (or the admin bearer), never a pass, and a body not as Hermes writes it is refused.
     const lookup={notes:[{key:'e'.repeat(64),origins:[{by:'unknown'}],more:0,cites:[]}],space:'123'};
     assert.deepEqual(await request('/internal/notes/sources',lookup),{labels:{['e'.repeat(64)]:{from:'unknown',label:'source not recorded'}}});
     await request('/internal/notes/sources',lookup,401,scopeToken(token,'123',Date.now()+60000));
@@ -178,6 +178,24 @@ test('separated application captures through control outages, exposes owner repo
     await request('/v1/runtime/profiles',undefined,403,credential);
     const profiles=await request('/v1/runtime/profiles');assert.ok(profiles.profiles.some((p:any)=>p.is_default));
     assert.equal((await request('/v1/runtime/profiles/resolve',{profile:'default'})).space,'123');
+    // Hermes's own calls take the agent login, its own kind of caller (ADR-0291): it reads profiles and the chat list and
+    // runs schedules and background runs (below), and nothing else. The owner's admin bearer still reaches every one.
+    const agentKey=settings.agentKey,refused=(error:any)=>assert.equal(error.error,'agent_route_not_allowed');
+    assert.deepEqual(await request('/v1/runtime/profiles',undefined,200,agentKey),profiles);
+    assert.equal((await request('/v1/runtime/profiles/resolve',{profile:'default'},200,agentKey)).space,'123');
+    refused(await request('/v1/runtime/profiles',{name:'Agent',state:'active',expected_revision:0,operation_id:'agent-save'},403,agentKey));
+    assert.deepEqual(await request('/internal/chats',undefined,200,agentKey),await request('/internal/chats'));
+    assert.deepEqual(await request('/internal/notes/sources',lookup,200,agentKey),await request('/internal/notes/sources',lookup));
+    assert.deepEqual(await request('/internal/sources/retired',{event_ids:[digest(key)]},200,agentKey),await request('/internal/sources/retired',{event_ids:[digest(key)]}));
+    for(const credential of [agentKey,token])
+      assert.equal((await request('/v1/background/finish',{event_id:'f'.repeat(64),actor:'fixture'},403,credential)).error,'run_actor_mismatch');
+    for(const [path,body] of [['/v1/status',undefined],['/v1/runtime',undefined],['/v1/agent/manage',{action:'persona',scope:'default'}],['/mcp',{}],
+      ['/v1/background/cancel',{event_id:'f'.repeat(64)}],['/v1/memory/spaces',undefined],['/v1/ingest',{}],['/internal/chats/leave',{id:'a'.repeat(64),chat_id:'-1'}],
+      ['/v1/scheduler/ownership',{}],['/v1/schedules/turn',{}],['/v1/data?scope=123',undefined],['/internal/chats?all=1',undefined],['/v1/browser/admit',{}]] as const)
+      if(path.startsWith('/v1/browser/'))assert.equal((await request(path,body,404,agentKey)).error,'browser_chat_off');
+      else refused(await request(path,body,403,agentKey));
+    // Read as a pass, the agent login is none.
+    assert.equal((await request('/v1/events/'+digest(key),undefined,403,agentKey)).error,'agent_route_not_allowed');
     // No browser run is admitted, claimed or delivered, so none can hand out a pass. A closed run's pass is checked on
     // the scheduled run below.
     for(const operation of ['admit','workflow-context','claim','prepare','heartbeat','finish','observe','undelivered','delivered'])
@@ -193,6 +211,7 @@ test('separated application captures through control outages, exposes owner repo
     assert.equal((await request('/v1/scheduler/definition',scheduleBody,403)).error,'schedule_definition_not_allowed');
     await recordScheduleDefinition(services.schedules,scheduleBody);
     assert.equal((await request('/v1/scheduler/definition',scheduleBody)).duplicate,true);
+    assert.equal((await request('/v1/scheduler/definition',scheduleBody,200,agentKey)).duplicate,true,'Hermes’s checkpoint takes the agent login');
     const scheduleInput={scope:'123',space:'123',profile:ownerProfile,job_id:scheduleJob,id:'first',
       text:scheduleDefinition.prompt,files:[],definition:scheduleDefinition,job_revision:digest(canonical(scheduleDefinition)),
       scheduled_for:new Date().toISOString(),fire_reason:'manual',owner_epoch:scheduleOwner.epoch};
@@ -213,18 +232,18 @@ test('separated application captures through control outages, exposes owner repo
     const generated=await request('/v1/agent/manage',{action:'schedules',operation:'pause',profile:ownerProfile,job_id:scheduleJob});
     assert.match(generated.input.request_id,/^[a-f0-9]{32}$/);
     assert.equal((await request('/v1/agent/manage',{action:'schedules',operation:'list'})).operation,'schedules.manage');
-    const scheduled=await request('/v1/scheduler/input',{...scheduleInput,request_id:'page-run-1'});
+    const scheduled=await request('/v1/scheduler/input',{...scheduleInput,request_id:'page-run-1'},200,agentKey);
     assert.equal(scheduled.state,'captured');
     assert.equal((await connected.control.query('SELECT fired_by FROM managed_runs WHERE event_id=$1',[scheduled.event_id])).rows[0].fired_by,'owner');
     assert.equal((await connected.archive.query('SELECT 1 FROM events WHERE id=$1',[scheduled.event_id])).rowCount,0);
-    const scheduledContext=await request('/v1/scheduler/workflow-context',{event_id:scheduled.event_id,owner_epoch:scheduleOwner.epoch});
-    const scheduledClaim=await request('/v1/scheduler/claim',scheduledContext);assert.equal(scheduledClaim.claimed,true);
+    const scheduledContext=await request('/v1/scheduler/workflow-context',{event_id:scheduled.event_id,owner_epoch:scheduleOwner.epoch},200,agentKey);
+    const scheduledClaim=await request('/v1/scheduler/claim',scheduledContext,200,agentKey);assert.equal(scheduledClaim.claimed,true);
     // Unarchived schedule fires pass the runtime's pre-run delivery check through their admitted run.
     assert.equal((await request('/v1/memory/check',undefined,200,scheduledClaim.archive_credential)).valid,true);
     const otherScope=await services.prepared.audience.turn(token,{scope:'-42',space:'-42',logical_profile:ownerProfile},scheduled.event_id,Date.now()+60000);
     assert.equal((await request('/v1/memory/check',undefined,200,otherScope)).valid,false);
-    assert.equal((await request('/v1/scheduler/prepare',scheduledContext)).files.length,0);
-    await request('/v1/scheduler/finish',{event_id:scheduled.event_id,actor:scheduledContext.actor,state:'done',session:scheduledContext.conversation,text:'Scheduled result'});
+    assert.equal((await request('/v1/scheduler/prepare',scheduledContext,200,agentKey)).files.length,0);
+    await request('/v1/scheduler/finish',{event_id:scheduled.event_id,actor:scheduledContext.actor,state:'done',session:scheduledContext.conversation,text:'Scheduled result'},200,agentKey);
     assert.equal((await services.scheduled.delivery({event_id:scheduled.event_id})).state,'local');
     // The owner's own live turn may set schedules: Nocheh answers with the chat and profile they must name and keeps a turn
     // grant, and a definition posted as that turn is recorded as the owner's, with its message in the chat.
@@ -321,7 +340,7 @@ test('actual application and security entrypoints start with domain credentials 
   await mkdir(join(root,'spool'),{recursive:true});await writeFile(join(root,'spool/.restore-inactive'),'synthetic inactive restore');
   const env={...process.env,PGPASSWORD:'',PGPASSWORD_FILE:'',INNGEST_POSTGRES_PASSWORD:'',INNGEST_POSTGRES_PASSWORD_FILE:'',
     NOCHEH_ARCHIVE_PASSWORD:digest('archive-fixture'),NOCHEH_DERIVED_PASSWORD:digest('derived-fixture'),NOCHEH_CONTROL_PASSWORD:digest('control-fixture'),
-    NOCHEH_STORAGE_LAYOUT:'original-only-v1',NOCHEH_DATA_DIR:root,SERVICE_TOKEN:token,PORT:'0',HOST:'127.0.0.1',TELEGRAM_ENABLED:'false',GUARD_MODE:'on'};
+    NOCHEH_STORAGE_LAYOUT:'original-only-v1',NOCHEH_DATA_DIR:root,SERVICE_TOKEN:token,AGENT_KEY:digest('entrypoint-agent'),PORT:'0',HOST:'127.0.0.1',TELEGRAM_ENABLED:'false',GUARD_MODE:'on'};
   try {for(const entry of ['main','security/main']) {
     const child=spawn(process.execPath,['dist/src/'+entry+'.js'],{env,stdio:['ignore','pipe','pipe']});
     let output='',error='',code:number|null=null;child.stdout.on('data',chunk=>{output+=String(chunk);});child.stderr.on('data',chunk=>{error+=String(chunk);});child.on('exit',value=>{code=value;});

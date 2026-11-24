@@ -66,7 +66,7 @@ TITLES = {
     'photo_is_read': 'Photos are read once, at their largest size, for their text',
     'hermes_is_locked_down': 'The assistant runs locked down and sees only its own folders',
     'files_upload_over_1mb': 'A large upload on the Files page is kept whole',
-    'profiles_round_trip': 'A profile is made, listed and retired',
+    'profiles_round_trip': 'Hermes\'s Profiles page lists profiles and refuses changes',
     'no_refused_writes': 'No file went unread for want of space or a refused write',
     'owner_directory_lists_conversations': 'Your chat list', 'unparseable_update_does_not_wedge_polling': 'A broken update does not stop Telegram',
     'telegram_refresh_names': 'Group names refresh', 'owner_freedom_keeps_group_cards': 'Setting: your private requests run without approval, except posts to groups',

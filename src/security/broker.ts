@@ -2,7 +2,7 @@ import {createServer,type IncomingMessage,type ServerResponse} from 'node:http';
 import {once} from 'node:events';
 import {randomUUID} from 'node:crypto';
 import type pg from 'pg';
-import {boundReader,currentReader,assertAudience,type Reader} from '../access.js';
+import {agentLogin,boundReader,currentReader,assertAudience,type AgentLogin,type Reader} from '../access.js';
 import {digest} from '../archive.js';
 import {HttpError,json,readJson,object} from '../http.js';
 import {manifest,fingerprint,type Effect,type Decision} from './contract.js';
@@ -32,7 +32,9 @@ export interface BrokerStorage {
   /** An answer reader's read set from its record (ADR-0249); a reader without an answer comes back as it is. */
   bindReads?(principal:Reader):Promise<Reader>;
 }
-export interface BrokerOptions {pool:pg.Pool; token:string; archive:string; prepare:(principal:Reader,input:unknown)=>Promise<any>; hermes:string; model:string; fetch?:typeof fetch;storage?:BrokerStorage;assertActive?:()=>void;assertReady?:()=>Promise<void>;health?:()=>Promise<unknown>;}
+/** `agentKey` is the agent login (ADR-0291): the broker calls Hermes with it and takes it on POST /v1/guard alone; without it
+ * no agent login is accepted and no transport call is sent. */
+export interface BrokerOptions {pool:pg.Pool; token:string; agentKey?:string; archive:string; prepare:(principal:Reader|AgentLogin,input:unknown)=>Promise<any>; hermes:string; model:string; fetch?:typeof fetch;storage?:BrokerStorage;assertActive?:()=>void;assertReady?:()=>Promise<void>;health?:()=>Promise<unknown>;}
 /** Why Nocheh did not save a schedule a turn set (ADR-0290); any other refusal stays opaque. */
 export const scheduleErrors=new Set(['schedule_turn_required','schedule_turn_not_allowed','schedule_limit_reached','schedule_cron_unsupported',
   'invalid_schedule_definition','invalid_schedule_prompt','invalid_schedule_preference','profile_scope_denied','schedule_sequence_conflict',
@@ -136,6 +138,8 @@ export function brokerServer(options:BrokerOptions) {
   const box=options.storage instanceof RuntimeTurnRepository?new JobBoxRepository(options.storage.access):null;
   // So do machine jobs (ADR-0231). This service holds no machine token: storage refuses each command without one.
   const machines=options.storage instanceof RuntimeTurnRepository?new MachineRepository(options.storage.access):null;
+  // Hermes takes the agent login, never the master key (ADR-0291); without one nothing is sent.
+  const hermesLogin=()=>{if(!options.agentKey)throw new HttpError(503,'agent_key_unconfigured');return 'Bearer '+options.agentKey;};
   // A job's run goes on across reaction and learning epochs; each of its checks waits out a publication still pending (ADR-0208).
   const assertCurrent=(principal:Reader)=>afterPending(jobRun(principal),async()=>options.storage?options.storage.assertAudience(principal):assertAudience(options.pool,principal));
   return createServer((req,res)=>{void handle(req,res).catch(error=>{
@@ -155,6 +159,12 @@ export function brokerServer(options:BrokerOptions) {
       if(!box||!authorization.startsWith('Bearer ')||!boxTokenValid(authorization.slice(7)))throw new HttpError(403,'box_token_required');
       await options.assertReady?.();return json(res,200,await box.live());
     }
+    // The agent's own model calls without a pass get the system guard, and nothing else here (ADR-0291).
+    const login=agentLogin(req,options.agentKey);
+    if(login){
+      if(req.method!=='POST'||path!=='/v1/guard'||url.search)throw new HttpError(403,'agent_route_not_allowed');
+      await options.assertReady?.();return json(res,200,await options.prepare(login,await readJson(req,1024*1024)));
+    }
     // A bound reader (an answer, a member's private chat, the owner's ask about a member) is bound to its record on every
     // call, or refused without one, and reaches its read routes only (ADR-0249, ADR-0262). A pass for a topic the app
     // recorded a moment ago is read once this service's chat directory has looked again (ADR-0252).
@@ -170,7 +180,8 @@ export function brokerServer(options:BrokerOptions) {
     if(copy&&(principal.admin||!box||!boxTokenValid(req.headers['x-nocheh-box-token'])))throw new HttpError(403,'job_box_not_allowed');
     // Only the job's own chat and period, from its row: the page cursor is the one key it takes.
     if(copy&&[...url.searchParams.keys()].some(key=>key!=='cursor'))throw new HttpError(400,'invalid_box_request');
-    if(principal.admin&&path==='/v1/guard'&&req.method==='POST')return json(res,200,await options.prepare(principal,await readJson(req,1024*1024)));
+    // The system guard is the agent login's alone; the master key has no caller here.
+    if(principal.admin&&path==='/v1/guard')throw new HttpError(403,'agent_login_required');
     if(path!=='/v1/security/binding'&&await ownerSecurityRoute(options.pool,principal,req,res,url,{separated:!!options.storage}))return;
     const binding=await afterPending(job,()=>options.storage?options.storage.binding(principal):turnBinding(options.pool,principal));
     const credential=req.headers.authorization!;
@@ -195,7 +206,7 @@ export function brokerServer(options:BrokerOptions) {
     try {
       const rpc=async(base:string,route:string,body:unknown,authorization=credential)=>boundedJson(await call(base+route,{method:'POST',headers:{authorization,'content-type':'application/json'},body:JSON.stringify(body),redirect:'error',signal:controller.signal}));
       if(path==='/v1/security/binding'&&req.method==='GET') {
-        const transport=object(await rpc(options.hermes,'/internal/security/transport',{metadata:true},'Bearer '+options.token));
+        const transport=object(await rpc(options.hermes,'/internal/security/transport',{metadata:true},hermesLogin()));
         if(!Number.isSafeInteger(transport.model_context_length)||Number(transport.model_context_length)<1)throw new HttpError(503,'model_context_metadata_required');
         // Without the box token the launcher can fill no box, so no step gets one.
         // A member's own live turn in their private chat, with Personal assistant on: the launcher mounts that chat's
@@ -288,7 +299,7 @@ export function brokerServer(options:BrokerOptions) {
       }
       const attempt=await authorizeEffect('model.request',payload);
       const prepareStarted=performance.now();
-      const transport=object(await rpc(options.hermes,'/internal/security/transport',{},'Bearer '+options.token));
+      const transport=object(await rpc(options.hermes,'/internal/security/transport',{},hermesLogin()));
       const destination=providerTarget(transport,path);
       const prepared=object(await afterPending(job,()=>options.prepare(principal,{destination,payload})));
       if(prepared.guarded!==true||!prepared.payload)throw new HttpError(503,'required_guard_unavailable');

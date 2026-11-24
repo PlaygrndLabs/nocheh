@@ -2,7 +2,7 @@ import {test} from 'node:test';
 import assert from 'node:assert/strict';
 import {createHmac} from 'node:crypto';
 import type {IncomingMessage} from 'node:http';
-import {answerId,currentReader,reader,scopeToken,turnToken} from '../src/access.js';
+import {admin,adminOrAgent,agentLogin,answerId,currentReader,isAgentLogin,reader,scopeToken,turnToken} from '../src/access.js';
 import {chatDirectory,chatIdFor,chats,installChats,installChatsForTest,setChatLoader} from '../src/chats.js';
 import {BOB_CHAT,GP1,GP1_TOPIC,GP2,NG1,NG1_TG,NG1_TOPIC,NG2,NG2_TG,OWNER,fixtureChats,fixtureDirectory} from './fixture-groups.js';
 
@@ -107,4 +107,29 @@ test('a pass for a topic another process recorded a moment ago is read once the 
     assert.equal(looked,2);
     assert.ok(chats().get(fresh));
   } finally {setChatLoader(null);restore();}
+});
+
+test('the agent login is no reader and signs no pass; only the few calls the agent makes take it (ADR-0291)',async()=>{
+  const agentKey='synthetic-agent-login-only-for-tests-0001',login=agentLogin(request(agentKey),agentKey);
+  assert.deepEqual(login,{kind:'agent',agent:'hermes'});assert.ok(isAgentLogin(login));
+  // The master key's readers never take it: it is no admin bearer and no pass.
+  assert.throws(()=>reader(request(agentKey),secret),{code:'invalid_scope_token'});
+  await assert.rejects(currentReader(request(agentKey),secret),{code:'invalid_scope_token'});
+  // A pass signed with the agent login is no pass, and a real pass is no agent login.
+  const forged=turnToken(agentKey,null,later(),event,{space:OWNER,revision:1});
+  assert.throws(()=>reader(request(forged),secret),{code:'invalid_scope_token'});
+  assert.equal(agentLogin(request(forged),agentKey),null);
+  assert.equal(agentLogin(request(turnToken(secret,null,later(),event,{space:OWNER,revision:1})),agentKey),null);
+  assert.equal(agentLogin(request(secret),agentKey),null,'the master key is not the agent login');
+  // Only an exact bearer of a configured key of 32 characters or more.
+  for(const header of [agentKey,'bearer '+agentKey,'Bearer '+agentKey+' ','Bearer '+agentKey.slice(0,-1),'Bearer ','',undefined])
+    assert.equal(agentLogin({headers:header===undefined?{}:{authorization:header}} as unknown as IncomingMessage,agentKey),null,String(header));
+  for(const key of [undefined,'',agentKey.slice(0,31)])assert.equal(agentLogin(request(key??''),key),null,String(key));
+  assert.equal(agentLogin(request(agentKey.slice(0,32)),agentKey.slice(0,32))?.kind,'agent');
+  // The repository calls the agent makes take it or the admin bearer, never a scoped reader, and admin() never takes it.
+  assert.doesNotThrow(()=>adminOrAgent(login!));assert.doesNotThrow(()=>adminOrAgent({scope:null,admin:true}));
+  assert.throws(()=>adminOrAgent({scope:null,admin:false}),{code:'owner_required'});
+  assert.throws(()=>adminOrAgent({scope:OWNER,admin:false}),{code:'owner_required'});
+  assert.throws(()=>admin(login as never),{code:'owner_required'});
+  assert.equal(isAgentLogin({scope:null,admin:true}),false);
 });

@@ -83,14 +83,14 @@ class ImageTextTests(unittest.TestCase):
                         hint=json.loads(command[-1]))
             return subprocess.CompletedProcess(command, 0, json.dumps({'state': 'done', 'text': 'Synthetic',
                                                                        'usage': {'input_tokens': 1200, 'output_tokens': 30}}).encode(), b'')
-        with tempfile.TemporaryDirectory() as state, patch.dict('os.environ', {**ROUTE, 'SERVICE_TOKEN': 'synthetic-service-token'}), \
+        with tempfile.TemporaryDirectory() as state, patch.dict('os.environ', {**ROUTE, 'AGENT_KEY': 'synthetic-agent-key-0123456789abcdef', 'NOCHEH_HERMES_SESSION_TOKEN': 'synthetic-session-token-0123456789ab'}), \
                 patch.object(image_text.subprocess, 'run', side_effect=run), patch.object(usage, 'price', return_value=[0.004]):
             target = Path(state) / 'hermes/usage/usage.sqlite'
             target.parent.mkdir(parents=True)
             with patch.object(usage, 'DATABASE', target):
                 self.assertEqual(image_text.read_image(body), {'state': 'done', 'text': 'Synthetic'})
                 rows = usage.rows('2000-01-01', target)
-        self.assertNotIn('SERVICE_TOKEN', seen['env'])
+        for name in ('SERVICE_TOKEN', 'AGENT_KEY', 'NOCHEH_HERMES_SESSION_TOKEN'): self.assertNotIn(name, seen['env'])
         self.assertEqual(seen['env'][image_text.KEY], 'synthetic-image-key')
         self.assertEqual(seen['config']['auxiliary']['vision'], {'provider': 'custom', 'model': 'vision-model',
                          'base_url': 'https://images.example.test/v1', 'api_key': '${env:' + image_text.KEY + '}',

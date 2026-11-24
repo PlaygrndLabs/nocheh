@@ -413,3 +413,118 @@ class ConfigurationTests(unittest.TestCase):
             with self.assertRaises(ValueError):validate({**values,'NOCHEH_STORAGE_LAYOUT':'legacy'})
             for bad in ['',values[names[0]],values['POSTGRES_PASSWORD']]:
                 with self.assertRaises(ValueError):validate({**values,names[1]:bad})
+
+
+class AgentKeyTests(unittest.TestCase):
+    """The agent login and Hermes's session token (ADR-0291): generated, distinct, cut over once, rotated on request."""
+    KEYS=('SERVICE_TOKEN','AGENT_KEY','NOCHEH_HERMES_SESSION_TOKEN','NOCHEH_BOX_TOKEN','NOCHEH_MACHINE_TOKEN')
+
+    def test_init_generates_every_key_distinct_and_keeps_them(self):
+        from tools.operations.installation.configuration import validate,DEFAULTS
+        from tools.operations.installation.settings import EDITABLE,view
+        with tempfile.TemporaryDirectory() as folder:
+            state=Path(folder);values=initialize(state)
+            keys=[values[name] for name in self.KEYS]
+            self.assertTrue(all(len(key)>=32 for key in keys));self.assertEqual(len(set(keys)),len(keys))
+            self.assertFalse((state/'admin/restart-cached').exists(),'a fresh .env has nothing to restart')
+            self.assertEqual(initialize(state),values,'stable once made')
+            for name in ('AGENT_KEY','NOCHEH_HERMES_SESSION_TOKEN'):
+                self.assertNotIn(name,DEFAULTS);self.assertNotIn(name,EDITABLE)
+                self.assertNotIn(name,[field['key'] for field in view(state)['fields']])
+                self.assertNotIn(values[name],str(view(state)))
+                # Empty passes, so an older .env still loads before init, up or make dev fills it.
+                validate({**values,name:''})
+                for other in self.KEYS:
+                    if other!=name:
+                        with self.subTest(name=name,other=other),self.assertRaisesRegex(ValueError,'differ from every other Nocheh key'):
+                            validate({**values,name:values[other]})
+                with self.assertRaisesRegex(ValueError,name+' must contain at least 32'):validate({**values,name:'k'*31})
+            for name in ('NOCHEH_BOX_TOKEN','NOCHEH_MACHINE_TOKEN'):
+                with self.assertRaises(ValueError):validate({**values,name:values['AGENT_KEY']})
+
+    def test_the_first_run_without_an_agent_login_replaces_the_master_key_once(self):
+        import json
+        from tools.operations.installation.settings import view,service_revision,revision,LIVE,RETIRED_DEFAULTS
+        from tools.operations.installation.configuration import DEFAULTS
+        with tempfile.TemporaryDirectory() as folder:
+            state=Path(folder);values=initialize(state)
+            old={key:value for key,value in values.items() if key not in ('AGENT_KEY','NOCHEH_HERMES_SESSION_TOKEN')}
+            write_env(env_path(state),old)
+            # What a build before the agent login recorded at Apply: generated keys counted too.
+            defaults={**RETIRED_DEFAULTS,**DEFAULTS}
+            (state/'admin/applied.json').write_text(json.dumps({'revision':revision({k:v for k,v in load(state).items() if k not in LIVE and defaults.get(k)!=v})}))
+            values=initialize(state)
+            self.assertNotEqual(values['SERVICE_TOKEN'],old['SERVICE_TOKEN'],'Hermes knew the old master key')
+            self.assertEqual(len({values[name] for name in self.KEYS}),len(self.KEYS))
+            for name in ('POSTGRES_PASSWORD','NOCHEH_BOX_TOKEN','NOCHEH_MACHINE_TOKEN','NOCHEH_ARCHIVE_PASSWORD'):self.assertEqual(values[name],old[name])
+            marker=state/'admin/restart-cached'
+            self.assertTrue(marker.is_file());self.assertEqual(marker.stat().st_mode&0o777,0o600)
+            self.assertEqual(view(state)['apply_state'],'current','a cutover asks for no Apply')
+            self.assertEqual(json.loads((state/'admin/applied.json').read_text())['revision'],service_revision(load(state)))
+            marker.unlink()
+            self.assertEqual(initialize(state),values,'once: the agent login is there now');self.assertFalse(marker.exists())
+
+    def test_make_dev_cuts_over_the_operating_env_too(self):
+        from tools.cli import main
+        with tempfile.TemporaryDirectory() as folder:
+            root=Path(folder);(root/'data/local').mkdir(parents=True)
+            saved={'NOCHEH_CONFIG_VERSION':'1','SERVICE_TOKEN':'o'*40,'NOCHEH_BOX_TOKEN':'b'*40,'NOCHEH_MACHINE_TOKEN':'m'*40}
+            write_env(root/'.env',saved)
+            with patch('tools.development.live_dev.operating_root',return_value=root),\
+                 patch('tools.development.live_dev.operating_config',side_effect=lambda r:dict(read_env(r/'.env'))),\
+                 patch('tools.operations.installation.workspaces.images',return_value='nocheh'):
+                main.development_box_token()
+                first=read_env(root/'.env')
+                self.assertNotEqual(first['SERVICE_TOKEN'],'o'*40);self.assertEqual(first['NOCHEH_BOX_TOKEN'],'b'*40)
+                self.assertTrue(all(len(first[name])>=32 for name in self.KEYS))
+                self.assertTrue((root/'data/local/admin/restart-cached').exists())
+                (root/'data/local/admin/restart-cached').unlink()
+                main.development_box_token()
+                self.assertEqual(read_env(root/'.env'),first);self.assertFalse((root/'data/local/admin/restart-cached').exists())
+
+    def test_rotate_keys_applies_new_keys_and_restarts_what_caches_them(self):
+        from tools.operations.installation import settings
+        with tempfile.TemporaryDirectory() as folder:
+            state=Path(folder);old=initialize(state);said=[]
+            from types import SimpleNamespace
+            def ran(command,**options):return SimpleNamespace(returncode=0,stdout='nocheh-app\nnocheh-dashboard\nnocheh-executor\n' if 'ps' in command else '')
+            with patch('tools.operations.installation.settings.subprocess.run',side_effect=ran) as run,\
+                 patch('tools.operations.installation.settings.refresh_honcho',return_value='skipped'),\
+                 patch('tools.operations.installation.settings.rebuild_memory',return_value='skipped'),\
+                 patch('tools.operations.installation.settings.mini_app.menu_button',return_value='skipped'):
+                self.assertEqual(settings.rotate_keys(state,said.append),0)
+            new=load(state)
+            for name in ('SERVICE_TOKEN','AGENT_KEY','NOCHEH_HERMES_SESSION_TOKEN'):self.assertNotEqual(new[name],old[name])
+            for name in ('NOCHEH_BOX_TOKEN','NOCHEH_MACHINE_TOKEN','POSTGRES_PASSWORD'):self.assertEqual(new[name],old[name])
+            commands=[call.args[0] for call in run.call_args_list]
+            self.assertIn('up',commands[0]);self.assertEqual(commands[-1][-3:],['restart','nocheh-dashboard','nocheh-executor'])
+            self.assertFalse((state/'admin/restart-cached').exists());self.assertFalse((state/'admin/previous.env').exists())
+            self.assertIn('Answer privately buttons',said[0]);self.assertFalse(any(new[name] in said[0] for name in self.KEYS))
+            self.assertEqual(settings.view(state)['apply_state'],'current')
+            # The services do not come back: apply puts the old keys back.
+            with patch('tools.operations.installation.settings.subprocess.run',side_effect=[SimpleNamespace(returncode=code) for code in (1,0,0)]) as run:
+                self.assertEqual(settings.rotate_keys(state,said.append),1)
+            self.assertEqual({name:load(state)[name] for name in self.KEYS},{name:new[name] for name in self.KEYS})
+            self.assertEqual(said[-1],'Rotation failed; the old keys are back')
+            self.assertTrue((state/'admin/restart-cached').exists(),'the next up restarts them anyway')
+            self.assertFalse(any('restart' in call.args[0] for call in run.call_args_list))
+            # A stopped executor stays stopped.
+            with patch('tools.operations.installation.settings.subprocess.run',side_effect=lambda command,**options:SimpleNamespace(
+                    returncode=0,stdout='nocheh-dashboard\n' if 'ps' in command else '')) as run:
+                settings.restart_cached(state)
+            self.assertEqual(run.call_args_list[-1].args[0][-2:],['restart','nocheh-dashboard'])
+            self.assertFalse((state/'admin/restart-cached').exists())
+
+    def test_restore_of_an_older_backup_gets_the_new_keys(self):
+        from tools.operations.installation.configuration import cut_over,generate,ROTATED
+        config={'SERVICE_TOKEN':'o'*40,'NOCHEH_BOX_TOKEN':'b'*40}
+        self.assertTrue(cut_over(config));generate(config,ROTATED)
+        self.assertNotEqual(config['SERVICE_TOKEN'],'o'*40);self.assertTrue(config['AGENT_KEY'] and config['NOCHEH_HERMES_SESSION_TOKEN'])
+        self.assertFalse(cut_over(config));self.assertFalse(cut_over({}),'a fresh .env has no key to drop')
+        source=(Path(__file__).resolve().parents[2]/'tools/operations/installation/operations.py').read_text()
+        self.assertIn("if manifest['version']>1 and not config.get('AGENT_KEY'):cut_over(config);generate(config,ROTATED)",source)
+
+    def test_hermes_test_runners_give_the_agent_login_and_never_the_master_key(self):
+        source=(Path(__file__).resolve().parents[2]/'tools/cli/main.py').read_text()
+        self.assertIn("('-e', 'AGENT_KEY=test-agent-key-' + 'a' * 26) if tests == 'services/hermes' else ('-e', 'SERVICE_TOKEN=test-service-token')",source)
+        self.assertGreaterEqual(len('test-agent-key-'+'a'*26),32)

@@ -39,7 +39,7 @@ class TurnProcessTests(unittest.IsolatedAsyncioTestCase):
 
     def setUp(self):
         self.secret='synthetic-review-secret-not-a-real-credential'
-        environment=patch.dict(os.environ,{'SERVICE_TOKEN':self.secret})
+        environment=patch.dict(os.environ,{'AGENT_KEY':self.secret})
         environment.start();self.addCleanup(environment.stop)
 
     def review_body(self,purpose='memory-review',key=None):
@@ -55,14 +55,25 @@ class TurnProcessTests(unittest.IsolatedAsyncioTestCase):
             async def spawn(*args,**kwargs):
                 self.env=kwargs['env']
                 return await original(sys.executable,'-c',source,**kwargs)
-            with patch('services.hermes.turn_process.asyncio.create_subprocess_exec',spawn),patch.dict(os.environ,{'TELEGRAM_BOT_TOKEN':'hidden','OPENAI_API_KEY':'hidden','SERVICE_TOKEN':'hidden'}),patch('services.hermes.assistant_gateway.check_delivery_policy',return_value=delivery_allowed):
+            with patch('services.hermes.turn_process.asyncio.create_subprocess_exec',spawn),patch.dict(os.environ,{'TELEGRAM_BOT_TOKEN':'hidden','OPENAI_API_KEY':'hidden','SERVICE_TOKEN':'hidden','NOCHEH_HERMES_SESSION_TOKEN':'hidden'}),patch('services.hermes.assistant_gateway.check_delivery_policy',return_value=delivery_allowed):
                 events=[]
                 result=await _run_process(Path(folder),scope or Scope('-10','42',False,'group'),
                     {'event_id':'event','archive_credential':'scoped','text':'original','channel':'browser',**(extra or {})},'model',
                     SimpleNamespace(runtime=lambda:{'api_key':'ephemeral','base_url':'https://gateway.example.test/v1',
                                                     'provider':'openai','api_mode':'chat_completions'}),'session',events.append,cancel,progress,labels)
                 self.assertNotIn('SERVICE_TOKEN',self.env);self.assertNotIn('TELEGRAM_BOT_TOKEN',self.env);self.assertNotIn('OPENAI_API_KEY',self.env)
+                # Only the isolated mode's bridge gets the agent login (ADR-0291); a legacy model child gets no key.
+                self.assertNotIn('NOCHEH_HERMES_SESSION_TOKEN',self.env)
+                self.assertEqual(self.env.get('AGENT_KEY'),self.secret if os.environ.get('NOCHEH_SECURITY_RUNTIME')=='isolated' else None)
                 return result,events
+    async def test_only_the_isolated_bridge_gets_the_agent_login(self):
+        source='import sys,json; json.load(sys.stdin); print(json.dumps({"state":"done","text":"ok"}))'
+        await self.execute(source)
+        with patch.dict(os.environ,{'NOCHEH_SECURITY_RUNTIME':'isolated'}),patch('services.hermes.isolated_profile.prepare'),\
+             patch('services.hermes.security_transport.scoped_transport',return_value={}):
+            result,_=await self.execute(source)
+        self.assertEqual(result['text'],'ok')
+
     async def test_a_private_answer_says_first_where_it_was_asked_and_needs_its_pass(self):
         frame='[Private answer] The question below was asked in “Team”.'
         source=('import sys,json; body=json.load(sys.stdin); print(json.dumps({"state":"done","text":json.dumps({"text":body["text"],'

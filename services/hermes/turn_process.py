@@ -336,9 +336,9 @@ async def _run_process(profile, scope, body, model, credentials, session_id, emi
            'ARCHIVE_URL','GUARD_URL','NOCHEH_REPLY_ROUTE_URL','NOCHEH_GUARD_ROUTE_URL','NOCHEH_INSTALLATION_FIXTURE') if key in os.environ}
     env.update(HERMES_HOME=str(profile), GUARD_MODE=body.get('guard_mode','on'))
     if isolated:
-        from .environment import secret
-        # This short-lived bridge is trusted parent infrastructure, not the model process.
-        env['SERVICE_TOKEN']=secret('SERVICE_TOKEN')
+        from .environment import agent_key
+        # This short-lived bridge is trusted parent infrastructure, not the model process: it alone gets the agent login.
+        env['AGENT_KEY']=agent_key()
     module='services.hermes.security_client' if isolated else 'services.hermes.assistant_turn'
     process = await asyncio.create_subprocess_exec(sys.executable, '-m', module,
         stdin=asyncio.subprocess.PIPE, stdout=asyncio.subprocess.PIPE, stderr=asyncio.subprocess.DEVNULL,

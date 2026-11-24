@@ -21,7 +21,9 @@ from .subscription import resolve_credentials, detect_literals, DetectorContract
 MODEL = os.environ.get("NOCHEH_MODEL", "claude-sonnet-5-5")
 ROOT = Path(__file__).resolve().parents[2]
 PROFILE_HOME = Path(os.environ["HERMES_HOME"])
-TOKEN = environment_secret('SERVICE_TOKEN')
+# The agent login: Nocheh's calls here carry it, and Hermes's calls to Nocheh too (ADR-0291). main() refuses to start
+# without it, with a plain reason; a missing one refuses every call here.
+TOKEN = environment_secret('AGENT_KEY', False)
 CALL_LOCK = threading.RLock()
 
 
@@ -138,7 +140,7 @@ class Handler(BaseHTTPRequestHandler):
                                 "scheduler": SCHEDULER.status if SCHEDULER else 'not_started'})
 
     def do_POST(self):
-        if not hmac.compare_digest(self.headers.get("Authorization", "").encode(), ("Bearer " + TOKEN).encode()):
+        if not TOKEN or not hmac.compare_digest(self.headers.get("Authorization", "").encode(), ("Bearer " + TOKEN).encode()):
             return self.reply(401, {"error": "unauthorized"})
         try:
             length = int(self.headers.get("Content-Length", "0"))
@@ -220,10 +222,10 @@ class Handler(BaseHTTPRequestHandler):
         if self.path == '/internal/manage' and body.get('action') == 'schedules':
             # The owner's Schedules pages: Hermes's schedule stores, through the owner adapter the command line uses (ADR-0266).
             from .scopes import Scopes
-            from .native_admin import Administration,audience_revision
+            from .native_admin import Administration
             from .native_cron import owner_schedules
             policy=Scopes.load(os.environ.get('ASSISTANT_POLICY_FILE'))
-            return owner_schedules(Administration(None,PROFILE_HOME,MODEL,policy,TOKEN,revision_reader=lambda space:audience_revision(TOKEN,space)),body)
+            return owner_schedules(Administration(None,PROFILE_HOME,MODEL,policy,TOKEN),body)
         if self.path == '/internal/manage':
             from .management import dispatch
             from .scopes import Scopes
@@ -255,8 +257,11 @@ class Handler(BaseHTTPRequestHandler):
 
 def main():
     global ADMIN, SCHEDULER, AGENT
-    if len(TOKEN) < 24:
-        raise SystemExit("Service token is missing or too short")
+    from services.hermes.environment import agent_key, refuse_master_key, session_token
+    refuse_master_key()
+    try: agent_key()
+    except ValueError as error: raise SystemExit(str(error) + '; run ./bin/nocheh up') from None
+    session_token()
     logging.disable(logging.CRITICAL)
     configure()
     from services.hermes.request_boundary import install
@@ -280,9 +285,9 @@ def main():
     with open(os.devnull,'w') as quiet, contextlib.redirect_stdout(quiet), contextlib.redirect_stderr(quiet):
         AGENT.open()
         ADMIN = admin = subprocess.Popen([sys.executable, '-m', 'services.hermes.native_admin'], stdout=quiet, stderr=quiet)
-        from .native_admin import Administration,audience_revision
+        from .native_admin import Administration
         from .scheduler import Scheduler
-        administration=Administration(None,PROFILE_HOME,MODEL,policy,TOKEN,revision_reader=lambda space:audience_revision(TOKEN,space))
+        administration=Administration(None,PROFILE_HOME,MODEL,policy,TOKEN)
         from .managed_async import ManagedAsync
         global MANAGED
         SCHEDULER=Scheduler(administration,resolve_credentials)

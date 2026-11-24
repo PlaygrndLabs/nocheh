@@ -100,7 +100,7 @@ test('only the owner\'s own request in their private chat or an active project\'
   const archive=storageServer(s,{token,dataDir:root,guardMode:'on',assistant:policy} as unknown as Settings,async()=>({}));
   await new Promise<void>(resolve=>archive.listen(0,'127.0.0.1',resolve));
   const archiveBase='http://127.0.0.1:'+(archive.address() as {port:number}).port;
-  const broker=brokerServer({pool:stores.control,storage:s.turns,token,archive:archiveBase,hermes:'http://hermes',model:'fixture-model',prepare:storageGuardService(s),fetch:mock});
+  const broker=brokerServer({agentKey:'synthetic-agent-login-only-for-tests-0001',pool:stores.control,storage:s.turns,token,archive:archiveBase,hermes:'http://hermes',model:'fixture-model',prepare:storageGuardService(s),fetch:mock});
   await new Promise<void>(resolve=>broker.listen(0,'127.0.0.1',resolve));
   const brokerBase='http://127.0.0.1:'+(broker.address() as {port:number}).port;
   /** The dashboard's owner routes, as management reaches them with the service token. */

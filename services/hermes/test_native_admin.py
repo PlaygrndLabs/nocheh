@@ -61,8 +61,9 @@ class NativeAdminTests(unittest.TestCase):
         self.owner = self.root / 'profiles' / Scopes.profile('42')
         self.group = self.root / 'profiles' / Scopes.profile('-10')
         configure_profile(self.owner, 'gpt-5.6-sol'); configure_profile(self.group, 'gpt-5.6-sol')
-        self.token = 'admin-test-token-' * 3
-        self.app = create_app(self.root, 'gpt-5.6-sol', self.policy, self.token)
+        # The session token opens these pages; the agent login only calls Nocheh (ADR-0291).
+        self.token, self.agent = 'admin-test-token-' * 3, 'agent-test-key-' * 3
+        self.app = create_app(self.root, 'gpt-5.6-sol', self.policy, self.agent, self.token)
         self.client = TestClient(self.app, base_url='http://127.0.0.1')
         self.headers = {'X-Hermes-Session-Token': self.token}
 
@@ -200,20 +201,49 @@ class NativeAdminTests(unittest.TestCase):
         (workspace / 'escape').symlink_to(self.group)
         self.assertIn(self.client.get('/api/files/read', params={'path':'escape/config.yaml'}, headers=self.headers).status_code, (400,403))
 
-    def test_create_owner_profile_without_cloning_credentials_or_managed_binding(self):
-        result = self.client.post('/api/profiles', headers=self.headers, json={'name':'research'})
-        self.assertEqual(result.status_code, 200, result.text)
-        self.assertEqual(self.client.get('/api/config?profile=research', headers=self.headers).status_code, 200)
-        self.assertFalse((self.root / 'profiles/research/auth.json').exists())
-        self.assertEqual(self.client.get('/api/sessions?profile=research',headers=self.headers).json()['sessions'],[])
-        self.assertFalse((self.root / 'profiles/research/state.db').exists())
-        renamed = self.client.patch('/api/profiles/research', headers=self.headers, json={'new_name':'notes'})
-        self.assertEqual(renamed.status_code, 200, renamed.text)
-        self.assertEqual(self.client.delete('/api/profiles/notes', headers=self.headers).status_code, 200)
-        self.assertEqual(len(list((self.root / 'retired-profiles').iterdir())), 1)
-        self.assertEqual(self.client.delete('/api/profiles/'+self.owner.name, headers=self.headers).status_code, 400)
-        for body in ({'name':'nocheh-impostor'}, {'name':'unsafe','clone_from':'default'}):
-            self.assertEqual(self.client.post('/api/profiles', headers=self.headers, json=body).status_code, 400)
+    def test_profiles_page_lists_and_refuses_every_change(self):
+        # Like the Cron page (ADR-0291, the owner's pending answer): no profile is made, renamed or retired here.
+        before = self.client.get('/api/profiles', headers=self.headers).json()['profiles']
+        for method, path, body in (('POST', '/api/profiles', {'name': 'research'}), ('POST', '/api/profiles', {'name': 'nocheh-impostor'}),
+                                   ('PATCH', '/api/profiles/' + self.owner.name, {'new_name': 'notes'}),
+                                   ('DELETE', '/api/profiles/' + self.owner.name, None), ('DELETE', '/api/profiles/' + self.group.name, None)):
+            with self.subTest(method=method, path=path):
+                result = self.client.request(method, path, headers=self.headers, json=body)
+                self.assertEqual((result.status_code, result.json()), (403, {'error': 'profiles_read_only', 'detail': 'profiles_read_only'}))
+        self.assertEqual(self.client.get('/api/profiles', headers=self.headers).json()['profiles'], before)
+        self.assertFalse((self.root / 'profiles/research').exists()); self.assertFalse((self.root / 'retired-profiles').exists())
+        self.assertEqual(self.client.get('/api/profiles/active', headers=self.headers).status_code, 200)
+
+    def test_only_the_session_token_opens_the_pages(self):
+        from hermes_cli import web_server as native
+        self.assertEqual(native._SESSION_TOKEN, self.token)
+        for supplied in (self.agent, '', self.token + 'x'):
+            with self.subTest(supplied=supplied[:6]):
+                self.assertEqual(self.client.get('/api/profiles', headers={'X-Hermes-Session-Token': supplied}).status_code, 401)
+        self.assertEqual(self.client.get('/api/profiles', headers=self.headers).status_code, 200)
+        self.assertNotIn(self.agent, self.client.get('/api/config', headers=self.headers).text)
+
+    def test_without_a_session_token_nothing_opens(self):
+        from .native_admin import Administration
+        from fastapi.testclient import TestClient
+        admin = Administration(self.app.app, self.root, 'gpt-5.6-sol', self.policy, self.agent)
+        client = TestClient(admin, base_url='http://127.0.0.1')
+        for supplied in ('', self.agent, 'None'):
+            self.assertEqual(client.get('/api/profiles', headers={'X-Hermes-Session-Token': supplied}).status_code, 401)
+
+    def test_main_hands_the_dashboard_only_the_session_token(self):
+        from . import environment, native_admin
+        seen = {}
+        def create(root, model, policy, key, session, **options):
+            seen.update(key=key, session=session, environ=dict(os.environ)); return 'app'
+        with patch.dict(os.environ, {'HERMES_HOME': str(self.root), 'AGENT_KEY': self.agent, 'NOCHEH_HERMES_SESSION_TOKEN': self.token}), \
+             patch.object(environment, '_AGENT_KEY', None), patch.object(native_admin, 'create_app', create), patch('uvicorn.run'):
+            os.environ.pop('SERVICE_TOKEN', None)
+            native_admin.main()
+        self.assertEqual((seen['key'], seen['session']), (self.agent, self.token))
+        self.assertEqual(seen['environ']['HERMES_DASHBOARD_SESSION_TOKEN'], self.token)
+        for name in ('AGENT_KEY', 'AGENT_KEY_FILE', 'NOCHEH_HERMES_SESSION_TOKEN'): self.assertNotIn(name, seen['environ'])
+        self.assertNotIn(self.agent, json.dumps(seen['environ']))
 
 class BrowserBoundaryTests(unittest.TestCase):
     def test_audience_revision_keeps_logical_preferences_without_copying_memory(self):
@@ -260,7 +290,7 @@ class BrowserBoundaryTests(unittest.TestCase):
             root=Path(folder);policy=Scopes({'enabled':False},Served.of('42',groups=['-10']))
             forwarded=[];sent=[]
             async def app(scope,receive,send): forwarded.append(scope)
-            admin=Administration(app,root,'model',policy,'fixture')
+            admin=Administration(app,root,'model',policy,'fixture-agent-key',session_token='fixture')
             async def send(value): sent.append(value)
             async def receive(): return {'type':'websocket.connect'}
             for path in ('/api/pty','/api/ws','/api/pub','/api/events'):
@@ -277,7 +307,7 @@ class BrowserBoundaryTests(unittest.TestCase):
         from .native_admin import create_app
         with tempfile.TemporaryDirectory() as folder:
             root=Path(folder);policy=Scopes({'enabled':False},Served.of('42',groups=['-10']))
-            app=create_app(root,'model',policy,'fixture')
+            app=create_app(root,'model',policy,'fixture-agent-key','fixture')
             self.assertFalse(native._DASHBOARD_EMBEDDED_CHAT_ENABLED)
             with self.assertRaisesRegex(ValueError,'browser_chat_off'):web_server_chat._resolve_chat_argv(profile=Scopes.profile('42'))
             with TestClient(app,base_url='http://127.0.0.1:8785') as client:

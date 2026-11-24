@@ -245,11 +245,25 @@ def validate(values):
     machine=values.get('NOCHEH_MACHINE_TOKEN')
     if machine and (len(machine)<32 or machine in (values['SERVICE_TOKEN'],box)):
         raise ValueError('NOCHEH_MACHINE_TOKEN must contain at least 32 characters and differ from SERVICE_TOKEN and NOCHEH_BOX_TOKEN')
+    # The agent login (Nocheh and Hermes, both ways) and Hermes's dashboard session token (ADR-0291). Empty passes, so an
+    # older .env still loads before init, up or make dev fills them; Compose and the services refuse to run without them.
+    keys={name:values.get(name) or '' for name in KEYS}
+    for name in ('AGENT_KEY','NOCHEH_HERMES_SESSION_TOKEN','NOCHEH_BOX_TOKEN','NOCHEH_MACHINE_TOKEN'):
+        value=keys[name]
+        if value and (len(value)<32 or value in {v for k,v in keys.items() if k!=name}):
+            raise ValueError(f'{name} must contain at least 32 characters and differ from every other Nocheh key')
     # Every job that may run at once (two) must be able to have its box.
     if not re.fullmatch(r'[2-8]',str(values.get('NOCHEH_BOX_LIMIT','2'))):raise ValueError('NOCHEH_BOX_LIMIT must be 2-8')
 
 
-GENERATED = ('POSTGRES_PASSWORD','SERVICE_TOKEN','NOCHEH_BOX_TOKEN','NOCHEH_MACHINE_TOKEN','INNGEST_EVENT_KEY','INNGEST_SIGNING_KEY','INNGEST_POSTGRES_PASSWORD','NOCHEH_ARCHIVE_PASSWORD','NOCHEH_DERIVED_PASSWORD','NOCHEH_CONTROL_PASSWORD')
+GENERATED = ('POSTGRES_PASSWORD','SERVICE_TOKEN','NOCHEH_BOX_TOKEN','NOCHEH_MACHINE_TOKEN','INNGEST_EVENT_KEY','INNGEST_SIGNING_KEY','INNGEST_POSTGRES_PASSWORD','NOCHEH_ARCHIVE_PASSWORD','NOCHEH_DERIVED_PASSWORD','NOCHEH_CONTROL_PASSWORD',
+             'AGENT_KEY','NOCHEH_HERMES_SESSION_TOKEN')
+# The bearer and signing keys; no two may be equal (ADR-0291).
+KEYS = ('SERVICE_TOKEN','AGENT_KEY','NOCHEH_HERMES_SESSION_TOKEN','NOCHEH_BOX_TOKEN','NOCHEH_MACHINE_TOKEN')
+# What rotate-keys renews, and what a cutover makes anew.
+ROTATED = ('SERVICE_TOKEN','AGENT_KEY','NOCHEH_HERMES_SESSION_TOKEN')
+# Left by a key change: the dashboard and executor keep keys they read once, so the next up or rotate-keys restarts them.
+RESTART_MARKER = 'admin/restart-cached'
 
 
 def generate(values, names=GENERATED):
@@ -257,6 +271,21 @@ def generate(values, names=GENERATED):
     for name in names:
         if not values.get(name): values[name] = secrets.token_hex(32)
     return values
+
+
+def cut_over(values):
+    """Once, on the first run without an agent login: Hermes knew SERVICE_TOKEN until then, so it is made anew with the
+    agent login and the session token (ADR-0291). True when an existing key was dropped; a fresh .env has none."""
+    if values.get('AGENT_KEY'): return False
+    had = bool(values.get('SERVICE_TOKEN'))
+    values['SERVICE_TOKEN'] = ''
+    return had
+
+
+def mark_restart(state):
+    (Path(state) / 'admin').mkdir(exist_ok=True, mode=0o700)
+    marker = Path(state) / RESTART_MARKER
+    marker.touch(mode=0o600); marker.chmod(0o600)
 
 
 def github_folders(state):
@@ -297,6 +326,8 @@ def initialize(state, workspace=None):
                                             f'Rename it with ./bin/nocheh workspace rename {workspace}, or make another one with '
                                             f'./bin/nocheh workspace new {workspace}.')
     runtime_folders(state); github_folders(state); machine_folder(state)
+    try: before = load(state) if existing else None
+    except ValueError: before = None
     values = dict(DEFAULTS)
     values.update(existing)
     if workspace: values['NOCHEH_WORKSPACE'] = workspace
@@ -315,6 +346,7 @@ def initialize(state, workspace=None):
     if 'OPENAI_API_KEY' not in existing and 'NOCHEH_EMBEDDING_API_KEY' in existing:values['OPENAI_API_KEY']=existing['NOCHEH_EMBEDDING_API_KEY']
     if values.get('NOCHEH_GUARD_MODE')=='auto': values['NOCHEH_GUARD_MODE']='on'
     values.setdefault('NOCHEH_UID', str(os.getuid())); values.setdefault('NOCHEH_GID', str(os.getgid()))
+    changed = cut_over(values)
     generate(values)
     if values['NOCHEH_HONCHO_ENABLED']=='true' and owns_project(state):
         # `make dev` reads Honcho's volumes from .env, so setup saves the ones Compose uses. Honcho's
@@ -326,6 +358,11 @@ def initialize(state, workspace=None):
     (state/'workflows/redis').mkdir(parents=True,exist_ok=True,mode=0o700)
     if values != existing: write_env(path, values)
     path.chmod(0o600)
+    if changed:
+        mark_restart(state)
+        if before is not None:
+            from tools.operations.installation.settings import carry_applied
+            carry_applied(state, before)
     if values['NOCHEH_HONCHO_ENABLED']=='true':
         from tools.operations.memory.honcho_setup import initialize as initialize_honcho, runtime_init
         initialize_honcho(state)

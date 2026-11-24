@@ -11,8 +11,10 @@ const listen=async(server:Server)=>{server.listen(0,'127.0.0.1');await once(serv
 const close=(server:Server)=>new Promise<void>(r=>server.close(()=>r()));
 test('independent dashboard, legacy aliases and native HTTP/WebSocket boundary',{timeout:30000},async()=>{
   const state=await mkdtemp(join(tmpdir(),'nocheh-dashboard-boundary-')),secret='private-backend-token-'.repeat(3),asked:string[]=[];
+  // Hermes's dashboard takes its own session token (ADR-0291): never the agent login or the master key.
+  const master='private-master-token-'.repeat(3),agentKey='private-agent-login-'.repeat(3),sent:string[]=[];
   const native=createServer((req,res)=>{
-    asked.push(req.url!);
+    asked.push(req.url!);sent.push(JSON.stringify(req.headers)+req.url);
     assert.equal(req.headers['x-hermes-session-token'],secret);
     assert.equal(req.headers['x-forwarded-prefix'],'/hermes');assert.equal(req.headers.cookie,undefined);
     if(req.url==='/nocheh'){
@@ -29,7 +31,7 @@ test('independent dashboard, legacy aliases and native HTTP/WebSocket boundary',
   native.on('upgrade',(_req,socket)=>{upgrades++;socket.write('HTTP/1.1 101 Switching Protocols\r\nConnection: Upgrade\r\nUpgrade: websocket\r\n\r\n');socket.destroy();});
   const nativePort=await listen(native),probe=createServer(),port=await listen(probe);await close(probe);
   await mkdir(join(state,'admin/dashboard'),{recursive:true});await writeFile(join(state,'admin/dashboard/token'),secret);
-  await writeFile(join(state,'.env'),`NOCHEH_CONFIG_VERSION=1\nSERVICE_TOKEN=${secret}\n`);
+  await writeFile(join(state,'.env'),`NOCHEH_CONFIG_VERSION=1\nSERVICE_TOKEN=${master}\nAGENT_KEY=${agentKey}\nNOCHEH_HERMES_SESSION_TOKEN=${secret}\n`);
   const child=spawn(process.execPath,[resolve('dist/src/management.js')],{stdio:'ignore',env:{...process.env,NOCHEH_STATE_DIR:state,NOCHEH_DASHBOARD_PORT:String(port),NOCHEH_DASHBOARD_NATIVE_PORT:String(nativePort),NOCHEH_NATIVE_ADMIN_PORT:String(nativePort)}});
   const base=`http://127.0.0.1:${port}`;
   try{
@@ -111,6 +113,7 @@ test('independent dashboard, legacy aliases and native HTTP/WebSocket boundary',
     });
     for(const path of ['/hermes/api/pty?ticket=x','/hermes/api/ws','/hermes/api/events','/hermes/api/pub','/'])assert.equal(await socketRequest(path),403,path);
     assert.equal(upgrades,0);
+    assert.ok(sent.length&&!sent.some(line=>line.includes(master)||line.includes(agentKey)),'Hermes gets the session token only');
     await close(native);
     assert.equal((await fetch(base)).status,200,'Nocheh remains available without Hermes');
     assert.equal((await fetch(base+'/hermes/nocheh',{headers:{cookie}})).status,503);

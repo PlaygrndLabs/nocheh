@@ -283,11 +283,11 @@ def record(profile,before,after,origin,ops=None,trusted=frozenset(),now=None):
 
 
 def service_post(body):
-    """Storage's labels for these notes; only the service token may ask."""
+    """Storage's labels for these notes; only the agent login may ask."""
     from urllib.request import Request,urlopen
-    from .environment import secret
+    from .environment import agent_key
     request=Request(os.environ.get('ARCHIVE_URL','http://nocheh-app:8780')+'/internal/notes/sources',data=json.dumps(body).encode(),
-        headers={'Authorization':'Bearer '+secret('SERVICE_TOKEN'),'Content-Type':'application/json'})
+        headers={'Authorization':'Bearer '+agent_key(),'Content-Type':'application/json'})
     with urlopen(request,timeout=15) as response:value=json.loads(response.read(1024*1024))
     labels=value.get('labels') if isinstance(value,dict) else None
     if not isinstance(labels,dict):raise RuntimeError('note_sources_unavailable')
