@@ -42,6 +42,10 @@ const names: Record<string, [string, string]> = {
   'agent.run_budget_seconds': ['Time per answer (seconds)', 'Longest time one answer may take.'],
   'memory.memory_char_limit': ['Notes size (characters)', 'Room for the assistant’s general notes.'],
   'memory.user_char_limit': ['Profile size (characters)', 'Room for what it notes about you.'],
+  'nocheh.carry_messages': [
+    'Messages carried into a new day',
+    'Each chat starts a fresh conversation every day at 4 AM; it begins with this many of the last messages.',
+  ],
 };
 
 const conflict = (error: unknown) => /conflict|changed/.test((error as ApiError)?.message ?? '');

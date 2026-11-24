@@ -30,6 +30,7 @@ import {reloadMembers} from './members.js';
 import {privateAnswerId,type PrivateAnswer,type PrivateAnswerOutcome,type PrivateAnswerRepository} from './private-answers.js';
 import {closedTurnStates as closed,currentTurn,dispatchPayload,terminalTurnStates as terminal,turnFence,turnResultCodes as codes,type TurnInput as Input} from './telegram-turn.js';
 import {forwardLine,forwardOrigin} from '../forwarded.js';
+import {ownerTimeZone} from './task-settings.js';
 import type {Tag,TagBy} from '../source-tags.js';
 import {botReady,cancelReply,deliveredReceipt,finishPresence,replyOutcome,replyTarget,sendReply,showPresence,unansweredFinish,withdrawReply,type ReplyButton} from './telegram-reply.js';
 
@@ -720,14 +721,24 @@ export class TelegramDispatchRepository {
     // A command's fixed reply runs no model, so it needs no reply block.
     const replied=control===null?await this.replyOf(principal,source.id,payload,selected):null;
     const app=appBindingOf(space);
+    // The chat's day turns in this time zone: its Hermes session is one per day (ADR-0288).
+    const dayZone=await this.dayZone(scope.member);
     const body={channel:'telegram',event_id:source.id,source_key:original.source_key,scope:original.scope,chat,space,...(app?{app}:{}),
-      payload:dispatchPayload(payload,selected.event.payload,text),text,transcripts,files,attempt,control_reply:control,guard_mode:binding.mode,
+      payload:dispatchPayload(payload,selected.event.payload,text),text,transcripts,files,attempt,control_reply:control,guard_mode:binding.mode,day_zone:dayZone,
       ...(untranscribed?{untranscribed_voice:untranscribed}:{}),...(tooLarge?{files_too_large:tooLarge}:{}),...(addressing?{group_addressing:addressing}:{}),...(speaker?{speaker}:{}),...(forwarded?{forwarded}:{}),...(replied?{reply:replied}:{}),...(recent.length?{recent_group:recent}:{}),...(parts.length?{album_events:parts}:{})};
     const input={binding,principal,body};await this.prepared.allow(principal,{text,transcripts,files,control_reply:control,speaker,forwarded,reply:replied,recent_group:recent});await currentTurn(this,input);
     const reference=await this.derived.record({operation_id:'telegram-dispatch-input:'+digest(canonical(input)),source,
       ...(parents.length?{parents}:{}),kind:'runtime_context',content:Buffer.from(canonical(input)),producer:'nocheh',producer_version:protocol,
       configuration:{binding},provenance:{purpose:'assistant',guard_revision:selected.guarded_revision}});
     return {reference,input};
+  }
+  /** A member's own time zone in their private chat, else the owner's, which groups and the owner's chat use (ADR-0288). */
+  private async dayZone(member:string|undefined):Promise<string> {
+    if(member!==undefined) {
+      const row=(await this.control.query('SELECT time_zone FROM members WHERE id=$1',[member])).rows[0];
+      if(typeof row?.time_zone==='string'&&row.time_zone)return row.time_zone;
+    }
+    return ownerTimeZone(this.control);
   }
   /**
    * A member's private turn's reader (step 4): the groups they joined are asked of Telegram again first where their 'in'
