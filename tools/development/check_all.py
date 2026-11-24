@@ -160,7 +160,11 @@ def node_files(results, files, label, seconds=FILE_SECONDS):
                 if not queue:
                     return
                 name = queue.pop()
-            outcome = node_file(name, port, logs, label, seconds)
+            try:
+                outcome = node_file(name, port, logs, label, seconds)
+            except Exception as error:  # a cluster that cannot be reset fails the file, never passes it unseen
+                say(f'  FAIL {name} (checker error)')
+                outcome = 0, 0, [{'test': name + ' :: (whole file)', 'error': f'checker error: {error}'[:300]}]
             with lock:
                 outcomes.append(outcome)
     workers = [threading.Thread(target=worker, args=(port,)) for port in ports()]
