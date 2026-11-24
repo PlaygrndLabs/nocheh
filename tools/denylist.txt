@@ -1,0 +1,35 @@
+# Real brands and organisations that must not appear in agent-visible text.
+# One word or phrase per line, matched as whole words. Hits are warnings for a reviewer.
+تلگرام
+واتساپ
+اینستاگرام
+گوگل
+جیمیل
+مایکروسافت
+دیجی‌کالا
+اسنپ
+شاپرک
+همراه اول
+ایرانسل
+نوبیتکس
+پارسیان
+بانک ملی
+بانک ملت
+بانک صادرات
+بانک تجارت
+بانک سپه
+بانک پاسارگاد
+بانک سامان
+سازمان امور مالیاتی
+Telegram
+WhatsApp
+Instagram
+Google
+Gmail
+Microsoft
+Outlook
+OpenAI
+ChatGPT
+Claude
+Gemini
+PayPal

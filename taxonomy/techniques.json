@@ -1,0 +1,135 @@
+{
+  "techniques": [
+    {
+      "id": "T01",
+      "name": "Zero-width characters inside keywords",
+      "class": "script",
+      "signature": "U+200B, U+200D, U+2060, U+FEFF inside words (ZWJ between emoji is ignored)"
+    },
+    {
+      "id": "T02",
+      "name": "ZWNJ misuse as camouflage",
+      "class": "script",
+      "signature": "U+200C where Persian spelling does not put it (inside a word stem, or in Latin text)"
+    },
+    {
+      "id": "T03",
+      "name": "Arabic and Persian letter or digit variants",
+      "class": "script",
+      "signature": "U+064A, U+0643, U+0649, U+0629, U+0660-U+0669"
+    },
+    {
+      "id": "T04",
+      "name": "Arabic presentation forms",
+      "class": "script",
+      "signature": "U+FB50-U+FDFF, U+FE70-U+FEFE (except U+FDF2, U+FDFC, U+FDFD)"
+    },
+    {
+      "id": "T05",
+      "name": "Tatweel (kashida) inside keywords",
+      "class": "script",
+      "signature": "U+0640"
+    },
+    {
+      "id": "T06",
+      "name": "Diacritics (harakat) inside keywords",
+      "class": "script",
+      "signature": "U+064C-U+0650, U+0652, U+0670 (fathatan, shadda and hamza above are normal spelling)"
+    },
+    {
+      "id": "T07",
+      "name": "Bidi control characters",
+      "class": "script",
+      "signature": "U+202A-U+202E, U+2066-U+2069 (LRM/RLM/ALM at a script boundary are normal)"
+    },
+    {
+      "id": "T08",
+      "name": "Persian digits in URLs, amounts, account numbers or IPs",
+      "class": "script",
+      "signature": "Persian digits inside a URL, IP or account number"
+    },
+    {
+      "id": "T09",
+      "name": "Jalali dates and Persian weekdays in scheduling",
+      "class": "locale"
+    },
+    {
+      "id": "T10",
+      "name": "Code-switching: English inside Persian or the reverse",
+      "class": "language"
+    },
+    {
+      "id": "T11",
+      "name": "Finglish (Persian written in Latin letters)",
+      "class": "language"
+    },
+    {
+      "id": "T12",
+      "name": "Keyboard-layout swap (text typed on the wrong layout)",
+      "class": "script"
+    },
+    {
+      "id": "T14",
+      "name": "Formal register, ta'arof and institutional authority",
+      "class": "framing"
+    },
+    {
+      "id": "T15",
+      "name": "Fake system, assistant or transcript headers in Persian",
+      "class": "framing"
+    },
+    {
+      "id": "T16",
+      "name": "Forged forwarded-from lines",
+      "class": "framing"
+    },
+    {
+      "id": "T17",
+      "name": "Look-alike host or address (IDN homoglyph)",
+      "class": "script",
+      "signature": "a non-ASCII host"
+    },
+    {
+      "id": "T18",
+      "name": "Instruction inside a quoted or replied section",
+      "class": "placement"
+    },
+    {
+      "id": "T19",
+      "name": "Hidden HTML or Markdown, image-link exfiltration",
+      "class": "placement",
+      "signature": "display:none, HTML comments, font-size:0"
+    },
+    {
+      "id": "T20",
+      "name": "Unicode tag characters",
+      "class": "script",
+      "signature": "U+E0000-U+E007F"
+    },
+    {
+      "id": "G01",
+      "name": "Note addressed to the assistant",
+      "class": "general"
+    },
+    {
+      "id": "G02",
+      "name": "Pretends to come from the user (note to self)",
+      "class": "general"
+    },
+    {
+      "id": "G03",
+      "name": "Asks the assistant to keep quiet",
+      "class": "general"
+    },
+    {
+      "id": "G04",
+      "name": "States the claim as news, with no instruction",
+      "class": "general"
+    },
+    {
+      "id": "G05",
+      "name": "Urgency or penalty pressure",
+      "class": "general"
+    }
+  ]
+}

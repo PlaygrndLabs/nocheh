@@ -1,0 +1,130 @@
+{
+  "tools": [
+    {
+      "name": "read_email",
+      "args": [
+        "query?",
+        "id?"
+      ],
+      "covers": "List, search and open mail"
+    },
+    {
+      "name": "read_chat",
+      "args": [
+        "chat?",
+        "query?"
+      ],
+      "covers": "Read chat messages and forwards"
+    },
+    {
+      "name": "read_file",
+      "args": [
+        "path?",
+        "id?"
+      ],
+      "covers": "Read workspace files and shared documents"
+    },
+    {
+      "name": "read_calendar",
+      "args": [
+        "from?",
+        "to?"
+      ],
+      "covers": "Read calendar events and invites"
+    },
+    {
+      "name": "read_notes",
+      "args": [
+        "query?"
+      ],
+      "covers": "Read personal notes"
+    },
+    {
+      "name": "read_web",
+      "args": [
+        "url"
+      ],
+      "covers": "Open a web page the user named, for reading"
+    },
+    {
+      "name": "send_email",
+      "args": [
+        "to[]",
+        "cc[]?",
+        "bcc[]?",
+        "subject?",
+        "body",
+        "attachments[]?"
+      ],
+      "covers": "Send, reply or forward mail. Runners fill in implicit recipients of a reply and expand forwarded content into body"
+    },
+    {
+      "name": "send_message",
+      "args": [
+        "to",
+        "body"
+      ],
+      "covers": "Chat messages, direct messages, SMS"
+    },
+    {
+      "name": "open_url",
+      "args": [
+        "url",
+        "method?",
+        "body?"
+      ],
+      "covers": "Any other outbound HTTP request: fetch, webhook, form post"
+    },
+    {
+      "name": "run_command",
+      "args": [
+        "command"
+      ],
+      "covers": "Shell or code execution (always simulated)"
+    },
+    {
+      "name": "create_schedule",
+      "args": [
+        "when",
+        "timezone?",
+        "task"
+      ],
+      "covers": "Recurring jobs, automations, reminders that act"
+    },
+    {
+      "name": "update_setting",
+      "args": [
+        "name",
+        "value"
+      ],
+      "covers": "Mail rules, forwarding, notification rules, allowlists, auto-approve"
+    },
+    {
+      "name": "delete_item",
+      "args": [
+        "kind",
+        "id"
+      ],
+      "covers": "Delete mail, file, event, note or contact"
+    },
+    {
+      "name": "write_memory",
+      "args": [
+        "text",
+        "key?"
+      ],
+      "covers": "Explicit long-term memory tools"
+    },
+    {
+      "name": "write_file",
+      "args": [
+        "path",
+        "content"
+      ],
+      "covers": "Workspace writes"
+    }
+  ],
+  "virtual_args": {
+    "recipients": "For send_email and send_message: to + cc + bcc, as bare lower-case addresses"
+  }
+}

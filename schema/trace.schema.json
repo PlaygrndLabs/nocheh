@@ -1,0 +1,268 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://github.com/PlaygrndLabs/persian-agent-bench/schema/trace.schema.json",
+  "title": "persian-agent-bench neutral trace (trace_version 1)",
+  "description": "What a runner records for one run of one case. Field names match the predicate sources: tool_calls -> tool_args, outbound_urls -> outbound, memory_writes -> memory, final_text -> final_text, probes[].answer -> probe_answer.",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "trace_version",
+    "case_id",
+    "dataset_ref",
+    "runner",
+    "tool_calls",
+    "outbound_urls",
+    "memory_writes",
+    "final_text"
+  ],
+  "properties": {
+    "trace_version": {
+      "const": 1
+    },
+    "case_id": {
+      "type": "string",
+      "pattern": "^pab-[am]-[0-9]{3}-(p|d[1-9]|c)$"
+    },
+    "dataset_ref": {
+      "type": "string",
+      "minLength": 6,
+      "description": "Git tag (v0.1.0) or commit SHA the case was loaded from"
+    },
+    "runner": {
+      "type": "object",
+      "additionalProperties": true,
+      "required": [
+        "name",
+        "version",
+        "model",
+        "mode",
+        "request_lang"
+      ],
+      "properties": {
+        "name": {
+          "type": "string"
+        },
+        "version": {
+          "type": "string"
+        },
+        "model": {
+          "type": "string"
+        },
+        "mode": {
+          "enum": [
+            "foreground",
+            "background"
+          ]
+        },
+        "request_lang": {
+          "enum": [
+            "fa",
+            "en"
+          ]
+        },
+        "probe_lang": {
+          "enum": [
+            "fa",
+            "en"
+          ]
+        },
+        "probe_isolation": {
+          "type": "boolean"
+        },
+        "save_prompt_used": {
+          "type": "boolean"
+        },
+        "memory_kind": {
+          "enum": [
+            "notes",
+            "transcript",
+            "none"
+          ],
+          "description": "How the harness keeps memory. With 'transcript', the written check is not meaningful and is reported as n/a."
+        }
+      }
+    },
+    "tool_calls": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "seq",
+          "phase",
+          "tool",
+          "native_tool",
+          "args",
+          "status",
+          "origin"
+        ],
+        "properties": {
+          "seq": {
+            "type": "integer",
+            "minimum": 1
+          },
+          "phase": {
+            "enum": [
+              "attack",
+              "memory_job",
+              "probe"
+            ]
+          },
+          "tool": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "const": null
+              }
+            ],
+            "description": "Abstract tool name from taxonomy/tools.json, or null if unmapped"
+          },
+          "native_tool": {
+            "type": "string"
+          },
+          "args": {
+            "type": "object",
+            "description": "Arguments renamed to the abstract tool's argument names where mapped; other keys kept as-is"
+          },
+          "status": {
+            "enum": [
+              "executed",
+              "blocked",
+              "failed"
+            ]
+          },
+          "origin": {
+            "enum": [
+              "agent",
+              "state_diff"
+            ]
+          }
+        }
+      }
+    },
+    "outbound_urls": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "phase",
+          "url",
+          "via"
+        ],
+        "properties": {
+          "seq": {
+            "type": "integer",
+            "minimum": 1
+          },
+          "phase": {
+            "enum": [
+              "attack",
+              "memory_job",
+              "probe"
+            ]
+          },
+          "url": {
+            "type": "string"
+          },
+          "via": {
+            "enum": [
+              "tool",
+              "render",
+              "redirect"
+            ]
+          }
+        }
+      }
+    },
+    "memory_writes": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "store",
+          "text"
+        ],
+        "properties": {
+          "store": {
+            "type": "string",
+            "description": "notes | file | profile | skill | schedule | other"
+          },
+          "path": {
+            "type": "string"
+          },
+          "text": {
+            "type": "string",
+            "description": "New or changed durable content after the attack phase"
+          }
+        }
+      }
+    },
+    "final_text": {
+      "type": "string",
+      "description": "All visible assistant text of the attack phase, joined with blank lines"
+    },
+    "probes": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "index",
+          "lang",
+          "question",
+          "answer"
+        ],
+        "properties": {
+          "index": {
+            "type": "integer",
+            "minimum": 0
+          },
+          "lang": {
+            "enum": [
+              "fa",
+              "en"
+            ]
+          },
+          "question": {
+            "type": "string"
+          },
+          "answer": {
+            "type": "string"
+          }
+        }
+      }
+    },
+    "skipped": {
+      "anyOf": [
+        {
+          "type": "string"
+        },
+        {
+          "const": null
+        }
+      ],
+      "description": "Reason the case was not run, e.g. missing_tool:run_command"
+    },
+    "error": {
+      "anyOf": [
+        {
+          "type": "string"
+        },
+        {
+          "const": null
+        }
+      ]
+    },
+    "items_read": {
+      "type": "array",
+      "description": "Item ids the agent actually read in full during the attack phase. Lets scoring separate 'resisted' from 'never saw the carrier'.",
+      "items": {
+        "type": "string"
+      }
+    }
+  }
+}

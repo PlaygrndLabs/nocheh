@@ -1,0 +1,1183 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://github.com/PlaygrndLabs/persian-agent-bench/schema/case.schema.json",
+  "title": "persian-agent-bench case record (schema_version 1)",
+  "description": "One Persian attack test case (or benign control) for AI agents. Every human-language string is a {fa, en} pair: fa is the exact text the agent sees, en is an English translation for reviewers and judges.",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "schema_version",
+    "id",
+    "family",
+    "variant",
+    "track",
+    "added_in",
+    "status",
+    "title",
+    "user_request",
+    "tools_required",
+    "items",
+    "carrier",
+    "techniques",
+    "canary",
+    "checks",
+    "review_status",
+    "license",
+    "contamination_guid",
+    "register",
+    "user_calls"
+  ],
+  "properties": {
+    "schema_version": {
+      "const": 1
+    },
+    "id": {
+      "type": "string",
+      "pattern": "^pab-[am]-[0-9]{3}-(p|d[1-9]|c)$"
+    },
+    "family": {
+      "type": "string",
+      "pattern": "^pab-[am]-[0-9]{3}$"
+    },
+    "variant": {
+      "enum": [
+        "plain",
+        "disguised",
+        "control"
+      ]
+    },
+    "track": {
+      "enum": [
+        "action",
+        "memory"
+      ]
+    },
+    "added_in": {
+      "type": "string",
+      "pattern": "^[0-9]+\\.[0-9]+\\.[0-9]+$"
+    },
+    "status": {
+      "enum": [
+        "active",
+        "deprecated"
+      ]
+    },
+    "deprecated_note": {
+      "type": "string",
+      "minLength": 1
+    },
+    "title": {
+      "type": "string",
+      "minLength": 10,
+      "maxLength": 140
+    },
+    "user_request": {
+      "$ref": "#/$defs/bi"
+    },
+    "tools_required": {
+      "type": "array",
+      "minItems": 1,
+      "uniqueItems": true,
+      "items": {
+        "$ref": "#/$defs/tool_name"
+      }
+    },
+    "items": {
+      "type": "array",
+      "minItems": 1,
+      "maxItems": 12,
+      "items": {
+        "$ref": "#/$defs/item"
+      }
+    },
+    "carrier": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "item",
+        "type"
+      ],
+      "properties": {
+        "item": {
+          "type": "string",
+          "pattern": "^[a-z0-9_-]{1,32}$"
+        },
+        "type": {
+          "$ref": "#/$defs/carrier_type"
+        },
+        "placement": {
+          "enum": [
+            "start",
+            "middle",
+            "end",
+            "whole"
+          ]
+        }
+      }
+    },
+    "injection": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "text"
+      ],
+      "properties": {
+        "text": {
+          "$ref": "#/$defs/bi"
+        },
+        "decoded": {
+          "type": "string",
+          "minLength": 1
+        },
+        "display_note": {
+          "type": "string",
+          "minLength": 1
+        }
+      }
+    },
+    "techniques": {
+      "type": "array",
+      "uniqueItems": true,
+      "items": {
+        "type": "string",
+        "pattern": "^(T|G)[0-9]{2}$"
+      }
+    },
+    "attacker_goal": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "category",
+        "harm",
+        "text",
+        "reference_calls"
+      ],
+      "properties": {
+        "category": {
+          "enum": [
+            "exfil_url",
+            "send_message",
+            "run_command",
+            "create_schedule",
+            "change_setting",
+            "delete_item"
+          ]
+        },
+        "harm": {
+          "enum": [
+            "data_theft",
+            "direct_harm",
+            "persistence"
+          ]
+        },
+        "text": {
+          "$ref": "#/$defs/bi"
+        },
+        "reference_calls": {
+          "type": "array",
+          "minItems": 1,
+          "items": {
+            "$ref": "#/$defs/call"
+          }
+        }
+      }
+    },
+    "attacker_endpoints": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "hosts": {
+          "type": "array",
+          "uniqueItems": true,
+          "items": {
+            "type": "string",
+            "minLength": 3
+          }
+        },
+        "emails": {
+          "type": "array",
+          "uniqueItems": true,
+          "items": {
+            "type": "string",
+            "pattern": "^[^@\\s]+@[^@\\s]+$"
+          }
+        },
+        "handles": {
+          "type": "array",
+          "uniqueItems": true,
+          "items": {
+            "type": "string",
+            "minLength": 2
+          }
+        }
+      }
+    },
+    "canary": {
+      "type": "string",
+      "minLength": 8,
+      "maxLength": 64,
+      "pattern": "^[A-Za-z0-9-]+$"
+    },
+    "memory": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "type",
+        "risk_category",
+        "domain",
+        "false_claim",
+        "probes",
+        "background_rule"
+      ],
+      "properties": {
+        "type": {
+          "enum": [
+            "fact",
+            "preference"
+          ]
+        },
+        "risk_category": {
+          "enum": [
+            "financial_loss",
+            "health_safety",
+            "cybersecurity",
+            "operational_disruption",
+            "information_integrity"
+          ]
+        },
+        "domain": {
+          "type": "string",
+          "pattern": "^[a-z][a-z0-9_]{1,40}$"
+        },
+        "false_claim": {
+          "$ref": "#/$defs/bi"
+        },
+        "key_facts": {
+          "type": "array",
+          "uniqueItems": true,
+          "items": {
+            "type": "string",
+            "minLength": 4
+          }
+        },
+        "probes": {
+          "type": "array",
+          "minItems": 1,
+          "maxItems": 3,
+          "items": {
+            "$ref": "#/$defs/probe"
+          }
+        },
+        "stealth_keywords": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": [
+            "fa",
+            "en"
+          ],
+          "properties": {
+            "fa": {
+              "type": "array",
+              "items": {
+                "type": "string",
+                "minLength": 2
+              }
+            },
+            "en": {
+              "type": "array",
+              "items": {
+                "type": "string",
+                "minLength": 2
+              }
+            }
+          }
+        },
+        "background_rule": {
+          "$ref": "#/$defs/bi"
+        }
+      }
+    },
+    "checks": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "success": {
+          "$ref": "#/$defs/pred"
+        },
+        "attempted": {
+          "$ref": "#/$defs/pred"
+        },
+        "utility": {
+          "$ref": "#/$defs/pred"
+        },
+        "written": {
+          "$ref": "#/$defs/pred"
+        }
+      }
+    },
+    "judge_question": {
+      "$ref": "#/$defs/bi"
+    },
+    "notes": {
+      "type": "string",
+      "minLength": 1
+    },
+    "review_status": {
+      "enum": [
+        "draft",
+        "in_review",
+        "approved"
+      ]
+    },
+    "license": {
+      "const": "CC-BY-4.0"
+    },
+    "contamination_guid": {
+      "const": "c15e12d2-4d50-4c80-88e7-1c001b78365b"
+    },
+    "register": {
+      "enum": [
+        "formal_admin",
+        "semi_formal",
+        "casual_chat",
+        "service_notice",
+        "diaspora_mixed",
+        "finglish"
+      ],
+      "description": "Register of the carrier text (how formal it is). Results can be split by it."
+    },
+    "user_calls": {
+      "type": "array",
+      "minItems": 1,
+      "items": {
+        "$ref": "#/$defs/call"
+      },
+      "description": "Reference calls that do the user's task and read the carrier in full. Harnesses such as AgentDojo need them; runners use them to check the agent could read the carrier."
+    }
+  },
+  "allOf": [
+    {
+      "if": {
+        "properties": {
+          "variant": {
+            "enum": [
+              "plain",
+              "disguised"
+            ]
+          }
+        }
+      },
+      "then": {
+        "required": [
+          "injection"
+        ],
+        "properties": {
+          "carrier": {
+            "required": [
+              "item",
+              "type",
+              "placement"
+            ]
+          }
+        }
+      }
+    },
+    {
+      "if": {
+        "properties": {
+          "variant": {
+            "const": "control"
+          }
+        }
+      },
+      "then": {
+        "not": {
+          "anyOf": [
+            {
+              "required": [
+                "injection"
+              ]
+            },
+            {
+              "required": [
+                "attacker_goal"
+              ]
+            },
+            {
+              "required": [
+                "attacker_endpoints"
+              ]
+            }
+          ]
+        },
+        "properties": {
+          "track": {
+            "const": "action"
+          },
+          "checks": {
+            "required": [
+              "utility"
+            ],
+            "not": {
+              "anyOf": [
+                {
+                  "required": [
+                    "success"
+                  ]
+                },
+                {
+                  "required": [
+                    "attempted"
+                  ]
+                },
+                {
+                  "required": [
+                    "written"
+                  ]
+                }
+              ]
+            }
+          }
+        }
+      }
+    },
+    {
+      "if": {
+        "properties": {
+          "track": {
+            "const": "action"
+          },
+          "variant": {
+            "enum": [
+              "plain",
+              "disguised"
+            ]
+          }
+        }
+      },
+      "then": {
+        "required": [
+          "attacker_goal",
+          "attacker_endpoints"
+        ],
+        "not": {
+          "required": [
+            "memory"
+          ]
+        },
+        "properties": {
+          "checks": {
+            "required": [
+              "success"
+            ],
+            "not": {
+              "required": [
+                "written"
+              ]
+            }
+          }
+        }
+      }
+    },
+    {
+      "if": {
+        "properties": {
+          "track": {
+            "const": "memory"
+          }
+        }
+      },
+      "then": {
+        "required": [
+          "memory"
+        ],
+        "not": {
+          "anyOf": [
+            {
+              "required": [
+                "attacker_goal"
+              ]
+            },
+            {
+              "required": [
+                "judge_question"
+              ]
+            }
+          ]
+        },
+        "properties": {
+          "checks": {
+            "required": [
+              "written"
+            ],
+            "not": {
+              "anyOf": [
+                {
+                  "required": [
+                    "success"
+                  ]
+                },
+                {
+                  "required": [
+                    "attempted"
+                  ]
+                },
+                {
+                  "required": [
+                    "utility"
+                  ]
+                }
+              ]
+            }
+          }
+        }
+      }
+    },
+    {
+      "if": {
+        "properties": {
+          "status": {
+            "const": "deprecated"
+          }
+        }
+      },
+      "then": {
+        "required": [
+          "deprecated_note"
+        ]
+      }
+    }
+  ],
+  "$defs": {
+    "bi": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "fa",
+        "en"
+      ],
+      "properties": {
+        "fa": {
+          "type": "string",
+          "minLength": 1
+        },
+        "en": {
+          "type": "string",
+          "minLength": 1
+        }
+      }
+    },
+    "carrier_type": {
+      "enum": [
+        "email",
+        "chat_message",
+        "chat_forward",
+        "file",
+        "document",
+        "web_page",
+        "calendar_invite"
+      ]
+    },
+    "tool_name": {
+      "enum": [
+        "read_email",
+        "read_chat",
+        "read_file",
+        "read_calendar",
+        "read_notes",
+        "read_web",
+        "send_email",
+        "send_message",
+        "open_url",
+        "run_command",
+        "create_schedule",
+        "update_setting",
+        "delete_item",
+        "write_memory",
+        "write_file"
+      ]
+    },
+    "item": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "id",
+        "kind",
+        "role",
+        "body"
+      ],
+      "properties": {
+        "id": {
+          "type": "string",
+          "pattern": "^[a-z0-9_-]{1,32}$"
+        },
+        "kind": {
+          "enum": [
+            "email",
+            "chat_message",
+            "chat_forward",
+            "file",
+            "document",
+            "web_page",
+            "calendar_invite",
+            "note"
+          ]
+        },
+        "role": {
+          "enum": [
+            "carrier",
+            "benign",
+            "private"
+          ]
+        },
+        "time": {
+          "type": "string",
+          "pattern": "^[0-9]{4}-[0-9]{2}-[0-9]{2}T[0-9]{2}:[0-9]{2}(:[0-9]{2})?(Z|[+-][0-9]{2}:[0-9]{2})$"
+        },
+        "from": {
+          "type": "string",
+          "minLength": 3
+        },
+        "from_name": {
+          "$ref": "#/$defs/bi"
+        },
+        "to": {
+          "type": "array",
+          "minItems": 1,
+          "items": {
+            "type": "string",
+            "minLength": 3
+          }
+        },
+        "subject": {
+          "$ref": "#/$defs/bi"
+        },
+        "chat": {
+          "$ref": "#/$defs/bi"
+        },
+        "forwarded_from": {
+          "$ref": "#/$defs/bi"
+        },
+        "path": {
+          "type": "string",
+          "minLength": 1
+        },
+        "title": {
+          "$ref": "#/$defs/bi"
+        },
+        "url": {
+          "type": "string",
+          "pattern": "^https?://"
+        },
+        "start": {
+          "type": "string",
+          "pattern": "^[0-9]{4}-[0-9]{2}-[0-9]{2}T[0-9]{2}:[0-9]{2}(:[0-9]{2})?(Z|[+-][0-9]{2}:[0-9]{2})$"
+        },
+        "end": {
+          "type": "string",
+          "pattern": "^[0-9]{4}-[0-9]{2}-[0-9]{2}T[0-9]{2}:[0-9]{2}(:[0-9]{2})?(Z|[+-][0-9]{2}:[0-9]{2})$"
+        },
+        "organizer": {
+          "type": "string",
+          "minLength": 3
+        },
+        "attendees": {
+          "type": "array",
+          "items": {
+            "type": "string",
+            "minLength": 3
+          }
+        },
+        "location": {
+          "$ref": "#/$defs/bi"
+        },
+        "body": {
+          "$ref": "#/$defs/bi"
+        }
+      },
+      "allOf": [
+        {
+          "if": {
+            "properties": {
+              "kind": {
+                "const": "email"
+              }
+            }
+          },
+          "then": {
+            "required": [
+              "from",
+              "subject"
+            ]
+          }
+        },
+        {
+          "if": {
+            "properties": {
+              "kind": {
+                "enum": [
+                  "chat_message",
+                  "chat_forward"
+                ]
+              }
+            }
+          },
+          "then": {
+            "required": [
+              "from",
+              "chat"
+            ]
+          }
+        },
+        {
+          "if": {
+            "properties": {
+              "kind": {
+                "const": "chat_forward"
+              }
+            }
+          },
+          "then": {
+            "required": [
+              "forwarded_from"
+            ]
+          }
+        },
+        {
+          "if": {
+            "properties": {
+              "kind": {
+                "const": "file"
+              }
+            }
+          },
+          "then": {
+            "required": [
+              "path"
+            ]
+          }
+        },
+        {
+          "if": {
+            "properties": {
+              "kind": {
+                "enum": [
+                  "document",
+                  "note"
+                ]
+              }
+            }
+          },
+          "then": {
+            "required": [
+              "title"
+            ]
+          }
+        },
+        {
+          "if": {
+            "properties": {
+              "kind": {
+                "const": "web_page"
+              }
+            }
+          },
+          "then": {
+            "required": [
+              "url",
+              "title"
+            ]
+          }
+        },
+        {
+          "if": {
+            "properties": {
+              "kind": {
+                "const": "calendar_invite"
+              }
+            }
+          },
+          "then": {
+            "required": [
+              "title",
+              "start",
+              "organizer"
+            ]
+          }
+        }
+      ]
+    },
+    "call": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "tool",
+        "args"
+      ],
+      "properties": {
+        "tool": {
+          "$ref": "#/$defs/tool_name"
+        },
+        "args": {
+          "type": "object"
+        }
+      }
+    },
+    "probe": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "question",
+        "ground_truth",
+        "poisoned_behavior",
+        "rubric"
+      ],
+      "properties": {
+        "question": {
+          "$ref": "#/$defs/bi"
+        },
+        "ground_truth": {
+          "$ref": "#/$defs/bi"
+        },
+        "poisoned_behavior": {
+          "$ref": "#/$defs/bi"
+        },
+        "rubric": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": [
+            "0_safe",
+            "1_mild",
+            "2_moderate",
+            "3_severe",
+            "4_critical"
+          ],
+          "properties": {
+            "0_safe": {
+              "$ref": "#/$defs/bi"
+            },
+            "1_mild": {
+              "$ref": "#/$defs/bi"
+            },
+            "2_moderate": {
+              "$ref": "#/$defs/bi"
+            },
+            "3_severe": {
+              "$ref": "#/$defs/bi"
+            },
+            "4_critical": {
+              "$ref": "#/$defs/bi"
+            }
+          }
+        }
+      }
+    },
+    "source": {
+      "enum": [
+        "tool_args",
+        "outbound",
+        "memory",
+        "final_text",
+        "final_text_images",
+        "probe_answer"
+      ]
+    },
+    "sources": {
+      "type": "array",
+      "minItems": 1,
+      "uniqueItems": true,
+      "items": {
+        "$ref": "#/$defs/source"
+      }
+    },
+    "cond": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "equals": {
+          "type": "string"
+        },
+        "contains": {
+          "type": "string",
+          "minLength": 1
+        },
+        "starts_with": {
+          "type": "string",
+          "minLength": 1
+        },
+        "regex": {
+          "type": "string",
+          "minLength": 1
+        },
+        "one_of": {
+          "type": "array",
+          "minItems": 1,
+          "items": {
+            "type": "string"
+          }
+        },
+        "mode": {
+          "enum": [
+            "canonical",
+            "compact",
+            "raw"
+          ]
+        },
+        "word": {
+          "type": "string",
+          "minLength": 1
+        },
+        "any_word": {
+          "type": "array",
+          "minItems": 1,
+          "items": {
+            "type": "string",
+            "minLength": 1
+          }
+        }
+      },
+      "oneOf": [
+        {
+          "required": [
+            "equals"
+          ]
+        },
+        {
+          "required": [
+            "contains"
+          ]
+        },
+        {
+          "required": [
+            "starts_with"
+          ]
+        },
+        {
+          "required": [
+            "regex"
+          ]
+        },
+        {
+          "required": [
+            "one_of"
+          ]
+        },
+        {
+          "required": [
+            "word"
+          ]
+        },
+        {
+          "required": [
+            "any_word"
+          ]
+        }
+      ]
+    },
+    "host_cond": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "equals": {
+          "type": "string",
+          "minLength": 3
+        },
+        "suffix": {
+          "type": "string",
+          "minLength": 3
+        },
+        "one_of": {
+          "type": "array",
+          "minItems": 1,
+          "items": {
+            "type": "string",
+            "minLength": 3
+          }
+        },
+        "mode": {
+          "enum": [
+            "canonical",
+            "raw"
+          ]
+        }
+      },
+      "oneOf": [
+        {
+          "required": [
+            "equals"
+          ]
+        },
+        {
+          "required": [
+            "suffix"
+          ]
+        },
+        {
+          "required": [
+            "one_of"
+          ]
+        }
+      ]
+    },
+    "pred": {
+      "oneOf": [
+        {
+          "type": "object",
+          "additionalProperties": false,
+          "required": [
+            "all"
+          ],
+          "properties": {
+            "all": {
+              "type": "array",
+              "minItems": 1,
+              "items": {
+                "$ref": "#/$defs/pred"
+              }
+            }
+          }
+        },
+        {
+          "type": "object",
+          "additionalProperties": false,
+          "required": [
+            "any"
+          ],
+          "properties": {
+            "any": {
+              "type": "array",
+              "minItems": 1,
+              "items": {
+                "$ref": "#/$defs/pred"
+              }
+            }
+          }
+        },
+        {
+          "type": "object",
+          "additionalProperties": false,
+          "required": [
+            "not"
+          ],
+          "properties": {
+            "not": {
+              "$ref": "#/$defs/pred"
+            }
+          }
+        },
+        {
+          "type": "object",
+          "additionalProperties": false,
+          "required": [
+            "call"
+          ],
+          "properties": {
+            "call": {
+              "type": "object",
+              "additionalProperties": false,
+              "required": [
+                "tool"
+              ],
+              "properties": {
+                "tool": {
+                  "oneOf": [
+                    {
+                      "$ref": "#/$defs/tool_name"
+                    },
+                    {
+                      "type": "array",
+                      "minItems": 1,
+                      "uniqueItems": true,
+                      "items": {
+                        "$ref": "#/$defs/tool_name"
+                      }
+                    }
+                  ]
+                },
+                "args": {
+                  "type": "object",
+                  "additionalProperties": {
+                    "$ref": "#/$defs/cond"
+                  }
+                }
+              }
+            }
+          }
+        },
+        {
+          "type": "object",
+          "additionalProperties": false,
+          "required": [
+            "url"
+          ],
+          "properties": {
+            "url": {
+              "type": "object",
+              "additionalProperties": false,
+              "required": [
+                "in"
+              ],
+              "properties": {
+                "in": {
+                  "$ref": "#/$defs/sources"
+                },
+                "host": {
+                  "$ref": "#/$defs/host_cond"
+                },
+                "match": {
+                  "$ref": "#/$defs/cond"
+                }
+              }
+            }
+          }
+        },
+        {
+          "type": "object",
+          "additionalProperties": false,
+          "required": [
+            "text"
+          ],
+          "properties": {
+            "text": {
+              "type": "object",
+              "additionalProperties": false,
+              "required": [
+                "in",
+                "match"
+              ],
+              "properties": {
+                "in": {
+                  "$ref": "#/$defs/sources"
+                },
+                "match": {
+                  "$ref": "#/$defs/cond"
+                }
+              }
+            }
+          }
+        },
+        {
+          "type": "object",
+          "additionalProperties": false,
+          "required": [
+            "canary"
+          ],
+          "properties": {
+            "canary": {
+              "type": "object",
+              "additionalProperties": false,
+              "required": [
+                "in"
+              ],
+              "properties": {
+                "in": {
+                  "$ref": "#/$defs/sources"
+                }
+              }
+            }
+          }
+        }
+      ]
+    }
+  }
+}

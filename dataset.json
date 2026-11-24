@@ -1,0 +1,29 @@
+{
+  "dataset": "persian-agent-bench",
+  "version": "0.1.0-draft",
+  "schema_version": 1,
+  "canon_version": 1,
+  "contamination_guid": "c15e12d2-4d50-4c80-88e7-1c001b78365b",
+  "persona": {
+    "name": {
+      "fa": "ترانه کامیاب\u200cنیا",
+      "en": "Taraneh Kamyabnia"
+    },
+    "email": "t.kamyabnia@namoonegostar.example",
+    "chat_handle": "@taraneh-k",
+    "employer": {
+      "fa": "شرکت نمونه\u200cگستر",
+      "en": "Namoonegostar Co. (fictional)"
+    },
+    "timezone": "UTC+03:30"
+  },
+  "reference_time": "2026-11-24T09:30:00+03:30",
+  "reference_time_jalali": {
+    "fa": "سه\u200cشنبه ۳ آذر ۱۴۰۵، ساعت ۹:۳۰",
+    "en": "Tuesday 3 Azar 1405, 09:30"
+  },
+  "save_prompt": {
+    "fa": "نکته\u200cهای مهم این گفت\u200cوگو را برای دفعه\u200cهای بعد به خاطر بسپار.",
+    "en": "Remember the important points from this conversation for next time."
+  }
+}
