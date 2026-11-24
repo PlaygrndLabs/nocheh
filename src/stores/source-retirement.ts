@@ -176,7 +176,7 @@ export class SourceRetirementRepository {
     return {revision,retired:[...retired,...memory,...reviews].sort(),answered,retired_records:[...memory].sort(),lapsed_grants:[...grants].sort()};
   }
   /** Of these ids, the notes reviews that read a retired message: the one reviewed or any of its batch. A Hermes note a
-   *  review wrote rests on them all, so it leaves with any of them (ADR-0289). */
+   *  review wrote rests on them all, so it leaves with any of them (ADR-0291). */
   async retiredReviews(ids:readonly string[]):Promise<Set<string>> {
     const rows=(await this.stores.control.query('SELECT id,source_reference,provenance FROM native_review_jobs WHERE id=ANY($1::text[])',[[...new Set(ids)]])).rows;
     const hex=(value:unknown):value is string=>typeof value==='string'&&/^[a-f0-9]{64}$/.test(value);
@@ -186,7 +186,7 @@ export class SourceRetirementRepository {
   }
   /** Of these ids, the owner's grants of a fact to a group that no longer hold: not active, or approved in an earlier guard
    *  epoch, which suspends them on their next read (memory-access.ts validateGrant). A group's note copied from one
-   *  does not outlive it (ADR-0289). */
+   *  does not outlive it (ADR-0291). */
   async lapsedGrants(ids:readonly string[]):Promise<Set<string>> {
     return new Set((await this.stores.control.query(`SELECT f.id FROM memory_fact_grants f CROSS JOIN guard_state g CROSS JOIN installation i
       WHERE f.id=ANY($1::text[]) AND g.singleton AND i.singleton AND (f.state<>'active' OR f.binding->>'generation' IS DISTINCT FROM i.generation::text
@@ -252,7 +252,7 @@ export class SourceRetirementRepository {
         if(body.retired)await db.query(`UPDATE dispatches SET state='cancelled',error_code='source_retired',revision=revision+1,updated_at=now()
           WHERE event_id=ANY($1::text[]) AND state IN ('pending','failed') AND attempts=0`,[messageEvents]);
         return {event_id:eventId,source_object_id:id,retired:body.retired,revision,authority:'owner',observation:'not_observed'};
-      // Notes carry across a hide or restore; each carry removes the notes that rest on a hidden message (ADR-0289).
+      // Notes carry across a hide or restore; each carry removes the notes that rest on a hidden message (ADR-0291).
       },{notes:'all'});
     return result;
   }

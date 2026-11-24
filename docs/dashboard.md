@@ -16,9 +16,9 @@ then run:
 Nocheh opens at <http://127.0.0.1:8783/> for the `personal` workspace; `./bin/nocheh workspaces`
 shows each other workspace's address. It owns the application and owner API.
 Open Assistant console from the sidebar for Hermes's native dashboard at `/hermes/nocheh`;
-its return link brings you back to Nocheh. Chat, second in the sidebar, opens its chat
-at `/hermes/chat` directly; the profile picker there chooses your private chat or a
-group. Old `/nocheh#…` bookmarks still work.
+its return link brings you back to Nocheh. The dashboard has no chat page: talk to
+Nocheh in Telegram (see [chat page off](#chat-page-off)). Old `/nocheh#…` bookmarks
+still work.
 Settings › Models holds the model providers and keeps their keys server-side; see
 [model providers](provider.md).
 
@@ -35,7 +35,6 @@ updates; `dashboard --stop` stops only the dashboard service and owner server.
 | Page | Use it for |
 | --- | --- |
 | Home | What needs you (decisions waiting, problems), a Get started checklist until setup is done, today's replies, cost, kept messages and long-term memory, and where things are. |
-| Chat | Talk to the assistant in the browser. It opens the assistant console's chat, where the profile picker chooses your private chat or a group. |
 | Inbox | Waiting: decide approvals, memory-access requests, identity suggestions and organization changes. Allowed actions: standing permissions you can revoke. History: earlier decisions and their outcomes. |
 | Tasks | Personal and per-project to-do lists, also filled by telling Nocheh in chat or by members in the members' app: Open, Today, Upcoming, Board, Done, Dropped, Archive and Trash. A task added in the members' app shows **Members’ app**, and its comments and history say "in the members’ app"; a reminder a member set there says so, and goes to that member's own private chat ([telegram](telegram.md#task-reminders)). Every chat of a project sees the project's whole list, whatever a task's group, which is only a label; moving a task into a project's list names those chats first, and changing its group asks nothing ([ADR-0276](adr/0276-a-projects-tasks-are-one-list.md)). Groups, members' private chats and the members' app see a person assigned only when you linked them in Memory › People to a Telegram account in one of the project's groups, and count everyone else; your own names for people, and who a task is about, never show there. The members' app shows your statuses and the columns you let project chats see by the names you gave them. |
 | Schedules | Every chat's schedules in one table: name, chat, when, next run and last result, with Pause or Resume, Run now, Delete and each schedule's runs. Ask in your private chat to add one ([Schedules](#schedules)). |
@@ -112,8 +111,8 @@ remain supported alongside these conveniences:
 
 Secret settings take a hidden prompt or piped stdin, never a value in argv.
 The dashboard owner session is separate from the archive service credential and
-model provider keys. Ports bind only to localhost. Native HTTP and one-use,
-30-second WebSocket tickets are checked by Nocheh before proxying. Internal
+model provider keys. Ports bind only to localhost. Native HTTP requests are
+checked by Nocheh before proxying; every WebSocket upgrade is refused ([ADR-0289](adr/0289-chat-page-off-and-hermes-reads-passes-without-the-master-key.md)). Internal
 backend credentials are not injected into native pages. Existing CLI headers
 remain compatible; download-only cookies cannot administer settings.
 
@@ -147,11 +146,9 @@ file, and creating a new password on the next visit.
 
 ## Hermes page script rules
 
-Hermes's own pages under `/hermes/` (Chat, Sessions, Files and the assistant
-console) carry a `Content-Security-Policy-Report-Only` header: scripts only from
+Hermes's own pages under `/hermes/` (Sessions, Files and the assistant console) carry a `Content-Security-Policy-Report-Only` header: scripts only from
 the dashboard's address and the inline scripts named by a nonce that is new for
-each response. It leaves out `connect-src`, so Chat's live connections work in
-every browser. The rules are reported, not enforced, for now. The browser posts
+each response. There is no `connect-src`, `default-src` or `style-src`. The rules are reported, not enforced, for now. The browser posts
 what they would block to `/api/nocheh/csp-report`; the dashboard keeps only a count
 and, per kind, the rule, the blocked site and the page path, never page text, in
 `admin/dashboard/csp-reports.json`. `./bin/nocheh diagnose` shows them under
@@ -159,30 +156,16 @@ and, per kind, the rule, the blocked site and the page path, never page text, in
 from Hermes gets `script-src 'none'; sandbox`, enforced, and neither Hermes's
 session token nor the dashboard's CSRF value.
 
-## Native browser chat
+## Chat page off
 
-Open Chat in the sidebar (or Assistant console → Chat). The context banner
-identifies the owner-private default or selected group profile. Changing the native profile selector changes the scope of
-archive retrieval, native sessions and memory. Chat does not send replies to Telegram.
-The selector lists the private chat as `private-chat` and each allowed group as
-`group-` plus its name and a short code of its own (the username or the code
-alone when the name has no Latin letters); Profiles shows each group's full name. Sessions titles a Telegram
-conversation with its chat's name and leaves out memory reviews.
-The terminal, its model turn and the sidebar metadata connection have distinct roles;
-only the managed turn runner can invoke a model.
-
-Submitted text and up to 10 files (25 MiB total) are archived before execution.
-Voice attachments are transcribed like Telegram voice notes; bounded UTF-8 files
-(up to 200 kB each, 1 MB total) are included as context. Other binary files remain
-retrievable. Original images remain owner-only while guarding is on; required guarding
-rejects opaque image context. Generated results and transcripts retain provenance.
-
-Native Sessions can resume a conversation in its profile. Cancel stops the isolated
-model process. Reload reconnects to the same live terminal. After a service restart,
-a recorded run can be completed, failed or interrupted; it is never automatically
-executed again. Inbox › History lists the latest 50 assistant runs (browser conversations and scheduled jobs together), each with its state and a link to its original message.
-An explicit retry creates another observed input. Local UI commands appear as
-“Captured only” because they do not start a model turn.
+The dashboard has no chat page until Nocheh has its own; talk to Nocheh in Telegram.
+`/hermes/chat` answers with a short page that says so, every WebSocket upgrade through
+the dashboard is refused, and Nocheh's browser input routes (`/v1/browser/*`) answer
+404 `browser_chat_off`, so nothing typed in a browser reaches the agent as you. Hermes's
+other pages (sessions, profiles, files, models, skills, cron) still open from Assistant
+console, where Hermes's own Chat tab is hidden too. Inbox › History lists the latest
+50 assistant runs (scheduled and background jobs, and browser runs recorded earlier). See
+[ADR-0289](adr/0289-chat-page-off-and-hermes-reads-passes-without-the-master-key.md).
 
 A turn gets Hermes's own native notes, scoped native session search and skills, plus
 Nocheh's 18 data tools over MCP (`mcp__nocheh__*`): archive retrieval, long-term memory
@@ -190,7 +173,7 @@ recall and search, tasks, Notion, message and shell, browser and MCP proposals,
 background jobs and knowledge proposals. Proposals follow the owner's approval rules,
 and most wait for a yes. Shell, browser and MCP proposals, Notion included, also follow
 the chat's tool switches. Local wake-word models and arbitrary TUI gateway commands
-are disabled. See [ADR-0028](adr/0028-isolated-native-browser-turns.md) for the boundary.
+are disabled.
 
 ## Native memory and Honcho
 
@@ -602,35 +585,32 @@ started, whether it was timed or Run now, how it ended (Sent, Nothing new, Waiti
 for your yes, Not sent, Skipped, Failed) and how long it took. A timed run with
 nothing new sends nothing; the log shows it as Nothing new.
 
-Open **Hermes → Cron** to create a prompt schedule for the owner-private profile or
-one selected group. The native schedule builder supports intervals, cron expressions
-and one-time schedules. Each fire starts a fresh session with that profile's memory.
-Set **Run settings** to override agent steps and time for one job, or leave them
-blank to inherit. Production model selection remains in Nocheh Settings.
+Nocheh decides that a schedule may be set or run (ADR-0290). A schedule is set only
+by asking in a chat; Nocheh records who set it and from which message. Pause, Resume,
+Run now and Delete each carry Nocheh's own grant for that one press, and Hermes runs a
+timed schedule only when Nocheh's clock agrees that its time has come. Runs more than
+60 seconds late are recorded as missed and are not replayed; there is no catch-up.
+A schedule whose last change Nocheh did not save (a new one Nocheh refused is removed)
+shows **Not running: ask again to set it** and offers only Delete; a change whose
+answer was lost on the way is posted again until Nocheh answers. A cron Nocheh cannot
+time exactly, such as `0 23/2 * * *`, is refused when it is set.
+Original prompts and generated results remain separately inspectable in Inbox ›
+History, including after deleting a schedule.
 
-**Local** saves results in Inbox › History. **Telegram** sends the result to your private
-chat with no card, or proposes the exact result to a group for owner approval. Overlong results stay local with a visible delivery error.
-Pause prevents future starts; Cancel run interrupts an active run. Runs more than
-60 seconds late are recorded as missed; **Catch up once** is an explicit extra run.
-It does not replay every missed interval. Original prompts and generated results
-remain separately inspectable in Inbox › History, including after deleting a schedule.
+**Hermes → Cron** and `nocheh cron` only read: they list schedules, show one and its
+runs. Creating, editing, pausing, running and deleting there are refused
+(`cron_read_only`); use the Schedules page or ask in chat.
 
 ```sh
 ./bin/nocheh cron list --profile all
-./bin/nocheh cron create --profile PROFILE --file job.json
 ./bin/nocheh cron show JOB_ID --profile PROFILE
-./bin/nocheh cron update JOB_ID --profile PROFILE --file changes.json --revision REVISION
-./bin/nocheh cron pause JOB_ID --profile PROFILE
-./bin/nocheh cron trigger JOB_ID --profile PROFILE --request-id UNIQUE_REQUEST_ID
-./bin/nocheh cron catch-up JOB_ID --profile PROFILE --request-id UNIQUE_REQUEST_ID
-./bin/nocheh cron cancel JOB_ID --profile PROFILE
 ./bin/nocheh cron runs JOB_ID --profile PROFILE
 ```
 
-A minimal job file is `{"name":"Daily review","prompt":"Review today's archived notes.","schedule":"0 18 * * *","deliver":"local"}`.
-The native parser uses the profile's Hermes timezone; ISO dates include their UTC
-offset. Reuse the same request ID only when retrying the same manual request.
-Custom skills/scripts, alternate providers and topic schedules are not enabled.
+A schedule that is not set by asking (copied into Hermes's store by hand, or brought
+back from an export) stays inert until it is set again by asking. Custom
+skills/scripts, alternate providers, new group schedules and topic schedules are
+not enabled.
 
 ## Original and guarded versions (ADR-0033)
 

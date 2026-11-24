@@ -10,7 +10,7 @@ import unittest
 from pathlib import Path
 from unittest.mock import patch
 
-from .scopes import Scopes,topic_id,verify_capability
+from .scopes import Scopes,topic_id,check_claims
 from services.chats import Fixed,Served
 from .assistant_gateway import prepare_profile
 from .assistant_turn import restrict_session_search,install_tool_search_policy,ALLOWED_TOOLS,BACKGROUND_TOOLS,BACKGROUND_TOOLSETS,OWNER_SET_TOOLS,TURN_TOOLSETS,UnexpectedProfileTool,turn_tools,verify_profile_tools
@@ -84,11 +84,11 @@ class ScopeTests(unittest.TestCase):
         body=base64.urlsafe_b64encode(canonical({'scope':'-20','event_id':event,'expires':time.time()*1000+600000,'audience':'nocheh-assistant','app':{'app':'telegram','chat':'-20','topic':None}})).decode().rstrip('=')
         signature=base64.urlsafe_b64encode(hmac.new(secret.encode(),body.encode(),hashlib.sha256).digest()).decode().rstrip('=')
         token='turn.'+body+'.'+signature
-        verify_capability(token,secret,a,event)
+        check_claims(token,a,event)
         with patch.dict(os.environ,{'NOCHEH_STORAGE_LAYOUT':'original-only-v1'}):
-            with self.assertRaises(ValueError):verify_capability(token,secret,a,event)
+            with self.assertRaises(ValueError):check_claims(token,a,event)
         for scope,target in ((b,event),(owner,event),(a,'b'*64)):
-            with self.assertRaises(ValueError):verify_capability(token,secret,scope,target)
+            with self.assertRaises(ValueError):check_claims(token,scope,target)
         named_claims={'scope':'-20','space':'-20','app':{'app':'telegram','chat':'-20','topic':None},'event_id':event,'expires':time.time()*1000+600000,'audience':'nocheh-assistant',
                       'generation':'11111111-1111-1111-1111-111111111111','guard_epoch':5,'revision':5,'logical_profile':'research'}
         def signed(claims):
@@ -96,23 +96,39 @@ class ScopeTests(unittest.TestCase):
             return 'turn.'+data+'.'+base64.urlsafe_b64encode(hmac.new(secret.encode(),data.encode(),hashlib.sha256).digest()).decode().rstrip('=')
         # A background job run's credential lasts until 2 minutes after its job's hard deadline: up to 55 minutes, never past an hour.
         long_claims={'scope':'-20','event_id':event,'audience':'nocheh-assistant','app':{'app':'telegram','chat':'-20','topic':None}}
-        verify_capability(signed({**long_claims,'expires':time.time()*1000+55*60000}),secret,a,event)
+        check_claims(signed({**long_claims,'expires':time.time()*1000+55*60000}),a,event)
         for expires in (time.time()*1000+61*60000,time.time()*1000-1000):
-            with self.assertRaises(ValueError):verify_capability(signed({**long_claims,'expires':expires}),secret,a,event)
+            with self.assertRaises(ValueError):check_claims(signed({**long_claims,'expires':expires}),a,event)
         with patch.dict(os.environ,{'NOCHEH_STORAGE_LAYOUT':'original-only-v1'}):
-            bound=Scopes.apply_revision(a,verify_capability(signed(named_claims),secret,a,event))
+            bound=Scopes.apply_revision(a,check_claims(signed(named_claims),a,event))
             self.assertEqual(bound.logical_profile,'research')
-            self.assertEqual(verify_capability(signed(named_claims),secret,bound,event)['logical_profile'],'research')
+            self.assertEqual(check_claims(signed(named_claims),bound,event)['logical_profile'],'research')
             for invalid in ('planning','../owner',None):
-                with self.assertRaises(ValueError):verify_capability(signed({**named_claims,'logical_profile':invalid}),secret,bound,event)
+                with self.assertRaises(ValueError):check_claims(signed({**named_claims,'logical_profile':invalid}),bound,event)
             default_claims={**named_claims,'logical_profile':Scopes.profile('-20')}
             default_bound=Scopes.apply_revision(a,default_claims)
             implicit=Scopes.apply_revision(a,{key:value for key,value in default_claims.items() if key!='logical_profile'})
             self.assertEqual(default_bound.profile,implicit.profile,'default browser and Telegram profiles share native state')
-            joined=Scopes.apply_revision(a,verify_capability(signed({**named_claims,'project':'c'*64}),secret,a,event))
+            joined=Scopes.apply_revision(a,check_claims(signed({**named_claims,'project':'c'*64}),a,event))
             self.assertEqual((joined.project,joined.profile),('c'*64,bound.profile),'a project brings its role and skills, never another profile')
             for invalid in ('C'*64,'../projects',5):
-                with self.assertRaises(ValueError):verify_capability(signed({**named_claims,'project':invalid}),secret,a,event)
+                with self.assertRaises(ValueError):check_claims(signed({**named_claims,'project':invalid}),a,event)
+
+    def test_a_pass_is_read_by_its_claims_without_checking_its_signature(self):
+        # Hermes does not check the signature; Nocheh's own services check the signature on every call the pass makes. A pass
+        # signed with another key but carrying this turn's claims is read, and only its shape and claims refuse it.
+        a=self.resolve(self.update(-20,123),'-20');b=self.resolve(self.update(-30,456),'-30');event='a'*64
+        claims={'scope':'-20','event_id':event,'expires':time.time()*1000+600000,'audience':'nocheh-assistant','app':{'app':'telegram','chat':'-20','topic':None}}
+        def passed(value,key='another-synthetic-key'):
+            data=base64.urlsafe_b64encode(canonical(value)).decode().rstrip('=')
+            return 'turn.'+data+'.'+base64.urlsafe_b64encode(hmac.new(key.encode(),data.encode(),hashlib.sha256).digest()).decode().rstrip('=')
+        self.assertEqual(check_claims(passed(claims),a,event)['event_id'],event)
+        data=passed(claims).split('.')[1]
+        self.assertEqual(check_claims('turn.'+data+'.unchecked',a,event)['scope'],'-20')
+        for index,credential in enumerate(('scope.'+data+'.x','turn.'+data+'.','turn..x','turn.'+data,'turn.'+data+'.x.y',
+                                           passed({**claims,'audience':'other'}),passed({**claims,'event_id':'b'*64}))):
+            with self.subTest(index=index),self.assertRaises(ValueError):check_claims(credential,a,event)
+        with self.assertRaises(ValueError):check_claims(passed(claims),b,event)
 
     def test_a_chat_keeps_its_profile_and_session_by_its_nocheh_id(self):
         # ADR-0252: a chat stored before step 2b keeps its Telegram id as its chat id, so its profile, its topic's space and
@@ -228,11 +244,11 @@ class ScopeTests(unittest.TestCase):
             return 'turn.'+data+'.'+base64.urlsafe_b64encode(hmac.new(secret.encode(),data.encode(),hashlib.sha256).digest()).decode().rstrip('=')
         group=self.resolve(self.update(-20,123),'-20')
         claims={'scope':'-20','space':'-20','revision':1,'event_id':event,'expires':time.time()*1000+600000,'audience':'nocheh-assistant'}
-        verify_capability(signed({**claims,'app':{'app':'telegram','chat':'-20','topic':None}}),secret,group,event)
+        check_claims(signed({**claims,'app':{'app':'telegram','chat':'-20','topic':None}}),group,event)
         for app in (None,{'app':'telegram','chat':'-30','topic':None},{'app':'telegram','chat':'-20','topic':'42'}):
-            with self.subTest(app=app),self.assertRaises(ValueError):verify_capability(signed({**claims,'app':app}),secret,group,event)
+            with self.subTest(app=app),self.assertRaises(ValueError):check_claims(signed({**claims,'app':app}),group,event)
         from dataclasses import replace
-        verify_capability(signed(claims),secret,replace(group,app=()),event)
+        check_claims(signed(claims),replace(group,app=()),event)
 
     def test_native_memory_and_session_search_cannot_open_other_profiles(self):
         from hermes_constants import set_hermes_home_override,reset_hermes_home_override
@@ -308,14 +324,14 @@ class ScopeTests(unittest.TestCase):
             return 'turn.'+data+'.'+base64.urlsafe_b64encode(hmac.new(secret.encode(),data.encode(),hashlib.sha256).digest()).decode().rstrip('=')
         claims={'scope':'123','space':'123','app':{'app':'telegram','chat':'123','topic':None},'event_id':event,'expires':time.time()*1000+600000,'audience':'nocheh-assistant',
                 'generation':'11111111-1111-1111-1111-111111111111','guard_epoch':5,'revision':1,'answer':'b'*32}
-        self.assertEqual(verify_capability(signed(claims),secret,owner,event)['answer'],'b'*32)
+        self.assertEqual(check_claims(signed(claims),owner,event)['answer'],'b'*32)
         # Its scope is the chat itself, never the owner's (none); a group, a malformed record or a missing scope is refused.
         for bad,scope in (({**claims,'scope':None},owner),({**claims,'answer':'B'*32},owner),({**claims,'answer':'b'*31},owner),({**claims,'answer':5},owner),
                           ({**claims,'scope':'-20','space':'-20'},group),({**claims,'answer':None,'scope':'123'},owner)):
-            with self.subTest(claims=bad),self.assertRaises(ValueError):verify_capability(signed(bad),secret,scope,event)
+            with self.subTest(claims=bad),self.assertRaises(ValueError):check_claims(signed(bad),scope,event)
         # Without a record, the owner's own pass is unchanged.
         plain={key:value for key,value in claims.items() if key!='answer'}
-        self.assertNotIn('answer',verify_capability(signed({**plain,'scope':None}),secret,owner,event))
+        self.assertNotIn('answer',check_claims(signed({**plain,'scope':None}),owner,event))
 
     def test_an_ask_about_a_member_has_its_own_profile_never_carried_and_its_pass_only_in_the_owners_chat(self):
         # Step 4b: the owner's ask about a member reads as the owner's private chat, never as the owner, in a profile of its own.
@@ -349,10 +365,10 @@ class ScopeTests(unittest.TestCase):
             return 'turn.'+data+'.'+base64.urlsafe_b64encode(hmac.new(secret.encode(),data.encode(),hashlib.sha256).digest()).decode().rstrip('=')
         passed={'scope':'123','space':'123','app':{'app':'telegram','chat':'123','topic':None},'event_id':event,'expires':time.time()*1000+600000,
                 'audience':'nocheh-assistant',**claims,'member_read':'d'*32}
-        self.assertEqual(verify_capability(signed(passed),secret,owner,event)['member_read'],'d'*32)
+        self.assertEqual(check_claims(signed(passed),owner,event)['member_read'],'d'*32)
         for bad,scope in (({**passed,'scope':None},owner),({**passed,'member_read':'D'*32},owner),({**passed,'member_read':5},owner),
                           ({**passed,'answer':'a'*32},owner),({**passed,'scope':'-20','space':'-20'},group)):
-            with self.subTest(claims=bad),self.assertRaises(ValueError):verify_capability(signed(bad),secret,scope,event)
+            with self.subTest(claims=bad),self.assertRaises(ValueError):check_claims(signed(bad),scope,event)
         # resolve() takes it as the owner writing in the owner's private chat, as an answer.
         body,claims=turn(self.update(123,123,'private'),self.scopes,'123',claim_scope='123',claim_member_read='d'*32)
         self.assertTrue(self.scopes.resolve(body,claims).owner)
@@ -381,10 +397,12 @@ class ScopeTests(unittest.TestCase):
             finally:reset_hermes_home_override(token)
 
     def test_turn_tools_are_exact_and_job_turns_have_no_job_tool(self):
-        self.assertEqual(turn_tools(False,False),(OWNER_SET_TOOLS,REPLY_TOOLS))
-        self.assertEqual(turn_tools(True,False),(OWNER_SET_TOOLS|{'mcp__nocheh__background_job'},JOB_TOOLS))
-        self.assertEqual(turn_tools(True,True),(OWNER_SET_TOOLS|{'mcp__nocheh__background_job','mcp__nocheh__shell','mcp__nocheh__browser'},JOB_BOX_TOOLS))
-        self.assertEqual(turn_tools(True,False,True),(OWNER_SET_TOOLS|{'mcp__nocheh__my_time_zone'}|(ALLOWED_TOOLS-JOB_MACHINE_TOOLS),JOB_MACHINE_TOOLS))
+        # The time zone tool stays only in schedule and member turns (ADR-0282): every other turn drops it.
+        dropped=OWNER_SET_TOOLS|{'mcp__nocheh__my_time_zone'}
+        self.assertEqual(turn_tools(False,False),(dropped,REPLY_TOOLS))
+        self.assertEqual(turn_tools(True,False),(dropped|{'mcp__nocheh__background_job'},JOB_TOOLS))
+        self.assertEqual(turn_tools(True,True),(dropped|{'mcp__nocheh__background_job','mcp__nocheh__shell','mcp__nocheh__browser'},JOB_BOX_TOOLS))
+        self.assertEqual(turn_tools(True,False,True),(dropped|(ALLOWED_TOOLS-JOB_MACHINE_TOOLS),JOB_MACHINE_TOOLS))
         self.assertIn('mcp__nocheh__background_job',REPLY_TOOLS)
         for tools in (JOB_TOOLS,JOB_BOX_TOOLS,JOB_MACHINE_TOOLS):self.assertNotIn('mcp__nocheh__background_job',tools)
         # A private answer only reads (ADR-0249): no native memory, no tool that sends, changes, starts or asks.

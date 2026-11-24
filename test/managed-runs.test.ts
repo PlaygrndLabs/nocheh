@@ -13,6 +13,8 @@ import type {IncomingMessage} from 'node:http';
 import {archiveStatus,digest} from '../src/archive.js';
 
 import {admitBrowser} from '../src/workflows/browser.js';
+import {installChatsForTest} from '../src/chats.js';
+import {policyDirectory} from './fixture-groups.js';
 async function captureAndAdmit(...args:Parameters<typeof captureInput>){
   const result=await captureInput(...args);
   await admitBrowser(args[0],args[1],{...args[2] as Record<string,unknown>,event_id:result.event_id});
@@ -25,6 +27,8 @@ test('real PostgreSQL: browser originals, files, scoped claims and idempotent re
   const admin=new pg.Pool(connection);await admin.query(`CREATE SCHEMA ${namespace}`);
   const pool=new pg.Pool({...connection,options:`-c search_path=${namespace}`,max:4});
   config.dataDir=root;config.assistant={enabled:false,owner_id:'42',group_ids:['-10']};
+  // The chats the runs come from, as the seeder makes their rows from the policy (ADR-0252).
+  const restoreChats=installChatsForTest(policyDirectory(config.assistant));
   try {
     await initialize(pool);
     const text='  browser original\r\nsecret value\0🙂 ',bytes=Buffer.from([0,255,42,10]);
@@ -81,5 +85,5 @@ test('real PostgreSQL: browser originals, files, scoped claims and idempotent re
     const stale=await captureAndAdmit(pool,config,{...body,id:'after-policy-change',files:[]});
     await pool.query('UPDATE memory_policy_state SET revision=revision+1');
     await assert.rejects(claimRun(pool,config,{...claim,event_id:stale.event_id},undefined,{owner:'inngest',epoch:1}),{code:'browser_audience_changed'});
-  }finally{await pool.end();await admin.query(`DROP SCHEMA ${namespace} CASCADE`);await admin.end();await rm(root,{recursive:true,force:true});}
+  }finally{restoreChats();await pool.end();await admin.query(`DROP SCHEMA ${namespace} CASCADE`);await admin.end();await rm(root,{recursive:true,force:true});}
 });

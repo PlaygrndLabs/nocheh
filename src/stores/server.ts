@@ -1,6 +1,7 @@
 import {notionConnectionsHere} from './notion.js';
 import {githubReposHere} from './github-lookups.js';
 import {createServer} from 'node:http';
+import {randomUUID} from 'node:crypto';
 import {join} from 'node:path';
 import {admin,boundReader,currentReader} from '../access.js';
 import {ownerChat,telegramDeliveryAllowed} from '../assistant-policy.js';
@@ -31,7 +32,6 @@ import {controlStorageWorkflow,retryFailedWorkflows} from './workflow-owner.js';
 import {claimHostWorkflow,renewHostWorkflow,finishHostWorkflow,continueHostWorkflow} from '../workflows/host-coordinator.js';
 import {confirmImport,cancelImport,enterImportWrite,importProgress,pendingImports,reconcileImportReceipt} from '../workflows/imports.js';
 import {registerWorker} from '../workflows/store.js';
-import {drainSourceSpool} from './capture.js';
 import {fillTemplate,labeledLines,ownerPrompts,problemButtons,problemNotice} from '../prompts.js';
 import {retryButton} from './action-commands.js';
 import {archiveReplyPreviews} from './archive-reply-links.js';
@@ -41,7 +41,7 @@ import {searchTagged} from './native-memory.js';
 import {agentCopies,messageSender} from './archive-row-details.js';
 import {telegramDirectory} from './telegram-directory.js';
 import {currentChats,otherPrivateScopes} from './chats.js';
-import {scheduleChats,scheduleTurn,timeZoneTurn} from './schedules.js';
+import {issueScheduleGrant,recordScheduleTurn,scheduleChats,scheduleIdentity,scheduleTurn,timeZoneTurn} from './schedules.js';
 import {authorizeScheduleNotice} from './schedule-notices.js';
 import {storageGuardService} from './guard-service.js';
 import {taskQuery} from './tasks.js';
@@ -68,6 +68,9 @@ export function storageServer(s:StorageServices,config:Settings,call:RuntimeCall
       databases:await storageHealth(s.stores),inactive:restoredInactive(config.dataDir),workers:status()});
     // The members' app has its own listener (MEMBER_APP_PORT, ADR-0265 D3): never here, whatever the caller holds.
     if(path===MEMBER_APP_CORE_PREFIX||path.startsWith(MEMBER_APP_CORE_PREFIX+'/'))throw new HttpError(404,'not_found');
+    // The dashboard chat page is off until Nocheh has its own chat page; Telegram only. No browser input, run or
+    // delivery is taken, whatever the caller holds, so no browser run is ever admitted.
+    if(path.startsWith('/v1/browser/'))throw new HttpError(404,'browser_chat_off');
     assertStorageActive(config.dataDir);
     if(transport?.handle(req,res))return;
     if(req.method==='POST'&&path==='/internal/actions/authorize') {
@@ -104,7 +107,7 @@ export function storageServer(s:StorageServices,config:Settings,call:RuntimeCall
       return json(res,200,await s.retirements.historyRetirements(ids as string[]));
     }
     if(req.method==='POST'&&path==='/internal/notes/carry') {
-      // Hermes asks before a chat's new profile takes the notes of its earlier one (ADR-0289): whether every epoch since
+      // Hermes asks before a chat's new profile takes the notes of its earlier one (ADR-0291): whether every epoch since
       // let notes through for this chat. It names no chat, only whether it is the owner's.
       authorize(req,config.token);const body=object(await readJson(req,1024));
       if(Object.keys(body).some(key=>!['generation','from','to','owner'].includes(key))||typeof body.generation!=='string'||typeof body.owner!=='boolean'||
@@ -200,12 +203,6 @@ export function storageServer(s:StorageServices,config:Settings,call:RuntimeCall
     if(req.method==='POST'&&path==='/v1/memory/reviews'){admin(principal);return json(res,200,await s.imports.approveLearning(principal,await readJson(req)));}
     if(/^\/v1\/artifacts\/[a-f0-9]{64}\/bytes$/.test(path)&&req.method==='POST'){admin(principal);return json(res,200,await s.imports.upload(principal,path.split('/')[3]!,await readJson(req,70*1024*1024)));}
 
-    if(req.method==='POST'&&path==='/v1/browser/input') {
-      admin(principal);return json(res,200,await s.browserCapture.capture(principal,await readJson(req,40*1024*1024)));
-    }
-    if(req.method==='POST'&&path==='/v1/browser/delivered') {
-      admin(principal);return json(res,202,await s.browserDelivery.acknowledge(principal,await readJson(req,1024)));
-    }
     // Durable admission depends only on the owned filesystem. Database and
     // workflow outages leave an acknowledged observation available for replay.
     if(req.method==='POST'&&path==='/v1/ingest') {
@@ -229,7 +226,10 @@ export function storageServer(s:StorageServices,config:Settings,call:RuntimeCall
     // repository checks first; the answer comes later as a separate message.
     // Whether this reply may set schedules with Hermes's schedule tool (ADR-0266): only the owner's own live Telegram
     // message in their private chat, not a forward. The schedules run in the owner's time zone.
-    if(req.method==='POST'&&path==='/v1/schedules/turn')return json(res,200,await scheduleTurn(s,principal));
+    // Nocheh keeps a turn grant for an allowed turn, with the chat and profile its schedules must name (ADR-0290).
+    if(req.method==='POST'&&path==='/v1/schedules/turn')return json(res,200,await recordScheduleTurn(s,principal,await scheduleTurn(s,principal)));
+    // A schedule Hermes's tool set in this turn, posted from inside it: only with this turn's grant (ADR-0290).
+    if(req.method==='POST'&&path==='/v1/schedules/turn/definition')return json(res,200,await s.schedules.turnDefinition(principal,await readJson(req,1024*1024),s));
     // The owner or a member sets their own time zone by asking in their own private chat (ADR-0281, ADR-0282).
     if(req.method==='POST'&&path==='/v1/schedules/time-zone')return json(res,200,await timeZoneTurn(s,principal,await readJson(req)));
     if(req.method==='POST'&&path==='/v1/member-asks')return json(res,200,await s.memberAsks.ask(principal,await readJson(req,16*1024)));
@@ -285,8 +285,18 @@ export function storageServer(s:StorageServices,config:Settings,call:RuntimeCall
       const operation=({profiles:'listProfiles',memory:'readNotes',preferences:writes?'writeSettings':'readSettings',
         persona:writes?'writePersona':'readPersona',schedules:'manageSchedules'} as Record<string,AgentOperation>)[string(action,20)];
       if(!operation)throw new HttpError(400,'unknown_management_action');
-      // The Schedules pages (ADR-0266): each schedule with the name of its chat as the owner sees it.
-      if(operation==='manageSchedules')return json(res,200,await scheduleChats(s.stores.control,ownerChat(s.access.policy()),await agentOperation(s.agent,operation)(input)));
+      if(operation==='manageSchedules') {
+        // The Schedules pages (ADR-0266): each schedule with the name of its chat as the owner sees it.
+        if(input.operation==='list')return json(res,200,await scheduleChats(s.stores.control,ownerChat(s.access.policy()),await agentOperation(s.agent,operation)(input)));
+        // The owner's Pause, Resume, Delete or Run now: Nocheh grants that one change first, so Hermes's post of it is
+        // accepted (ADR-0290). Nothing else changes a schedule from here.
+        if(!['pause','resume','delete','run'].includes(String(input.operation)))throw new HttpError(400,'invalid_schedule_action');
+        const change=input.operation as 'pause'|'resume'|'delete'|'run',profile=scheduleIdentity(input.profile),job=scheduleIdentity(input.job_id);
+        const request=input.request_id===undefined||input.request_id===null?randomUUID().replaceAll('-',''):input.request_id;
+        if(typeof request!=='string'||!/^[a-zA-Z0-9_-]{1,128}$/.test(request))throw new HttpError(400,'invalid_schedule_action');
+        await issueScheduleGrant(s.stores.control,{profile,job_id:job,operation:change,person:'owner',request_id:request});
+        return json(res,200,await agentOperation(s.agent,operation)({operation:change,profile,job_id:job,request_id:request}));
+      }
       // Each note says where it came from in the owner's words; what Hermes recorded about it stays behind.
       const value=await agentOperation(s.agent,operation)(input);
       return json(res,200,operation==='readNotes'?await s.noteSources.withOwnerLabels(value,ids=>s.originals.originals(ids)):value);
@@ -295,7 +305,6 @@ export function storageServer(s:StorageServices,config:Settings,call:RuntimeCall
       admin(principal);const body=object(await readJson(req,2*1024*1024)),operation=path.slice('/v1/scheduler/'.length);
       if(operation==='finish')return json(res,200,await s.scheduled.finish(body));
       await assertGuardConfiguration(s.guards,config.guardMode);await s.configuration.assert(config.assistant);
-      if(operation==='ownership')return json(res,200,await s.schedules.ownership());
       if(operation==='definition')return json(res,200,await s.schedules.definition(principal,body));
       if(operation==='input')return json(res,200,await s.schedules.capture(principal,body));
       if(operation==='workflow-context')return json(res,200,await s.scheduled.context(body));
@@ -306,9 +315,8 @@ export function storageServer(s:StorageServices,config:Settings,call:RuntimeCall
       if(operation==='cancel')return json(res,200,await s.scheduled.cancel(body));
       if(operation==='recover')return json(res,200,await s.scheduled.recoverExpired());
       if(operation==='runs')return json(res,200,await s.scheduled.history(body));
-      if(operation==='delivery')return json(res,200,await s.actionCommands.offer('telegram',await s.scheduled.delivery(body) as Record<string,any>));
-      // A schedule a reply set in the owner's private chat, once captured: Nocheh's own message there (ADR-0266).
-      if(operation==='announce')return json(res,200,await s.scheduleNotices.announce(body));
+      // Ownership, delivery and a new schedule's message are Nocheh's own now: it delivers after run() and announces from
+      // the turn route (ADR-0290).
       throw new HttpError(404,'not_found');
     }
     if(req.method==='POST'&&path.startsWith('/v1/background/')) {
@@ -322,23 +330,6 @@ export function storageServer(s:StorageServices,config:Settings,call:RuntimeCall
       if(operation==='prepare')return json(res,200,await runs.prepare(body));
       if(operation==='heartbeat')return json(res,200,await runs.heartbeat(body));
       throw new HttpError(404,'not_found');
-    }
-    if(req.method==='POST'&&path.startsWith('/v1/browser/')) {
-      admin(principal);const body=object(await readJson(req,2*1024*1024)),operation=path.slice('/v1/browser/'.length);
-      if(operation==='finish')return json(res,200,await s.browser.finish(body));
-      if(operation==='cancel')return json(res,200,await s.browser.cancel(body));
-      if(operation==='observe')return json(res,200,await s.browser.observe(body));
-      if(operation==='active')return json(res,200,await s.browser.active(body));
-      if(operation==='undelivered')return json(res,200,await s.browser.undelivered(principal,body));
-      await assertGuardConfiguration(s.guards,config.guardMode);await s.configuration.assert(config.assistant);
-      if(operation==='admit') {
-        await drainSourceSpool(s.capture,config.dataDir,string(body.event_id,64));
-        return json(res,200,await s.browser.admit(principal,body));
-      }
-      if(operation==='workflow-context')return json(res,200,await s.browser.context(body));
-      if(operation==='claim')return json(res,200,await s.browser.claim(body));
-      if(operation==='prepare')return json(res,200,await s.browser.prepare(body));
-      if(operation==='heartbeat')return json(res,200,await s.browser.heartbeat(body));
     }
     if(await ownerSecurityRoute(s.stores.control,principal,req,res,url,{separated:true,preview:input=>s.controlledActions.preview(principal,input)}))return;
     if(path==='/v1/workflows'||path.startsWith('/v1/workflows/')) {

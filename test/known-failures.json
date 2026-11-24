@@ -1,0 +1,7 @@
+{
+  "about": "Tests known to fail, by section of tools/development/check_all.py. Each entry says why and since when. A failure listed here does not fail the run; take an entry off when its test is fixed. \"flaky\": true marks a test that fails only sometimes or only in some environments, so passing does not report it.",
+  "load": {},
+  "node": {},
+  "browser": {},
+  "python": {}
+}

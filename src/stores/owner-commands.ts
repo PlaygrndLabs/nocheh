@@ -14,7 +14,7 @@ import {keepNotes,type NotesKept} from './notes-epochs.js';
  * epoch and requests no Honcho or memory review refresh; its receipt keeps the current epoch and never holds memory.
  * A command whose epoch takes nothing away from a chat passes `notes` to let chats keep their Hermes notes across it:
  * every chat (`all`), or only the owner's private chat (`owner`) when it can take something away from a group. Without it
- * every chat's notes start fresh (ADR-0289). */
+ * every chat's notes start fresh (ADR-0291). */
 export class OwnerCommands {
   constructor(readonly control:pg.Pool){}
   async run<T>(principal:Reader,operationId:string,request:unknown,change:(client:pg.PoolClient)=>Promise<T>,

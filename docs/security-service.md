@@ -305,7 +305,9 @@ and `NOCHEH_MEMORY_CONTEXT=legacy` and restart Hermes with this version's image.
 Sealed boxes need the isolated runtime. In legacy mode a job that asks for a box
 is refused with `job_box_not_allowed`, and a box job approved before the change
 fails at its next run with `job_box_unavailable`. Turn **Sealed box for jobs** off
-first, so such a job's later runs go without a box.
+first, so such a job's later runs go without a box. Hermes has no mount of stored
+files in either mode: a turn's images come through the broker's `/v1/turn-files/<sha>`
+with the turn's pass.
 The converted history remains readable. An older image that predates this layout
 requires an offline reverse conversion; do not start it against converted profiles.
 There is no automatic fallback when a required security service is unavailable.

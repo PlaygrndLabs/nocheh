@@ -27,7 +27,7 @@ Nocheh is in development mode and not yet released. Everything below is built an
   `text-embedding-3-small` until the owner picks another model ([ADR-0181](docs/adr/0181-memory-search-model-change-rebuilds-memory.md)); a group's recall, search and learning read
   through a memory wall that only holds its own chats ([ADR-0286](docs/adr/0286-memory-walls.md)); each project ticks which of its groups share memory ([ADR-0287](docs/adr/0287-projects-tick-the-groups-that-share-memory.md)). Hermes's own notes
   carry through safety changes, minus what rests on a hidden message, and start fresh only after a change that takes
-  something away from a chat ([ADR-0289](docs/adr/0289-chat-notes-carry-into-new-guard-epochs.md)).
+  something away from a chat ([ADR-0291](docs/adr/0291-chat-notes-carry-into-new-guard-epochs.md)).
 - People: the name the owner sets in Memory › People is the person's name everywhere, and each
   person has a private note only the owner reads
   ([ADR-0274](docs/adr/0274-people-names-everywhere-and-private-notes.md)). Honcho 3.6.2 reads
@@ -57,6 +57,11 @@ Nocheh is in development mode and not yet released. Everything below is built an
   card's chat, period and named Notion pages ([ADR-0283](docs/adr/0283-machine-jobs-read-only-their-card.md)), and
   watch start-up files and admin rights ([ADR-0284](docs/adr/0284-machine-jobs-watch-start-up-files-and-admin.md)); files are
   parsed by a separate reader with no network and no key ([ADR-0285](docs/adr/0285-files-are-parsed-by-a-separate-reader.md)).
+  Per-person keys, step 1: the dashboard chat page is off and Hermes reads passes without the
+  master key ([ADR-0289](docs/adr/0289-chat-page-off-and-hermes-reads-passes-without-the-master-key.md)); Nocheh
+  grants every schedule change and fire, and Hermes's Cron page is read-only
+  ([ADR-0290](docs/adr/0290-nocheh-grants-schedule-changes-and-fires.md)). Next: the agent login replaces the
+  master key in Hermes, then one-time keys per reply.
 - Dashboard: compact tables and sub-tabs on every page (table-first plan, steps 1 to 5);
   Connections, Members and Sent to apps pages.
 - Operations: daily backups, export and import, an encrypted off-site copy (off until the owner
@@ -77,7 +82,7 @@ Checks and follow-ups:
   script policy from Report-Only to enforced in one commit. Later: one shared name cleaner for
   cards, forwards and recall labels, and a notice when an off-site restore check fails.
 - Development startup order: a full tester run of `project_groups_stay_apart` alone.
-- Notes carry ([ADR-0289](docs/adr/0289-chat-notes-carry-into-new-guard-epochs.md)): on the owner's install, hide a message
+- Notes carry ([ADR-0291](docs/adr/0291-chat-notes-carry-into-new-guard-epochs.md)): on the owner's install, hide a message
   and check that the private chat's notes are still in Memory › Assistant notes after its next reply.
 - A project's tasks are one list ([ADR-0276](docs/adr/0276-a-projects-tasks-are-one-list.md)): a full tester run of
   `project_groups_stay_apart`, `member_private_chat_reads_joined_groups`, `member_app_tasks`,
@@ -96,7 +101,7 @@ Checks and follow-ups:
 Next:
 - After go-live: members connect their own accounts, then Slack.
 - After MVP: undo an import, Notion "Switch account", approval-card rule notes and "No, do this
-  instead", Nocheh's own chat page in place of the temporary Hermes chat link.
+  instead", Nocheh's own chat page (the dashboard chat page is off until then, [ADR-0289](docs/adr/0289-chat-page-off-and-hermes-reads-passes-without-the-master-key.md)).
 - At go-live, production rules start: no data loss, data-keeping schema changes and tested
   upgrades.
 

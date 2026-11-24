@@ -57,6 +57,15 @@ class ScriptedAgentTests(unittest.TestCase):
                          {'tool':'mcp__nocheh__archive_search','arguments':{'mode':'text','query':'CRATEWORD1','limit':10}})
         self.assertEqual(self.agent.respond(request(framed,message('assistant',None),message('tool','{"sources":[]}'),tools=tools))['tool'],'mcp__nocheh__tasks')
 
+    def test_a_reply_that_may_set_schedules_calls_hermes_schedule_tool(self):
+        # The tester sets a schedule by asking in the owner's chat (ADR-0290): Hermes's own schedule tool, exact arguments.
+        user=message('user','هر دقیقه یادم بنداز [[tool:cronjob_manage {"action":"create","name":"Synthetic reminder","prompt":"یادآوری SCHEDMARK","schedule":"every 1m","repeat":1}]]')
+        tools=('mcp__nocheh__archive_search','cronjob_manage')
+        self.assertEqual(self.agent.respond(request(user,tools=tools)),{'tool':'cronjob_manage','arguments':
+            {'action':'create','name':'Synthetic reminder','prompt':'یادآوری SCHEDMARK','schedule':'every 1m','repeat':1}})
+        final=self.agent.respond(request(user,message('assistant',None),message('tool','{"success": true, "job_id": "a1b2c3d4e5f6"}'),tools=tools))
+        self.assertEqual(final['content'],'[agent] cronjob_manage: {"success": true, "job_id": "a1b2c3d4e5f6"}')
+
     def test_a_nocheh_tool_result_is_read_inside_hermes_mcp_envelope(self):
         # Hermes's MCP client gives the model {"result": <the tool's text>}; a job's notice may follow it.
         user=message('user','[[tool:mcp__nocheh__background_job {"action":"status"}]] [[tool:terminal {"command":"id"}]]')

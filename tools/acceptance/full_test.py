@@ -29,6 +29,7 @@ import argparse
 import json
 import os
 from pathlib import Path
+import re
 import socket
 import subprocess
 import sys
@@ -178,6 +179,7 @@ TITLES = {
     'member_app_reminder_goes_to_setter': 'A reminder a member sets in the app reaches only their own chat; with no way to reach them, none is set',
     'member_app_never_leaks': 'No private mark is in any answer of the members\' app or any reminder a member got',
     'no_lingering_isolated_turns': 'Nothing left running afterwards', 'dashboard_pages': 'Every dashboard page opens',
+    'end_of_run_health': 'No service ran out of memory or kept restarting',
 }
 
 
@@ -246,6 +248,69 @@ def containers(project):
                           capture_output=True, text=True).stdout.split()
 
 
+# Log lines the end-of-run health check counts in every container. A first version: the report shows them, and only
+# a container that ran out of memory or kept restarting fails the run, until a few runs show which lines scenarios
+# cause on purpose.
+LOG_SIGNALS = {
+    'missing table or column': re.compile(r'\b42P01\b|\b42703\b|relation "[^"]+" does not exist|column "[^"]+" does not exist'),
+    'deadlock': re.compile(r'deadlock detected|\b40P01\b'),
+    'Python traceback': re.compile(r'Traceback \(most recent call last\)'),
+    'unhandled Node error': re.compile(r'UnhandledPromiseRejection|uncaughtException|Unhandled promise rejection'),
+}
+# Work Nocheh still holds when the run ends, by workflow state; finished states are left out.
+LEFTOVER_WORK = ("SELECT family||' '||state||coalesce(' ('||waiting_reason||')','')||': '||count(*) FROM workflow_registry "
+                 "WHERE state NOT IN ('completed','skipped','cancelled','denied') GROUP BY family,state,waiting_reason ORDER BY 1")
+# Honcho's learning queue: tasks not yet done, and tasks that ended with an error.
+HONCHO_QUEUE = ("SELECT task_type||': '||count(*) FILTER (WHERE NOT processed)||' waiting, '"
+                "||count(*) FILTER (WHERE processed AND error IS NOT NULL)||' failed' FROM queue GROUP BY task_type ORDER BY 1")
+
+
+def end_of_run_health(project, directory):
+    """What the logs and the stores show once every scenario ran: errors no scenario looked for, work left stuck."""
+    ids = containers(project)
+    states = subprocess.run(['docker', 'inspect', '--format', '{{index .Config.Labels "com.docker.compose.service"}} '
+                             '{{.RestartCount}} {{.State.OOMKilled}}']+ids, capture_output=True, text=True).stdout.splitlines() if ids else []
+    unhealthy = [f'{service} restarted {count} times' if int(count) >= 3 else f'{service} ran out of memory'
+                 for service, count, oom in (line.split() for line in states) if int(count) >= 3 or oom == 'true']
+    signals = {}
+    for identifier, line in zip(ids, states):
+        service = line.split()[0]
+        output = subprocess.run(['docker', 'logs', identifier], capture_output=True, text=True, errors='replace')
+        for text in (output.stdout+output.stderr).splitlines():
+            for name, pattern in LOG_SIGNALS.items():
+                if pattern.search(text):
+                    row = signals.setdefault(name, {}).setdefault(service, {'count': 0, 'examples': []})
+                    row['count'] += 1
+                    if len(row['examples']) < 2:
+                        row['examples'].append(text.strip()[:240])
+    compose = ['docker', 'compose', '-p', project, '-f', str(directory/'compose.json'), 'exec', '-T']
+
+    def rows(service, user, database, sql):
+        result = subprocess.run(compose+[service, 'psql', '-X', '-q', '-A', '-t', '-U', user, '-d', database, '-c', sql],
+                                capture_output=True, text=True)
+        return result.stdout.split('\n') if result.returncode == 0 else ['could not read: '+result.stderr.strip()[:200]]
+    observed = {'unhealthy_containers': unhealthy, 'log_signals': signals,
+                'leftover_work': [line for line in rows('nocheh-db', 'nocheh', 'nocheh_control', LEFTOVER_WORK) if line],
+                'honcho_learning_queue': [line for line in rows('honcho-postgres', 'experiment', 'honcho_experiment', HONCHO_QUEUE) if line]}
+    return {'scenario': 'end_of_run_health', 'passed': not unhealthy, 'observed': observed,
+            'error': '; '.join(unhealthy) or None}
+
+
+def health_lines(row):
+    """The end-of-run health check, in words, for the report."""
+    observed = row['observed']
+    lines = ['## End-of-run health', '', 'Shown for every run. Only a container that ran out of memory or kept restarting fails it.', '']
+    lines += ['- Containers: '+('; '.join(observed['unhealthy_containers']) or 'none ran out of memory or kept restarting')]
+    for name, services in observed['log_signals'].items():
+        lines.append(f'- Logs, {name}: '+', '.join(f"{service} {value['count']}" for service, value in services.items()))
+        lines += ['  - `'+example.replace('`', "'")+'`' for value in services.values() for example in value['examples'][:1]]
+    if not observed['log_signals']:
+        lines.append('- Logs: no missing tables, deadlocks, Python tracebacks or unhandled Node errors')
+    lines.append('- Work left in Nocheh: '+('; '.join(observed['leftover_work']) or 'none'))
+    lines.append('- Honcho learning queue: '+('; '.join(observed['honcho_learning_queue']) or 'empty'))
+    return lines+['']
+
+
 def keep_logs(project, directory):
     """Save each container's exit state and log before teardown removes them."""
     out = directory/'logs'
@@ -306,6 +371,9 @@ def write_report(directory, steps, scenarios, exited=()):
             lines.append('- **'+TITLES.get(row['scenario'], row['scenario'])+'** (`'+row['scenario']+'`): '+str(detail)[:400]
                          + (' Observed: '+json.dumps({k: v for k, v in gate.items() if k != 'gate'}, ensure_ascii=False)[:300] if len(gate) > 1 else ''))
         lines.append('')
+    health = [row for row in scenarios if row.get('scenario') == 'end_of_run_health']
+    if health:
+        lines += health_lines(health[0])
     lines += ['## Passed', '']
     lines += ['- '+TITLES.get(row['scenario'], row['scenario'])+(f" ({row['seconds']} s)" if row.get('seconds') else '') for row in passed]
     (directory/'report.md').write_text('\n'.join(lines)+'\n')
@@ -361,6 +429,8 @@ def main():
             scenarios.append(dashboard_pages(directory, directory))
     directory.mkdir(parents=True, exist_ok=True)
     project = json.loads((directory/'fixture.json').read_text())['project'] if (directory/'fixture.json').exists() else None
+    if scenarios and project:
+        scenarios.append(end_of_run_health(project, directory))
     passed = all(row['passed'] for row in steps) and all(row.get('passed') for row in scenarios)
     exited = keep_logs(project, directory) if project and not passed else []
     write_report(directory, steps, scenarios, exited)

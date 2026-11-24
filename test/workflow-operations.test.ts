@@ -13,6 +13,8 @@ import {prepareGuarded,setGuardMode} from '../src/guarded.js';
 import {dispatchCommitted} from '../src/assistant.js';
 import {fixtureAgent} from './fixture-agent.js';
 import {pauseFamily,switchFamily} from '../src/workflows/store.js';
+import {installChatsForTest} from '../src/chats.js';
+import {policyDirectory} from './fixture-groups.js';
 
 test('targeted preparation and dispatch preserve source identity and exclude legacy or stale owners',{skip:!process.env.PGHOST},async()=>{
   const config={...settings(),assistant:{enabled:true,owner_id:'123',group_ids:[] as string[]}};
@@ -23,6 +25,8 @@ test('targeted preparation and dispatch preserve source identity and exclude leg
   const root=await mkdtemp(join(tmpdir(),'workflow-operations-'));config.dataDir=root;
   const source=(id:number):Envelope=>({version:1,key:'telegram:fixture:update:'+id,origin:'live',bot_id:'fixture',kind:'telegram_update',scope:'123',source_id:String(id),revision:'1',occurred_at:null,text:null,
     payload:{update_id:id,message:{message_id:id,chat:{id:123,type:'private'},from:{id:123,is_bot:false},voice:{file_id:'voice'+id}}}});
+  // The owner's private chat, as the seeder makes its row from the policy (ADR-0252).
+  const restoreChats=installChatsForTest(policyDirectory(config.assistant));
   try {
     await initialize(pool);await setGuardMode(pool,'on');
     const first=await ingest(pool,source(1)),second=await ingest(pool,source(2));
@@ -48,5 +52,5 @@ test('targeted preparation and dispatch preserve source identity and exclude leg
     await dispatchCommitted(pool,config,fixtureAgent(async()=>{throw Error('completed job cannot run');}),first.id,{owner:'inngest',epoch:2});
     assert.equal((await pool.query('SELECT state FROM dispatches WHERE event_id=$1',[first.id])).rows[0].state,'done');
     assert.equal((await pool.query('SELECT state FROM dispatches WHERE event_id=$1',[second.id])).rows[0].state,'pending');
-  }finally{await pool.end();await admin.query(`DROP SCHEMA ${namespace} CASCADE`);await admin.end();await rm(root,{recursive:true,force:true});}
+  }finally{restoreChats();await pool.end();await admin.query(`DROP SCHEMA ${namespace} CASCADE`);await admin.end();await rm(root,{recursive:true,force:true});}
 });

@@ -8,6 +8,8 @@ import {shareKnowledge,revokeShare,sharedContext,readShared} from '../src/sharin
 import {search,readEvent} from '../src/retrieval.js';
 import {evidenceGraph} from '../src/graph.js';
 import type {Reader} from '../src/access.js';
+import {installChatsForTest} from '../src/chats.js';
+import {legacyDirectory} from './fixture-groups.js';
 
 test('real PostgreSQL: shares, topic isolation, filtering, private provenance and revocation across all reads',{skip:!process.env.PGHOST},async()=>{
  const admin=new pg.Pool(),namespace=`sharing_${Date.now()}`;await admin.query(`CREATE SCHEMA ${namespace}`);
@@ -15,6 +17,8 @@ test('real PostgreSQL: shares, topic isolation, filtering, private provenance an
  const base:Envelope={version:1,key:'topic:1',scope:'-20',bot_id:'fixture',source_id:'1',revision:'1',origin:'import',kind:'telegram_update',occurred_at:null,text:'Juniper topic one',payload:{message:{message_thread_id:1,is_topic_message:true}}};
  const principal=async(space:string):Promise<Reader>=>({scope:'-20',space,revision:(await spacePolicy(pool,space)).revision,admin:false});
  const unused=async()=>{throw Error('filter must not run');};
+ // The group's two topics, as the seeder makes their rows (ADR-0252).
+ const restoreChats=installChatsForTest(legacyDirectory(['-20/topic/1','-20/topic/2'],{served:['-20']}));
  try{await initialize(pool);
   const a=await ingest(pool,base),b=await ingest(pool,{...base,key:'topic:2',text:'Juniper topic two',payload:{message:{message_thread_id:2,is_topic_message:true}}});
   const secret=await ingest(pool,{...base,key:'private',scope:'123',text:'Juniper: private medical appointment',payload:{}});
@@ -46,5 +50,5 @@ test('real PostgreSQL: shares, topic isolation, filtering, private provenance an
   await revokeShare(pool,share.id,who.revision);
   for(const run of [()=>search(pool,who,'Juniper'),()=>readEvent(pool,who,a.id),()=>readShared(pool,who,'filtered',filtered.id),()=>evidenceGraph(pool,who,who.space!)])await assert.rejects(run,{code:'space_policy_changed'});
   who=await principal(who.space!);await assert.rejects(readShared(pool,who,'shared',share.id),{code:'shared_source_not_found'});
- }finally{await pool.end();await admin.query(`DROP SCHEMA ${namespace} CASCADE`);await admin.end();}
+ }finally{restoreChats();await pool.end();await admin.query(`DROP SCHEMA ${namespace} CASCADE`);await admin.end();}
 });

@@ -227,7 +227,7 @@ export class SharingContentRepository {
       await this.fence(db,input,binding);
       const release=digest(canonical(['sharing-release',binding.generation,operation]));
       await this.insertRelease(db,release,row,representation,binding,null);return {id:release,revision:1};
-    // An approval only lets more through (ADR-0289).
+    // An approval only lets more through (ADR-0291).
     },{notes:'all'});
   }
   private async insertRelease(db:pg.PoolClient,id:string,row:Preview,representation:{revision:number|null;hash:string},binding:GuardBinding,expires:Date|null) {
@@ -242,7 +242,7 @@ export class SharingContentRepository {
       const row=(await db.query("UPDATE sharing_releases SET state='revoked',revision=revision+1,revoked_at=now() WHERE id=$1 AND revision=$2 AND state='active' RETURNING revision",
         [id,body.expected_revision])).rows[0];
       if(!row)throw new HttpError(409,'sharing_revision_conflict');return {id,revision:row.revision,state:'revoked'};
-    // A group may have noted what it can no longer read; the owner reads every chat (ADR-0289).
+    // A group may have noted what it can no longer read; the owner reads every chat (ADR-0291).
     },{notes:'owner'});
   }
   async list(principal:Reader,after='') {

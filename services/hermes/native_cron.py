@@ -6,7 +6,7 @@ import json
 import os
 import re
 import uuid
-from datetime import datetime,timezone
+from datetime import datetime,timezone,timedelta
 from pathlib import Path
 from urllib.request import Request,urlopen
 from services.durable import canonical
@@ -60,38 +60,106 @@ def workflow_cursor(job,profile):
         'completed':(job.get('repeat') or {}).get('completed',0)})).hexdigest()
 
 
-def sync_job(call,job,home,bound):
+# How long a change whose answer was lost is posted again when Nocheh refuses it: the original post may still be
+# committing there meanwhile, and a press's edit grant lives three minutes.
+POSTING_SECONDS=180
+
+
+def sync_job(call,job,profile,scope,grant=None):
     from cron import jobs as native
     # Persist order before publishing so a delayed older acknowledgment cannot
     # replace a later native definition or occurrence checkpoint in the archive.
     updates={'nocheh_workflow_revision':int(job.get('nocheh_workflow_revision',0))+1}
     if job.get('state')=='completed' and not job.get('enabled'):updates['next_run_at']=None
     job=native.update_job(job['id'],updates)
-    call('definition',{'scope':bound.chat_id,'profile':home.name,'job_id':job['id'],'definition':definition(job,home.name),
-        'workflow_cursor':workflow_cursor(job,home.name),'workflow_sequence':job['nocheh_workflow_revision']})
-    # The definition Nocheh captured: a later change Hermes makes itself (its schedule tool) differs from it (ADR-0266).
-    return native.update_job(job['id'],{'nocheh_registered':True,'nocheh_workflow_synced':True,'nocheh_synced_revision':revision(job,home.name)})
+    body={'scope':scope,'profile':profile,'job_id':job['id'],'definition':definition(job,profile),
+        'workflow_cursor':workflow_cursor(job,profile),'workflow_sequence':job['nocheh_workflow_revision']}
+    if not job.get('nocheh_registered'):
+        # A change (a turn's or a press's) whose answer is lost (a timeout, a network error, a restart) is posted again,
+        # the very same body, by the scheduler loop until Nocheh answers (Scheduler.resume).
+        job=native.update_job(job['id'],{'nocheh_posting':{'body':body,'grant':grant,'revision':revision(job,profile),
+            'until':(datetime.now(timezone.utc)+timedelta(seconds=POSTING_SECONDS)).isoformat()}})
+    # Nocheh takes a changed definition only with its own grant (an owner or member press); without one, only a
+    # checkpoint of the version it already holds.
+    call('definition',{**body,**({'grant':grant} if grant else {})})
+    return mark_saved(native,job,profile)
 
 
-def fields(body,model):
-    allowed={'name','prompt','schedule','deliver','repeat','profile','nocheh_preferences','_nocheh_revision'}
-    empty_fields={'skills','skill','base_url','script','no_agent','context_from','enabled_toolsets','workdir','monitor_script','monitor_url','attach_to_session','failure_deliver','continuity'}
-    for key,value in body.items():
-        if key in allowed:continue
-        if key in empty_fields and value in (None,'',False,[]):continue
-        if key=='provider' and value in (None,'','openai'):continue
-        if key=='model' and value in (None,'',model):continue
-        raise ValueError('cron_setting_unavailable')
-    values={key:body[key] for key in ('name','prompt','schedule','deliver','repeat','nocheh_preferences') if key in body}
-    if 'prompt' in values and (not isinstance(values['prompt'],str) or not values['prompt'].strip() or len(values['prompt'])>100000):raise ValueError('invalid_cron_prompt')
-    if 'name' in values and (not isinstance(values['name'],str) or len(values['name'])>200):raise ValueError('invalid_cron_name')
-    if 'schedule' in values and (not isinstance(values['schedule'],str) or len(values['schedule'])>256):raise ValueError('invalid_cron_schedule')
-    if values.get('deliver','local') not in ('local','telegram'):raise ValueError('cron_delivery_denied')
-    if 'repeat' in values and values['repeat'] is not None and (type(values['repeat']) is not int or not 1<=values['repeat']<=10000):raise ValueError('invalid_cron_repeat')
-    if 'nocheh_preferences' in values:
-        from .policy_config import validate
-        validate(values['nocheh_preferences'])
-    return values
+def mark_saved(native,job,profile):
+    """The definition Nocheh captured: a later change Hermes makes itself (its schedule tool) differs from it (ADR-0266)."""
+    return native.update_job(job['id'],{'nocheh_registered':True,'nocheh_workflow_synced':True,'nocheh_synced_revision':revision(job,profile),
+        'nocheh_posting':None,**({'last_error':None} if job.get('last_error')=='not_saved' else {})})
+
+
+def transient(error):
+    """Whether a post's outcome is unknown or may change on its own: no answer (a timeout or a lost connection), a server
+    error, or a guard or owner change."""
+    from http.client import HTTPException
+    status,code=refusal(error)
+    if status is None:return isinstance(error,(OSError,HTTPException))
+    return status>=500 or status==429 or code in ('guard_context_changed','guard_transition_pending','workflow_owner_changed')
+
+
+def not_saved(native,job):
+    """A change Nocheh refused for good: the job stays inert and says so on the Schedules pages. A removal Nocheh did
+    not take shows again, so it can be deleted again and its row stops counting."""
+    updates={'nocheh_posting':None,'last_error':'not_saved'}
+    if job.get('nocheh_removed'):updates['nocheh_removed']=False
+    return native.update_job(job['id'],updates)
+
+
+def refusal(error):
+    """(status, code) of a call Nocheh refused: its body is {"error":code}. (None, None) for anything else."""
+    from urllib.error import HTTPError
+    if not isinstance(error,HTTPError):return None,None
+    if not hasattr(error,'nocheh_code'):
+        try:code=json.load(error).get('error')
+        except Exception:code=None
+        finally:error.close()
+        error.nocheh_code=code if isinstance(code,str) else None
+    return error.code,error.nocheh_code
+
+
+def turn_notice(job):
+    """What Nocheh's message in the chat says of a schedule set by asking: its name, when, its zone, its next run."""
+    return {'name':job.get('name') or '','schedule':job.get('schedule_display') or (job.get('schedule') or {}).get('display') or '',
+        'timezone':job.get('timezone') if isinstance(job.get('timezone'),str) else None,'next_run_at':job.get('next_run_at')}
+
+
+def turn_capture(job_id,home,profile,scope,request):
+    """A schedule the owner or a member set by asking, sent from inside their sealed turn with its pass: Nocheh records it
+    for this turn's person and chat (ADR-0290), or refuses. A new schedule it refused is removed again; a changed one stays
+    inert, shown as not saved. One whose answer was lost is posted again by the scheduler loop. Raises the failure."""
+    from cron import jobs as native
+    answer={}
+    with store(home):
+        job=next((job for job in inspect(home) if job['id']==job_id),None)
+        if not job:raise ValueError('cron_job_not_found')
+        # Hermes's tool names its own delivery targets; a schedule set in a chat sends to that chat.
+        if job.get('deliver','local')!='telegram':job=native.update_job(job_id,{'deliver':'telegram'})
+        if not job.get('nocheh_registered') or not job.get('nocheh_definition_version') or revision(job,profile)!=job.get('nocheh_synced_revision'):
+            job=native.update_job(job_id,{'nocheh_definition_version':uuid.uuid4().hex,'nocheh_registered':False})
+        notice=turn_notice(job)
+        def call(_route,body):answer.update(request('/v1/schedules/turn/definition',{**body,'notice':notice}))
+        try:sync_job(call,job,profile,scope)
+        except Exception as error:
+            if not transient(error):
+                job=next((stored for stored in inspect(home) if stored['id']==job_id),job)
+                # The turn says it was not saved: a new one leaves nothing behind, so asking again sets no second one.
+                if not job.get('nocheh_synced_revision'):native.remove_job(job_id)
+                else:not_saved(native,job)
+            raise
+        native.update_job(job_id,{'nocheh_announced':True})
+    return answer
+
+
+def turn_remove(job,profile,scope,request):
+    """A registered schedule Hermes's tool removed in a turn: Nocheh records the removal, so its row neither waits nor
+    counts toward the chat's limit. The job is gone from the store, so this posts its last copy."""
+    job={**job,'enabled':False,'nocheh_removed':True,'nocheh_definition_version':uuid.uuid4().hex,
+        'nocheh_workflow_revision':int(job.get('nocheh_workflow_revision',0))+1}
+    return request('/v1/schedules/turn/definition',{'scope':scope,'profile':profile,'job_id':job['id'],'definition':definition(job,profile),
+        'workflow_cursor':workflow_cursor(job,profile),'workflow_sequence':job['nocheh_workflow_revision']})
 
 
 def profiles(admin):
@@ -118,13 +186,15 @@ def _annotate(job,home,selected,bound,served=None):
 
 
 def manage(admin,path,method,query,body,headers,call=None):
+    """Hermes's Cron page reads (ADR-0290: it changes nothing), and the owner adapter's pause, resume, run now and delete,
+    each carrying the request id Nocheh granted."""
     call=call or (lambda route,payload:archive(route,payload,admin.token))
     if path=='/api/cron/delivery-targets':return {'targets':[
         {'id':'local','name':'Local (save only)','home_target_set':True,'home_env_var':None},
         {'id':'telegram','name':'Telegram to this chat (no card in your private chat; a group\'s results wait for your card)',
          'home_target_set':True,'home_env_var':None}]}
     if path=='/api/cron/blueprints':return {'blueprints':[]}
-    match=re.fullmatch(r'/api/cron/jobs(?:/([a-zA-Z0-9_-]{1,128})(?:/(runs|pause|resume|trigger|catch-up|cancel))?)?',path)
+    match=re.fullmatch(r'/api/cron/jobs(?:/([a-zA-Z0-9_-]{1,128})(?:/(runs|pause|resume|trigger))?)?',path)
     if not match:raise ValueError('cron_operation_unavailable')
     job_id,operation=match.groups();selected=query.get('profile',['default'])[0]
     policy=getattr(admin,'policy',None);served=policy.current() if policy is not None else None
@@ -144,50 +214,48 @@ def manage(admin,path,method,query,body,headers,call=None):
         job=next((job for job in jobs if job['id']==job_id and not job.get('nocheh_removed')),None)
         if not job:raise ValueError('cron_job_not_found')
         return annotate(job,home,name,bound)
+    # Only the owner adapter changes a schedule here, each change with the request id of Nocheh's grant. Creating,
+    # editing, catching up and cancelling are gone (ADR-0290): a schedule is set by asking in a chat.
+    if not job_id or not (method=='POST' and operation in ('pause','resume','trigger') or method=='DELETE' and not operation):
+        raise ValueError('cron_operation_unavailable')
+    identity=body.get('request_id') or headers.get(b'idempotency-key',b'').decode()
+    if not isinstance(identity,str) or not re.fullmatch(r'[a-zA-Z0-9_-]{1,128}',identity):raise ValueError('cron_request_identity_required')
     from cron import jobs as native
     with store(home):
         jobs=inspect(home);job=next((job for job in jobs if job['id']==job_id and not job.get('nocheh_removed')),None)
-        if job_id and not job:raise ValueError('cron_job_not_found')
-        if operation in ('trigger','catch-up') and method=='POST':
+        if not job:raise ValueError('cron_job_not_found')
+        grant=None
+        if operation=='trigger':
+            # Run now moves only the cursor (a checkpoint); the fire itself then needs Nocheh's run-now grant.
             if not job.get('nocheh_registered'):raise ValueError('cron_definition_not_captured')
             if job.get('nocheh_pending') or job.get('nocheh_running'):raise ValueError('cron_already_pending')
-            identity=body.get('request_id') or headers.get(b'idempotency-key',b'').decode()
-            if not isinstance(identity,str) or not re.fullmatch(r'[a-zA-Z0-9_-]{1,128}',identity):raise ValueError('cron_request_identity_required')
             if job.get('nocheh_last_request')==identity:return annotate(job,home,name,bound)
-            if operation=='catch-up' and not job.get('nocheh_missed'):raise ValueError('cron_no_missed_run')
-            job=native.update_job(job_id,{'nocheh_pending':{'id':identity,'reason':'catch_up' if operation=='catch-up' else 'manual','at':datetime.now(timezone.utc).isoformat()},'nocheh_last_request':identity})
-        elif operation=='cancel' and method=='POST':
-            if event:=job.get('nocheh_running'):call('cancel',{'event_id':event})
-            job=native.update_job(job_id,{'nocheh_pending':None})
-        elif not job_id and method=='POST':
-            values=fields(body,admin.model)
-            if not values.get('prompt') or not values.get('schedule'):raise ValueError('cron_prompt_and_schedule_required')
-            request_id=headers.get(b'idempotency-key',b'').decode() or uuid.uuid4().hex
-            existing=next((j for j in jobs if j.get('nocheh_create_id')==request_id),None)
-            if existing:return annotate(existing,home,name,bound)
-            preferences=values.pop('nocheh_preferences',{})
-            job=native.create_job(**values,provider='openai',model=admin.model)
-            job=native.update_job(job['id'],{'prompt':values['prompt'],'nocheh_create_id':request_id,'nocheh_preferences':preferences,'nocheh_registered':False})
-        elif method=='PUT' and not operation:
-            changes=fields(body.get('updates',body),admin.model)
-            expected=body.get('updates',body).get('_nocheh_revision')
-            if expected!=revision(job,home.name):raise ValueError('configuration_conflict')
-            job=native.update_job(job_id,{**changes,'nocheh_registered':False})
-        elif operation in ('pause','resume') and method=='POST':
+            job=native.update_job(job_id,{'nocheh_pending':{'id':identity,'reason':'manual','at':datetime.now(timezone.utc).isoformat()},'nocheh_last_request':identity})
+        elif operation in ('pause','resume'):
+            grant=identity
             job=native.update_job(job_id,{'enabled':operation=='resume','state':'scheduled' if operation=='resume' else 'paused','nocheh_registered':False})
-        elif method=='DELETE' and not operation:
+        else:
+            grant=identity
             if event:=job.get('nocheh_running'):call('cancel',{'event_id':event})
             removal={'enabled':False,'nocheh_removed':True,'nocheh_registered':False,'nocheh_pending':None}
             # Hermes keeps a finished job terminal; only a live job is paused on removal.
             if job.get('state') not in ('completed','error'):removal['state']='paused'
+            recorded=job.get('nocheh_registered') or job.get('nocheh_synced_revision')
             job=native.update_job(job_id,removal)
-        else:raise ValueError('cron_operation_unavailable')
+            # One Nocheh never recorded (set in a turn it refused) has nothing there to remove; it is gone here.
+            if not recorded:return {'ok':True}
         if not job.get('nocheh_registered'):
-            # A failed archive write leaves the native definition intact but inert.
-            # Resume retries capture; the scheduler never executes an uncaptured job.
+            # A refused or failed archive write leaves the native definition intact but inert: the scheduler never
+            # executes a definition Nocheh did not capture.
             job=native.update_job(job['id'],{'nocheh_definition_version':uuid.uuid4().hex})
         job=native.update_job(job['id'],{'nocheh_workflow_synced':False})
-        job=sync_job(call,job,home,bound)
+        try:job=sync_job(call,job,home.name,bound.chat_id,grant)
+        except Exception as error:
+            # A lost answer is posted again by the scheduler loop with the same grant; a refusal is final.
+            if transient(error):raise
+            not_saved(native,next((stored for stored in inspect(home) if stored['id']==job_id),job))
+            if refusal(error)[0]==403:raise ValueError('cron_change_refused') from None
+            raise
         return {'ok':True} if method=='DELETE' else annotate(job,home,name,bound)
 
 
@@ -195,13 +263,15 @@ SCHEDULE_ACTIONS={'pause':('POST','/pause'),'resume':('POST','/resume'),'run':('
 
 
 def listed(job,name,bound):
-    """What the owner's Schedules pages show of a schedule: no prompt text, Hermes's own fields by their meaning."""
-    repeat=job.get('repeat') or {}
+    """What the owner's Schedules pages show of a schedule: no prompt text, Hermes's own fields by their meaning. One
+    whose last change Nocheh did not save (ADR-0290) is not saved: it has no next run, since it does not run."""
+    repeat=job.get('repeat') or {};saved=bool(job.get('nocheh_registered'))
+    state=job.get('state') or ('scheduled' if job.get('enabled',True) else 'paused')
     return {'id':job['id'],'profile':name,'scope':bound.chat_id,'space':bound.space,'name':job.get('name') or '',
         'schedule':job.get('schedule_display') or (job.get('schedule') or {}).get('display') or '',
         'timezone':job.get('timezone') if isinstance(job.get('timezone'),str) else None,
-        'enabled':bool(job.get('enabled',True)),'state':job.get('state') or ('scheduled' if job.get('enabled',True) else 'paused'),
-        'next_run_at':job.get('next_run_at'),'last_run_at':job.get('last_run_at'),'last_status':job.get('last_status'),
+        'enabled':bool(job.get('enabled',True)),'state':state if saved or state=='completed' else 'not_saved','saved':saved,
+        'next_run_at':job.get('next_run_at') if saved else None,'last_run_at':job.get('last_run_at'),'last_status':job.get('last_status'),
         'last_error':job.get('last_error'),'last_delivery_error':job.get('last_delivery_error'),
         'running':bool(job.get('nocheh_running')),'pending':bool(job.get('nocheh_pending')),
         'set_in_chat':not job.get('nocheh_create_id'),'deliver':job.get('deliver','local'),
@@ -210,7 +280,7 @@ def listed(job,name,bound):
 
 def owner_schedules(admin,body,call=None):
     """The owner's Schedules pages (ADR-0266): every chat's schedules, or one schedule paused, resumed, run now or deleted,
-    through the same owner adapter as the command line."""
+    each with the grant Nocheh issued for that press (ADR-0290)."""
     operation=body.get('operation')
     if operation=='list':
         found,seen=[],set()
@@ -222,7 +292,8 @@ def owner_schedules(admin,body,call=None):
     job_id,profile=body.get('job_id'),body.get('profile')
     if not isinstance(job_id,str) or not re.fullmatch(r'[a-zA-Z0-9_-]{1,128}',job_id):raise ValueError('cron_job_not_found')
     if not isinstance(profile,str) or not re.fullmatch(r'[a-zA-Z0-9][a-zA-Z0-9_-]{0,63}',profile):raise ValueError('profile_scope_denied')
-    method,suffix=SCHEDULE_ACTIONS[operation];request=body.get('request_id') or uuid.uuid4().hex
+    # The request id names Nocheh's grant for this one press (ADR-0290), so it is required for every change.
+    method,suffix=SCHEDULE_ACTIONS[operation];request=body.get('request_id')
     if not isinstance(request,str) or not re.fullmatch(r'[a-zA-Z0-9_-]{1,128}',request):raise ValueError('cron_request_identity_required')
-    result=manage(admin,'/api/cron/jobs/'+job_id+suffix,method,{'profile':[profile]},{} if method=='DELETE' else {'request_id':request},{},call)
+    result=manage(admin,'/api/cron/jobs/'+job_id+suffix,method,{'profile':[profile]},{'request_id':request},{},call)
     return {'ok':True} if operation=='delete' else {'schedule':listed(result,profile,admin.binding(admin.profile(profile)[0]))}

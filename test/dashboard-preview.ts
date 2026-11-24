@@ -256,6 +256,12 @@ let retirementRevision=0,retired=false;const retirementHistory:any[]=[];
 let settingsChanges:Record<string,unknown>={};
 // The settings apply that is running in the `slow-apply` and `lost-apply` scenarios.
 let applying:any=null;
+// Saved settings that work at once, as LIVE in tools/operations/installation/settings.py; any other saved setting waits
+// for Apply, as on the real server, so the dashboard offers it. An apply that never finished leaves it waiting.
+const liveSettings=new Set(['NOCHEH_BACKUP_SCHEDULE','NOCHEH_BACKUP_TIME','NOCHEH_BACKUP_TIME_ZONE','NOCHEH_BACKUP_KEEP','TELEGRAM_PROBLEM_NOTICES',
+  'NOCHEH_OFFSITE','NOCHEH_OFFSITE_PROVIDER','NOCHEH_OFFSITE_ENDPOINT','NOCHEH_OFFSITE_BUCKET','NOCHEH_OFFSITE_REGION','NOCHEH_OFFSITE_ACCESS_KEY_ID',
+  'NOCHEH_OFFSITE_SECRET_ACCESS_KEY','NOCHEH_OFFSITE_PASSPHRASE','NOCHEH_OFFSITE_KEEP']);
+let applyPending=false;
 /** Which provider and model each part uses, as owner monitoring reports it; never a key. */
 function modelRoutes() {
   const setting=(key:string)=>String(settingsChanges[key]??fields.find(f=>f.key===key)?.value??'');
@@ -274,7 +280,7 @@ const fields=[{key:'TELEGRAM_ENABLED',value:'false',editable:true},{key:'TELEGRA
 // `no-owner` is an installation with its bot token and owner ID still to add.
 const settingValue=(mode:string,f:{key:string;value?:string|null})=>settingsChanges[f.key]??(mode==='fresh'?freshInstall[f.key]?.value:mode==='no-owner'&&f.key==='TELEGRAM_OWNER_ID'?'':undefined)??f.value;
 // What GET /settings answers; connecting off-site storage answers it too.
-const settingsView=(mode:string)=>({revision:settingsRevision,apply_state:applying?'pending':'current',
+const settingsView=(mode:string)=>({revision:settingsRevision,apply_state:applying||applyPending?'pending':'current',
    applying:applying?{id:applying.id,step:applying.step,started_at:applying.created_at}:null,fields:fields.map(f=>({...f,value:settingValue(mode,f),
      // A saved owner ID changes only from the command line, like the real settings.
      ...(f.key==='TELEGRAM_OWNER_ID'&&settingValue(mode,f)?{editable:false,changes_from:'cli'}:{}),
@@ -771,7 +777,7 @@ const server=createServer((req,res)=>{void(async()=>{
  const phone=req.headers['x-nocheh-mini-session'];
  if(typeof phone==='string'){if(await ownerLock.check(phone,'phone')!=='signed_in')throw new HttpError(401,'mini_app_sign_in_required');}
  else sessions.authorize(req,req.method!=='GET');
- if(['/inngest/runs','/hermes/nocheh','/hermes/chat'].includes(path)){res.setHeader('content-type','text/html');res.end('<h1>Synthetic integration boundary</h1><p>This isolated preview has no native runtime or provider. Production proxy behavior is verified by boundary tests.</p><a href="/">Return to Nocheh</a>');return;}
+ if(['/inngest/runs','/hermes/nocheh'].includes(path)){res.setHeader('content-type','text/html');res.end('<h1>Synthetic integration boundary</h1><p>This isolated preview has no native runtime or provider. Production proxy behavior is verified by boundary tests.</p><a href="/">Return to Nocheh</a>');return;}
  const route=path.replace(/^\/api\/(?:plugins\/)?nocheh/,'');
  const mode=await scenario();if(mode==='conflict'&&!modeRevision){settingsRevision+='external';revision++;modeRevision=true;}if(mode!=='conflict')modeRevision=false;if(mode==='offline'&&['/monitoring','/workflows/metrics','/status','/tools/actions'].includes(route))throw new HttpError(503,'fixture_observation_unavailable');
  if(await messagesFixture(req,res,route,url))return;
@@ -881,7 +887,7 @@ const server=createServer((req,res)=>{void(async()=>{
   if(route==='/memory/longterm/rebuild'){const chosen=url.searchParams.getAll('space').length;
     return json(res,200,{workspace:'synthetic-workspace',failed_learning:failedLearning,relearn:chosen?{conversations:chosen,sessions:chosen*2,messages:12*chosen,interpretations:1}:{conversations:5,sessions:9,messages:180,interpretations:4},replace:{saved_messages:212}});}
   if(route==='/honcho/status')return json(res,200,{enabled:true,running:true,reasoning_provider_configured:false,embedding_credential:true,api_budget_usd:5});
-  if(route==='/runtime')return json(res,200,{agent:{id:'hermes',name:'Hermes',capabilities:{telegram:true,browser:true,scheduler:true,background:true,settings:true,persona:true,prompts:true,notes:true,recall:true,review:true,schedules:false,schedule_list:true}},
+  if(route==='/runtime')return json(res,200,{agent:{id:'hermes',name:'Hermes',capabilities:{telegram:true,browser:false,scheduler:true,background:true,settings:true,persona:true,prompts:true,notes:true,recall:true,review:true,schedules:false,schedule_list:true}},
     status:{ok:true,model:'Subscription model',telegram:'disabled'},capabilities:{'guard.detect':true,'image.read':true,'usage.price':false}});
   if(route==='/graph'){
     const scope=url.searchParams.get('scope')??'*',all=scope==='*';
@@ -1158,8 +1164,9 @@ const server=createServer((req,res)=>{void(async()=>{
   if(route==='/settings/apply'&&['slow-apply','lost-apply'].includes(mode)){if(applying)throw new HttpError(409,'wait_for_active_jobs');
    const job:any={id:randomUUID(),kind:'settings.apply',state:'running',step:'restarting',created_at:new Date().toISOString()};jobs.unshift(job);applying=job;
    if(mode==='lost-apply')setTimeout(()=>{job.state='interrupted';job.error='dashboard_restarted';applying=null;},2500);
-   else{setTimeout(()=>{job.step='memory';},5000);setTimeout(()=>{job.state='complete';job.result={status:'applied'};applying=null;},8000);}
+   else{setTimeout(()=>{job.step='memory';},5000);setTimeout(()=>{job.state='complete';job.result={status:'applied'};applying=null;applyPending=false;},8000);}
    return json(res,202,job);}
+  if(route==='/settings/apply')applyPending=false;
   if(route==='/operations'||route==='/settings/apply'){const job={id:randomUUID(),kind:route==='/operations'?'operations.'+body.action:'settings.apply',state:'complete',created_at:new Date().toISOString(),result:{status:'synthetic_only'}};jobs.unshift(job);return json(res,200,job);}
   const importAction=/^\/jobs\/([a-f0-9-]{36})\/(start|cancel)$/.exec(route);
   if(importAction){const job=jobs.find(j=>j.id===importAction[1]);if(!job)throw new HttpError(404,'job_not_found');if(importAction[2]==='start'){if(job.state!=='ready'&&(JSON.stringify(body.mapping)!==JSON.stringify(job.mapping)||body.review_approved!==job.review_approved))throw new HttpError(409,'import_configuration_conflict');job.mapping=body.mapping;job.review_approved=body.review_approved;job.state='running';}else job.state='cancelled';return json(res,200,job);}
@@ -1228,7 +1235,9 @@ const server=createServer((req,res)=>{void(async()=>{
       throw new HttpError(400,'Your Telegram user ID changes only from the command line: ./bin/nocheh config set TELEGRAM_OWNER_ID <id>');
     // Memory already holds small-model vectors here; another model needs the confirmed rebuild.
     if(mode!=='no-provider'&&body.changes?.NOCHEH_EMBEDDING_MODEL&&body.changes.NOCHEH_EMBEDDING_MODEL!=='text-embedding-3-small'&&body.rebuild_memory!==true)throw new HttpError(400,'embedding_model_change_requires_rebuild');
-    settingsChanges={...settingsChanges,...body.changes};settingsRevision+='x';return json(res,200,{ok:true});}
+    settingsChanges={...settingsChanges,...body.changes};settingsRevision+='x';
+    if(Object.keys(body.changes??{}).some(key=>!liveSettings.has(key)))applyPending=true;
+    return json(res,200,{ok:true});}
   if(route==='/data/'+id+'/guarded'){if(body.expected_revision!==revision)throw new HttpError(409,'guard_revision_conflict');guarded=body.content?.text??source.event.text;revision++;return json(res,200,{ok:true});}
   if(route==='/sources/'+id+'/retirement'){
     if(body.expected_revision!==retirementRevision)throw new HttpError(409,'source_retirement_conflict');

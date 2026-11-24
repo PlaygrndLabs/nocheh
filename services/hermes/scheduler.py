@@ -6,7 +6,7 @@ import uuid
 from datetime import datetime,timezone,timedelta
 from pathlib import Path
 from services.durable import canonical,digest
-from .native_cron import archive,store,inspect,profiles,definition,revision,workflow_cursor,sync_job
+from .native_cron import archive,store,inspect,profiles,definition,revision,workflow_cursor,sync_job,refusal,mark_saved,not_saved,transient
 from .native_memory import save_receipt
 
 
@@ -36,8 +36,8 @@ class Scheduler:
         self.managed_flush=lambda:None
 
     def publish(self,receipt):
+        # Nocheh sends a scheduled run's result itself once the run finishes; Hermes only records how it ended.
         outcome=self.call('finish',receipt['finish'])
-        delivery=self.call('delivery',{'event_id':receipt['finish']['event_id']})
         home=self.root/'profiles'/receipt['logical_profile']
         from cron import jobs as native
         with store(home):
@@ -46,7 +46,8 @@ class Scheduler:
                 native.update_job(job['id'],{'nocheh_running':None,'last_run_at':receipt['at'],
                     'last_status':'success' if outcome['state']=='done' else 'error',
                     'last_error':None if outcome['state']=='done' else receipt['finish'].get('error_code') or outcome['state'],
-                    'last_delivery_error':delivery.get('reason'),'nocheh_delivery':delivery,'nocheh_workflow_synced':False})
+                    # Hermes no longer learns how the result was sent; an earlier run's delivery error must not stay shown.
+                    'last_delivery_error':None,'nocheh_delivery':None,'nocheh_workflow_synced':False})
         return outcome
 
     def flush(self):
@@ -59,11 +60,46 @@ class Scheduler:
     def recover(self):
         self.flush();self.call('recover',{})
 
+    def checkpoint(self,native,job,home,bound):
+        """Post a registered job's checkpoint. Nocheh refusing it (the definition is not one it granted) leaves the job
+        inert until it is set again, and never holds back another job or the loop. A job changed since Nocheh captured it
+        is not posted: sync_one leaves it inert, or the turn that changed it records it."""
+        if job.get('nocheh_synced_revision') and job['nocheh_synced_revision']!=revision(job,home.name):return None
+        try:return sync_job(self.call,job,home.name,bound.chat_id)
+        except Exception as error:
+            if refusal(error)!=(403,'schedule_definition_not_allowed'):raise
+            native.update_job(job['id'],{'nocheh_registered':False});return None
+
+    @staticmethod
+    def save(native,job,updates,profile):
+        """The scheduler's own change to a job (a finished schedule turns off) is part of the checkpoint it posts next,
+        not a change from outside a grant. Hermes's tool writes the store without this lock, so a turn's change that landed
+        since `job` was read stays a change from outside, for that turn to record."""
+        own=job.get('nocheh_synced_revision')==revision(job,profile)
+        saved=native.update_job(job['id'],updates)
+        if own and revision(saved,profile)==revision({**job,**updates},profile):
+            return native.update_job(job['id'],{'nocheh_synced_revision':revision(saved,profile)})
+        return saved
+
+    @staticmethod
+    def occurrence(native,job,due,at,late):
+        """Where a timed occurrence leaves the job: its next run (from now when it was skipped late) and its repeat count."""
+        if late and job['schedule']['kind']=='interval':
+            seconds=job['schedule']['minutes']*60
+            slots=int((at-date(due)).total_seconds()//seconds)+1
+            next_run=(date(due)+timedelta(seconds=seconds*slots)).isoformat()
+        else:next_run=native.compute_next_run(job['schedule'],at.isoformat() if late else due,timezone=job)
+        if job['schedule']['kind']=='once':next_run=None
+        completed=(job.get('repeat') or {}).get('completed',0)+1
+        times=(job.get('repeat') or {}).get('times')
+        updates={'next_run_at':next_run,'repeat':{'completed':completed,'times':times}}
+        if not next_run or times is not None and completed>=times:updates.update(enabled=False,state='completed',next_run_at=None)
+        return updates
+
     def _advance(self,target,expected,epoch,at=None):
         at=at or now();self.flush()
-        ownership=self.call('ownership',{})
-        if not ownership.get('admission',True):return {'state':'waiting','next_attempt':int((at+timedelta(seconds=30)).timestamp()*1000)}
-        if not target or not isinstance(epoch,int) or ownership.get('owner')!='inngest' or ownership.get('epoch')!=epoch:raise ValueError('workflow_owner_changed')
+        # Nocheh checks admission and that this epoch owns the schedules before it calls, and again on capture.
+        if not target or not isinstance(epoch,int):raise ValueError('workflow_owner_changed')
         from cron import jobs as native
         for name,home,bound in profiles(self.admin):
             if target and home.name!=target[0]:continue
@@ -73,11 +109,13 @@ class Scheduler:
                     if target and job['id']!=target[1]:continue
                     if self.stopping.is_set():return
                     if expected and expected!=workflow_cursor(job,home.name):return {'state':'skipped'}
-                    if not job.get('nocheh_registered'):
-                        if target:return {'state':'waiting','next_attempt':int((at+timedelta(seconds=30)).timestamp()*1000)}
-                        continue
                     if job.get('nocheh_removed'):
                         if target:return {'state':'completed'}
+                        continue
+                    if not job.get('nocheh_registered'):
+                        # Only a change still being posted again (Scheduler.resume) may yet run this cursor; any other
+                        # inert job ends here, and the post that sets it again opens a new workflow.
+                        if target:return {'state':'waiting','next_attempt':int((at+timedelta(seconds=30)).timestamp()*1000)} if job.get('nocheh_posting') else {'state':'completed'}
                         continue
                     pending=job.get('nocheh_pending')
                     due=job.get('next_run_at')
@@ -85,40 +123,44 @@ class Scheduler:
                         if target:return {'state':'waiting','next_attempt':int(date(due).timestamp()*1000)} if job.get('enabled',True) and due else {'state':'completed'}
                         continue
                     scheduled_for=pending['at'] if pending else due
+                    # A press (Run now) posts its own reason and request id, which name Nocheh's run-now grant; Nocheh
+                    # itself records it as overlap when a run is busy. A clock fire says how it found its slot.
                     reason=pending['reason'] if pending else 'scheduled'
-                    if job.get('nocheh_running'):reason='overlap'
+                    if not pending and job.get('nocheh_running'):reason='overlap'
                     elif not pending and (at-date(due)).total_seconds()>60:reason='missed'
                     request_id=pending['id'] if pending else due
                     fire=digest(canonical({'profile':home.name,'job':job['id'],'request':request_id,'type':'manual' if pending else 'scheduled'}))
                     snapshot=definition(job,home.name)
-                    captured=self.call('input',{'id':fire,'conversation':job['id'],'scope':bound.chat_id,'profile':bound.logical_profile or bound.profile,
-                        'space':bound.space,'revision':bound.revision,'text':job['prompt'],'files':[],
-                        'job_id':job['id'],'job_revision':revision(job,home.name),'scheduled_for':scheduled_for,
-                        'fire_reason':reason,'definition':snapshot,'owner_epoch':epoch})
+                    try:
+                        captured=self.call('input',{'id':fire,'conversation':job['id'],'scope':bound.chat_id,'profile':bound.logical_profile or bound.profile,
+                            'space':bound.space,'revision':bound.revision,'text':job['prompt'],'files':[],
+                            'job_id':job['id'],'job_revision':revision(job,home.name),'scheduled_for':scheduled_for,
+                            'fire_reason':reason,'definition':snapshot,'owner_epoch':epoch,**({'request_id':pending['id']} if pending else {})})
+                    except Exception as error:
+                        status,code=refusal(error)
+                        if status!=403:raise
+                        if pending and (code or '').startswith('fire_grant_') or pending and code=='schedule_catch_up_off':
+                            # Nocheh granted no such press (or it expired): the press is dropped, so the job is not stuck.
+                            saved=native.update_job(job['id'],{'nocheh_pending':None,'nocheh_workflow_synced':False,'last_status':'error','last_error':'run_now_refused'})
+                        elif not pending and code=='fire_grant_time':
+                            # Nocheh's clock says this slot is not due: skip it as a missed one, and never run it.
+                            saved=self.save(native,job,{**self.occurrence(native,job,due,at,True),'nocheh_pending':None,'nocheh_workflow_synced':False,
+                                'nocheh_missed':{'from':scheduled_for,'until':at.isoformat(),'reason':'refused'},'last_status':'skipped','last_error':'scheduled_refused'},home.name)
+                        else:raise
+                        self.checkpoint(native,saved,home,bound);return {'state':'completed'}
                     reason=captured.get('fire_reason',reason)
                     updates={'nocheh_pending':None,'nocheh_workflow_synced':False}
-                    if not pending:
-                        if reason=='missed' and job['schedule']['kind']=='interval':
-                            seconds=job['schedule']['minutes']*60
-                            slots=int((at-date(due)).total_seconds()//seconds)+1
-                            next_run=(date(due)+timedelta(seconds=seconds*slots)).isoformat()
-                        else:next_run=native.compute_next_run(job['schedule'],at.isoformat() if reason=='missed' else due,timezone=job)
-                        if job['schedule']['kind']=='once':next_run=None
-                        completed=(job.get('repeat') or {}).get('completed',0)+1
-                        times=(job.get('repeat') or {}).get('times')
-                        updates.update(next_run_at=next_run,repeat={'completed':completed,'times':times})
-                        if not next_run or times is not None and completed>=times:updates.update(enabled=False,state='completed',next_run_at=None)
+                    if not pending:updates.update(self.occurrence(native,job,due,at,reason=='missed'))
                     if reason in ('missed','overlap'):
                         updates.update(nocheh_missed={'from':scheduled_for,'until':at.isoformat(),'reason':reason},last_status='skipped',last_error='scheduled_'+reason)
-                        saved=native.update_job(job['id'],updates)
-                        if target:sync_job(self.call,saved,home,bound);return {'state':'completed'}
+                        saved=self.save(native,job,updates,home.name)
+                        if target:self.checkpoint(native,saved,home,bound);return {'state':'completed'}
                         continue
                     # Schedule advancement follows durable capture, before execution.
                     # Retrying the same fire can only return its previous claim.
                     updates['nocheh_running']=captured['event_id']
-                    if reason=='catch_up':updates['nocheh_missed']=None
-                    saved=native.update_job(job['id'],updates)
-                    sync_job(self.call,saved,home,bound);return {'state':'completed'}
+                    saved=self.save(native,job,updates,home.name)
+                    self.checkpoint(native,saved,home,bound);return {'state':'completed'}
         if target:return {'state':'skipped'}
 
     def advance(self,body):
@@ -137,25 +179,37 @@ class Scheduler:
                     except Exception as error:failed=failed or error
         if failed:raise failed
 
+    def resume(self,native,job,home):
+        """A turn's or a press's change whose answer was lost: the very same body again, until Nocheh answers. One Nocheh
+        already recorded comes back as a duplicate, with no grant needed; one it did not takes the press's grant while it
+        lasts, and a turn's is refused, since only that turn could set it. A refusal is final once the original post can
+        no longer be committing; then the job stays inert, shown as not saved."""
+        posting=job['nocheh_posting']
+        # Changed again since: the later turn or press posts its own.
+        if posting.get('revision')!=revision(job,home.name):native.update_job(job['id'],{'nocheh_posting':None});return
+        try:self.call('definition',{**posting['body'],**({'grant':posting['grant']} if posting.get('grant') else {})})
+        except Exception as error:
+            if transient(error):raise
+            if refusal(error)[0]==403 and date(posting['until'])>now():return
+            not_saved(native,job);return
+        job=mark_saved(native,job,home.name)
+        # Anything that moved the job's cursor since is posted next as an ordinary checkpoint.
+        if posting['body']['workflow_cursor']!=workflow_cursor(job,home.name):native.update_job(job['id'],{'nocheh_workflow_synced':False})
+
     def sync_one(self,native,job,home,bound):
+        """Checkpoints only (ADR-0290): a job Nocheh registered and nobody changed since. A new or changed job is
+        recorded by the turn that set it (schedule_gate) or an owner or member press; until then it is inert, but for one
+        whose answer was lost (resume)."""
+        if not job.get('nocheh_registered'):
+            if job.get('nocheh_posting'):self.resume(native,job,home)
+            return
         current=revision(job,home.name)
-        if job.get('nocheh_workflow_synced'):
-            if job.get('nocheh_synced_revision')==current:return
-            if not job.get('nocheh_synced_revision'):
-                native.update_job(job['id'],{'nocheh_synced_revision':current});return
-            # Hermes's own schedule tool changed it in a reply (ADR-0266): a new definition, captured before it may run.
-            job=native.update_job(job['id'],{'nocheh_definition_version':uuid.uuid4().hex,'nocheh_registered':False,'nocheh_workflow_synced':False})
-        if not job.get('nocheh_definition_version'):job=native.update_job(job['id'],{'nocheh_definition_version':uuid.uuid4().hex})
-        if job.get('deliver','local') not in ('local','telegram'):
-            # Hermes's tool names its own delivery targets; a schedule set in a chat sends to that chat.
-            job=native.update_job(job['id'],{'deliver':'telegram'})
-        job=sync_job(self.call,job,home,bound)
-        if not job.get('nocheh_create_id') and not job.get('nocheh_announced') and not job.get('nocheh_removed'):
-            # A schedule set by asking in the chat: Nocheh's own message there says so, with Pause and Delete (ADR-0266).
-            self.call('announce',{'scope':bound.chat_id,'profile':home.name,'job_id':job['id'],'name':job.get('name') or '',
-                'schedule':job.get('schedule_display') or (job.get('schedule') or {}).get('display') or '',
-                'timezone':job.get('timezone') if isinstance(job.get('timezone'),str) else None,'next_run_at':job.get('next_run_at')})
-            native.update_job(job['id'],{'nocheh_announced':True})
+        if not job.get('nocheh_synced_revision'):job=native.update_job(job['id'],{'nocheh_synced_revision':current})
+        elif job['nocheh_synced_revision']!=current:
+            # Changed outside a grant (by hand, or Hermes's tool before its turn reported it): inert until set again.
+            native.update_job(job['id'],{'nocheh_registered':False});return
+        if job.get('nocheh_workflow_synced'):return
+        self.checkpoint(native,job,home,bound)
 
     def context(self,body,claim=False):
         if (self.root/'scheduler-inactive').exists():return {'state':'waiting'}
@@ -185,8 +239,11 @@ class Scheduler:
                 else:
                     try:
                         if not recovered:self.recover();recovered=True
-                        self.managed_flush();self.sync()
-                        self.flush();self.status='workflow_owned'
+                        # A managed receipt Nocheh refuses must not stop schedules from syncing and publishing.
+                        try:self.managed_flush();managed=True
+                        except Exception:managed=False
+                        self.sync()
+                        self.flush();self.status='workflow_owned' if managed else 'waiting_for_archive'
                     except Exception:self.status='waiting_for_archive'
                 save_receipt(self.root/'scheduler-status.json',json.dumps({'state':self.status,'actor':self.actor,'at':now().isoformat()}))
                 self.stopping.wait(2)

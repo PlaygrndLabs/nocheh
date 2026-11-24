@@ -131,9 +131,11 @@ export function MemberScheduleList() {
           ? t('schedule_running')
           : row.state === 'finished'
             ? t('schedule_finished')
-            : row.next_run_at
-              ? t('schedule_next', {when: moment(row.next_run_at)})
-              : '',
+            : row.state === 'not_saved'
+              ? t('schedule_not_saved')
+              : row.next_run_at
+                ? t('schedule_next', {when: moment(row.next_run_at)})
+                : '',
       row.last_ok === false ? t('schedule_last_failed') : '',
     ]
       .filter(Boolean)
@@ -175,7 +177,7 @@ export function MemberScheduleList() {
                 </span>
               </div>
               <div className="flex flex-wrap gap-1.5 ps-7">
-                {row.state !== 'finished' && (
+                {row.state !== 'finished' && row.state !== 'not_saved' && (
                   <Button
                     size="sm"
                     variant="ghost"
@@ -186,7 +188,7 @@ export function MemberScheduleList() {
                     {row.state === 'paused' ? t('resume') : t('pause')}
                   </Button>
                 )}
-                {row.state !== 'running' && row.state !== 'finished' && (
+                {row.state !== 'running' && row.state !== 'finished' && row.state !== 'not_saved' && (
                   <Button
                     size="sm"
                     variant="ghost"

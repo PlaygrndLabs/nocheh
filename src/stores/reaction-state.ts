@@ -39,7 +39,7 @@ export async function advanceReactionEpoch(db:pg.PoolClient,deferredAt?:number):
   // way (learned.ts). Work that hides a message or replaces what the owner or a guard set must advance
   // its own, unrecorded epoch.
   await db.query("INSERT INTO guard_quiet_epochs(generation,epoch,reason) VALUES($1,$2,'reaction') ON CONFLICT DO NOTHING",[guard.generation,next]);
-  // Every chat keeps its Hermes notes across it too (ADR-0289).
+  // Every chat keeps its Hermes notes across it too (ADR-0291).
   await keepNotes(db,next,'all');
   // Honcho keeps earlier reactions as evidence, so a reaction change never rechecks Honcho writes.
   await requestWorkflow(db,'memory_review','refresh',next);

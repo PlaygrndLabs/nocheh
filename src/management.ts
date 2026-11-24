@@ -7,8 +7,7 @@ import { spawn, type ChildProcess } from 'node:child_process';
 import { fileURLToPath } from 'node:url';
 import { HttpError, json, object, readJson, string } from './http.js';
 import {DOWNLOAD_COOKIE,OwnerSessions,SESSION_COOKIE,SESSION_COOKIE_AGE,csrfFor} from './dashboard-auth.js';
-import type {Duplex} from 'node:stream';
-import {CSP_REPORT_PATH,proxyNative,proxyNativeSocket} from './dashboard-proxy.js';
+import {CSP_REPORT_PATH,proxyNative} from './dashboard-proxy.js';
 import {importConfiguration} from './workflows/imports.js';
 import {proxyOwnerInspection} from './inspection-proxy.js';
 import {ownerStoragePath} from './stores/owner-api.js';
@@ -204,7 +203,6 @@ export async function startManagement() {
     return `phone:${user_id}`;
   }
   const archiveConnection=object(await python({operation:'archive.connection'}));
-  const sockets=new Set<Duplex>();
   const live=new DashboardLiveUpdates();
   for (const job of await listJobs(Infinity)) if (!job.workflow&&['running', 'queued'].includes(job.state)) {
     job.state = 'interrupted'; job.error = 'dashboard_restarted'; await putJob(job);
@@ -260,7 +258,7 @@ export async function startManagement() {
         const draining=maintenance.begin(job.id,request);
         live.closeAll();
         coordinator=await draining;
-        for(const socket of sockets)socket.destroy();maintenance.ready(coordinator);
+        maintenance.ready(coordinator);
       }
       launch(job,{operation:'operations.run',action,job:job.id,options},coordinator);return job;
     }catch(error){
@@ -333,7 +331,6 @@ export async function startManagement() {
       if(/^\/tools\/actions\/[a-f0-9]{64}$/.test(route) && req.method==='GET')return json(res,200,await python({operation:'tools.manage',action:route.slice(7)}));
       if(req.method==='POST' && ['/tools/decide','/tools/telegram-decision','/tools/resolve','/tools/telegram-resolve','/tools/grant','/tools/revoke'].includes(route))return json(res,200,await python({operation:'tools.manage',action:route.slice(7),request:await readJson(req)}));
       if (req.method === 'GET' && route === '/runtime') return json(res,200,await archive('/v1/runtime'));
-      if (req.method==='POST' && route==='/ws-ticket')return json(res,200,{ticket:sessions.ticket(await sessions.authorize(req)),ttl_seconds:30});
       if(['/memory/longterm','/memory/longterm/rebuild','/memory/longterm/retry-failed','/memory/longterm/fresh-start','/memory/spaces','/memory/shares','/memory/shares/revoke','/memory/reviews','/memory/reviews/control','/memory/recall','/memory/preview','/memory/facts','/memory/longterm/coverage','/memory/originals','/memory/message-facts'].includes(route) && ['GET','POST'].includes(req.method??'')) {
         return json(res,200,await python({operation:'memory.api',path:'/v1'+route+url.search,
           ...(req.method==='POST'?{body:object(await readJson(req))}:{})}));
@@ -554,10 +551,12 @@ export async function startManagement() {
       await proxyOwnerInspection(req,res,Number(archiveConnection.port),string(archiveConnection.token),session.csrf,String(archiveConnection.host??'127.0.0.1'));return;
     }
     if(path.startsWith('/hermes/')) {
-      if(req.method==='POST'&&path==='/hermes/api/auth/ws-ticket') {
-        // Native's ticket helper uses cookie + Origin, without a custom header.
-        if(!req.headers.origin)throw new HttpError(403,'origin_required');
-        return json(res,200,{ticket:sessions.ticket(await sessions.authorize(req,false)),ttl_seconds:30});
+      // The dashboard chat page is off until Nocheh has its own chat page; Telegram only. Whoever asks gets this page
+      // and nothing reaches Hermes.
+      if(path==='/hermes/chat'||path.startsWith('/hermes/chat/')) {
+        res.writeHead(404,{'content-type':'text/html; charset=utf-8','cache-control':'no-store',
+          'content-security-policy':"default-src 'none'; base-uri 'none'; form-action 'none'; frame-ancestors 'none'"});
+        res.end('<!doctype html><html lang="en"><title>Chat is off</title><body><h1>Chat is off</h1><p>The chat page is switched off for now. Talk to Nocheh in Telegram.</p><a href="/">Back to Nocheh</a></body></html>');return;
       }
       const page=req.method==='GET'&&!path.startsWith('/hermes/api/')&&!path.startsWith('/hermes/assets/')&&!path.startsWith('/hermes/dashboard-plugins/');
       const session=page?await sessions.session(req):await sessions.authorize(req,!['GET','HEAD'].includes(req.method??''));
@@ -570,18 +569,9 @@ export async function startManagement() {
   })().catch(error => { if (!res.headersSent) json(res, error instanceof HttpError ? error.status : 503,
     {error: error instanceof HttpError ? error.code : 'management_unavailable'}); else res.end(); }).finally(async()=>{await responseDone;tracked.finish();}); });
   server.requestTimeout = 120000;
-  server.on('upgrade', (req, socket, head) => { void (async()=>{
-    try {
-      if(maintenance.active)throw new HttpError(503,'installation_maintenance');
-      checkOrigin(req);if(!req.headers.origin)throw new HttpError(403,'origin_required');
-      const url=new URL(req.url??'','http://local');
-      if(!['/hermes/api/pty','/hermes/api/ws','/hermes/api/events'].includes(url.pathname))throw new HttpError(403,'websocket_route_denied');
-      await sessions.consume(req,url.searchParams.get('ticket')??'');
-      sockets.add(socket);socket.on('close',()=>sockets.delete(socket));
-      const connection=object(await python({operation:'native.connection'}));
-      if(!socket.destroyed)proxyNativeSocket(req,socket,head,Number(connection.port),string(connection.token),String(connection.host??'127.0.0.1'));
-    }catch{socket.end('HTTP/1.1 403 Forbidden\r\nConnection: close\r\n\r\n');}
-  })(); });
+  // The dashboard chat page is off, and with it every live connection to Hermes: each upgrade is refused. The listener
+  // stays so an upgrade never reaches the request handler.
+  server.on('upgrade',(_req,socket)=>{socket.on('error',()=>socket.destroy());socket.end('HTTP/1.1 403 Forbidden\r\nConnection: close\r\n\r\n');});
   server.listen(PORT, CONTAINER?'0.0.0.0':'127.0.0.1', () => console.log(`Nocheh dashboard: http://127.0.0.1:${PORT}/`));
   let stopping=false;
   // The daily automatic backup goes through the same path as Back up now. A busy dashboard
@@ -617,7 +607,6 @@ export async function startManagement() {
   const stop = () => {
     if(stopping)return;stopping=true;clearInterval(schedule);clearInterval(problemCheck);clearInterval(githubCheck);
     live.closeAll();
-    for(const socket of sockets)socket.destroy();
     for (const [id,child] of active) if(activeJobs.get(id)?.kind==='import')child.kill('SIGTERM');
     // A partial request or stalled stream must not hold a reload open forever.
     // Closing its transport does not cancel admitted owner writes or lifecycle jobs.

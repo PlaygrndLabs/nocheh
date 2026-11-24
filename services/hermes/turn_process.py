@@ -367,7 +367,7 @@ async def _run_process(profile, scope, body, model, credentials, session_id, emi
             elif isinstance(value,dict) and value.get('event') == 'heartbeat':
                 continue
             elif isinstance(value,dict) and value.get('event') == 'memory_sources':
-                # The ids the turn's long-term memory cited, kept for its notes (ADR-0289); only well-formed ones.
+                # The ids the turn's long-term memory cited, kept for its notes (ADR-0291); only well-formed ones.
                 ids=value.get('ids')
                 if memory is not None and isinstance(ids,list):memory[:]=[one for one in ids[:500] if isinstance(one,str) and re.fullmatch(r'[a-f0-9]{64}',one)]
             elif isinstance(value,dict) and value.get('event') == 'progress' and background:

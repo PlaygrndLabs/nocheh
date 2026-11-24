@@ -31,7 +31,7 @@ a turn whose delivered answer is retired, or when it is exactly the text a
 withheld turn's memory tool call wrote. Notes carried from an earlier guard
 epoch's profile leave the rows of the turns that wrote them behind, so what
 each such turn rests on is kept beside the notes (``DEPENDENCIES``) and checked
-the same way (ADR-0289).
+the same way (ADR-0291).
 """
 import fcntl
 import json
@@ -66,7 +66,7 @@ LOOKUP_BATCH=200
 # Hermes' MemoryStore files and their entry delimiter (tools/memory_tool_store.py).
 NOTE_FILES=('MEMORY.md','USER.md')
 NOTE_DELIMITER='\n§\n'
-# What each note carried from an earlier guard epoch rests on (ADR-0289), by note key (note_sources.key): the turn that
+# What each note carried from an earlier guard epoch rests on (ADR-0291), by note key (note_sources.key): the turn that
 # wrote it, checked like a turn's message (retired, or its delivered answer retired), and the sources it read or quoted,
 # checked like a cited source. Ids only, no text, in the profile root, which a turn cannot write.
 DEPENDENCIES='nocheh-note-dependencies.json'
@@ -196,7 +196,7 @@ def _withhold(row,content):
 
 def _lookup(lookup,event_ids,extra=None):
     """Retired and answer-retired events among the given IDs, in bounded batches. `extra`, when given, also gathers the
-    owner's grants among them that have lapsed (`lapsed`), which only a group's notes leave with (ADR-0289)."""
+    owner's grants among them that have lapsed (`lapsed`), which only a group's notes leave with (ADR-0291)."""
     revision=lookup([])['revision'] if not event_ids else None
     retired,answered=set(),{}
     ordered=sorted(event_ids)
@@ -358,7 +358,7 @@ def _note_keys(notes):
 
 
 def _withhold_dependent(notes,depends,revision,lookup):
-    """Remove carried notes that rest on a source retired since they were last checked; return how many (ADR-0289).
+    """Remove carried notes that rest on a source retired since they were last checked; return how many (ADR-0291).
     Every retirement starts a new epoch, whose carry checks them all, so this asks storage again only when the
     retirement revision moved since."""
     if notes is None or not depends['entries'] or depends['checked']==revision:return 0
@@ -376,7 +376,7 @@ def note_dependencies(rows):
     it the notes it wrote, when its turn's message or delivered answer is retired (turn ids), or when any source id is
     retired: an id the row cites, an id a tool result before it in its turn cites, a message the turn's row quotes in
     Nocheh's frame, or an earlier text of the session the turn's memory writes copy. The last two are read as if every
-    such message were retired, which can only add an id plan() would not have counted (ADR-0289)."""
+    such message were retired, which can only add an id plan() would not have counted (ADR-0291)."""
     from .note_sources import _plain,_written
     # Each earlier text once, in its plain form, with every id it is read as: a tool result can cite many.
     found=[];earlier={};session=object()
@@ -421,7 +421,7 @@ def _plain_copied(plain,written):
 
 def add_dependencies(profile,before,turn=(),sources=()):
     """Record what the notes a turn added or changed rest on beyond its stored rows: the message it answered (`turn`) and
-    the long-term memory it was given (`sources`), which no stored row holds (ADR-0289). They are looked up on the next
+    the long-term memory it was given (`sources`), which no stored row holds (ADR-0291). They are looked up on the next
     turn, as the memory may already rest on a retired message."""
     from .note_sources import entries,key
     turn=[one for one in turn if isinstance(one,str) and HEX.fullmatch(one)]

@@ -139,7 +139,7 @@ export interface MemberMe {name:string;mode:MemberTasks;reminders:MemberReminder
 
 /** One of the member's own schedules, set in their private chat (members' schedules). `schedule` is how it repeats as
  * the agent wrote it; times are UTC (the page shows them in the phone's time). No prompt text and no time zone name. */
-export interface MemberSchedule {id:string;name:string;schedule:string;state:'scheduled'|'paused'|'running'|'finished';
+export interface MemberSchedule {id:string;name:string;schedule:string;state:'scheduled'|'paused'|'running'|'finished'|'not_saved';
   next_run_at:string|null;last_run_at:string|null;last_ok:boolean|null}
 /** GET /schedules: the schedules of the member's private chat, how many they may keep, and the member's own time zone
  * for new schedules (null: the owner's, which is never named). */

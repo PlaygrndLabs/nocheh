@@ -84,7 +84,7 @@ def prepare_profile(root,scope,model):
     link=plugins/'nocheh';target=Path(__file__).resolve().parent
     if not link.exists():link.symlink_to(target,target_is_directory=True)
     if scope.guard_epoch:
-        # A new guard epoch starts a new profile; the chat keeps its conversation and its notes (ADR-0289), and the
+        # A new guard epoch starts a new profile; the chat keeps its conversation and its notes (ADR-0291), and the
         # superseded profiles are removed once idle.
         from .profile_history import carry, prune, prune_answers
         from .profile_notes import carry_notes

@@ -56,7 +56,7 @@ Telegram delivery outages, permissions or undocumented behavior exhaustively.
 | Sharing | Complete approved wording and whitespace, compatible historical hashes, concurrent exact receipts and expiration conflicts, atomic follow-up staging, current grant/fact checks at delivery, interrupted-handoff recovery, confirmed one-time consumption, expiry and revocation; project membership grants no access | `store-memory-followup.test.ts`, `store-memory-access.test.ts`, `store-sharing.test.ts`, `store-projects.test.ts` |
 | Knowledge organization | Exact delegated scope and capture watermark; deferred atomic application, owner review, revocation and checked undo; imported authority stays inactive | `store-knowledge-management.test.ts`, `store-owner-supervision.test.ts`, `knowledge-portability.test.ts`, `test_knowledge_tools.py` |
 | Actions and tools | Live owner authority; exact chat/topic proposal; current means the source topic; deny/revoke and deleted-topic fallback block delivery; uncertain effects never repeat | `store-telegram-actions.test.ts`, `test_telegram_simulation.py`, `store-controlled-execution.test.ts`, `test_controlled_tools.py` |
-| Scheduling and browser | Stable identities, locks, cancellation and reconnection; missed schedules do not silently replay | `store-scheduled-runs.test.ts`, `store-browser-runs.test.ts`, `test_scheduler.py` |
+| Scheduling and browser | Stable identities, locks, cancellation and reconnection; a schedule is set by asking and runs only with Nocheh's grant; missed schedules do not silently replay | `store-scheduled-runs.test.ts`, `store-browser-runs.test.ts`, `test_scheduler.py` |
 | Workflow recovery | Independent capture, bounded admission, durable native review handoff, isolated native lease recovery under the profile lock, outbox and protected completion receipts | `store-workflows.test.ts`, `workflow-store.test.ts`, `test_review_handoff.py`, `test_native_leases.py`, `test_workflow_recovery.py` |
 | Imports and portability | No historical replies; explicit learning consent; safe extraction and source identity; corrections preserved | `store-imports.test.ts`, `store-source-portability.test.ts`, `store-portable-bundle.test.ts` |
 | Provider and budgets | Scoped routes, guarded attempts, conservative durable reservations and separate reasoning limits | `services/honcho/test_meter.py`, `test_honcho_budget.py` |
@@ -116,7 +116,7 @@ Hermes services, preserving state; `--verify-only` skips those setup changes. Ti
 reports retain each attempt, including startup and protocol failures. The ordinary
 private/topic/General reply checks, exact archived originals and causal delivery
 receipts, unselected-chat silence and restart receipts
-are separate from the ingestion/browser rehearsal. Parallel execution beside an
+are separate from the installation (ingestion) rehearsal, which runs no agent turn. Parallel execution beside an
 operating stack requires the owner's explicit single-stack exception.
 
 Select `--scenario faults-and-files` to exercise a documented `429` response and
@@ -143,7 +143,7 @@ denials with stale fingerprints and repeated decisions, `current` destinations,
 the owner freedom setting, which still shows a card for each post to a group,
 a fixed reply to someone who may not talk in a group, replies only when addressed in a group,
 unselected groups and members, retirement, a voice note
-transcribed before its reply that does not hold the next message, a photo read by the vision tool, an ordinary file with a caption, an owner-private schedule that fires on its
+transcribed before its reply that does not hold the next message, a photo read by the vision tool, an ordinary file with a caption, an owner-private schedule set by asking in the owner's chat that fires on its
 own cadence and sends its result there once with no card, deleted topics,
 polling 5xx (measured after the adapter restarts polling), lost send responses,
 a blocked bot, and restart. Two operations scenarios close the run: the
@@ -198,6 +198,17 @@ names, passes, failures, skips, image IDs, source revision, commands and elapsed
 times. Preserve failed runs before repairs. A skipped fixture-dependent test is
 pending until its separate fixture succeeds; a green process exit is insufficient.
 
+`python3 -m tools.development.check_all` runs every suite in one go: a compile
+check of every tracked Python file, every compiled Node test file against a
+freshly reset synthetic cluster (one worker per cluster named in
+`NOCHEH_CHECK_PGPORTS`), the dashboard browser tests, and the Python unit tests
+of `services/hermes`, `services/telegram`, `services/reader`, `services/honcho`
+and `test/`. `--setup` makes its two Python environments under `data/test-env/`.
+A failure listed with its reason in `test/known-failures.json` is shown but does
+not fail the run; any other failure does, and a listed test that passes again is
+named so it comes off the list. GitHub runs it on every pull request and on main
+(`.github/workflows/checks.yml`), with synthetic data and no secrets.
+
 After a repair, rerun affected behavior and adjacent contracts. Integrate verified
 increments under the shared Git lock without activating the operating services.
 Carry unrelated evidence forward with its original revision and limitations.
@@ -222,6 +233,12 @@ itself fails, its logs are kept in `full-<time>-first-start/` and one fresh
 start is tried; the report names the containers that stopped. The owner
 allowed it to run beside the live installation (2026-10-26): it never reads the
 live state, credentials or volumes and never stops the live stack.
+
+After the scenarios, `end_of_run_health` counts missing tables or columns,
+deadlocks, Python tracebacks and unhandled Node errors in every container's log,
+and lists the work Nocheh and Honcho's learning queue still hold. For now only a
+container that ran out of memory or restarted three times or more fails it; the
+report shows the rest until a few runs show which lines scenarios cause on purpose.
 
 The fake Telegram plays every person. It stores inline keyboards, edits cards
 with `editMessageText`, and answers `answerCallbackQuery` only for button

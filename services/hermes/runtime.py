@@ -165,7 +165,8 @@ class Handler(BaseHTTPRequestHandler):
             if self.path == '/internal/manage':
                 code = str(error) if str(error) in ('configuration_conflict', 'unsupported_preference',
                     'profile_scope_denied', 'invalid_preference', 'invalid_persona', 'cron_job_not_found', 'cron_already_pending',
-                    'cron_definition_not_captured', 'cron_operation_unavailable', 'cron_topic_scope_unavailable') else 'invalid_management_request'
+                    'cron_definition_not_captured', 'cron_operation_unavailable', 'cron_topic_scope_unavailable',
+                    'cron_change_refused') else 'invalid_management_request'
                 return self.reply(409 if code == 'configuration_conflict' else 400, {'error': code})
             self.reply(400, {'error': 'invalid_request'})
         except (KeyError, TypeError):
@@ -183,15 +184,13 @@ class Handler(BaseHTTPRequestHandler):
         if self.path in ('/internal/turn/start','/internal/turn/resume','/internal/turn/events','/internal/turn/cancel'):
             if AGENT is None:raise RuntimeError('agent_not_started')
             return getattr(AGENT,self.path.rsplit('/',1)[-1])(body)
-        # Every other channel's run; a Telegram turn has only the turn routes.
+        # Schedules and background jobs; a Telegram turn has only the turn routes. The dashboard chat page is off
+        # until Nocheh has its own chat page (Telegram only), so no browser run starts here.
         if self.path in ('/internal/run/start','/internal/run/resume','/internal/run/events','/internal/run/cancel'):
-            if body.get('channel') not in ('browser','scheduler','background'):raise ValueError('runtime_channel_unavailable')
+            if body.get('channel') not in ('scheduler','background'):raise ValueError('runtime_channel_unavailable')
             if MANAGED is None:raise RuntimeError('managed_runtime_not_started')
             if self.path.endswith('/start'):return MANAGED.start(body)
             return getattr(MANAGED.runs,self.path.rsplit('/',1)[-1])(body)
-        if self.path=='/internal/browser/events':
-            if MANAGED is None:raise RuntimeError('managed_runtime_not_started')
-            return MANAGED.events(body)
         if self.path=='/internal/schedule/advance':
             if SCHEDULER is None:raise RuntimeError('scheduler_not_started')
             return SCHEDULER.advance(body)
@@ -229,17 +228,6 @@ class Handler(BaseHTTPRequestHandler):
             from .management import dispatch
             from .scopes import Scopes
             return dispatch(PROFILE_HOME, MODEL, Scopes.load(os.environ.get('ASSISTANT_POLICY_FILE')), body)
-        if self.path == '/internal/browser-credentials':
-            from .scopes import Scopes, Scope, verify_capability
-            from .native_admin import Administration,audience_revision
-            policy=Scopes.load(os.environ.get('ASSISTANT_POLICY_FILE'))
-            administration=Administration(None,PROFILE_HOME,MODEL,policy,TOKEN,revision_reader=lambda space:audience_revision(TOKEN,space))
-            name,path=administration.profile(body['profile']);scope=administration.binding(name)
-            if scope.chat_id!=body['scope']:raise ValueError('profile_scope_denied')
-            claims=verify_capability(body['archive_credential'],TOKEN,scope,body['event_id'])
-            if not scope.owner and claims.get('revision')!=scope.revision:raise ValueError('browser_audience_changed')
-            credentials=resolve_credentials()
-            return {'model':MODEL,**credentials.runtime()}
         if self.path == '/internal/status':
             from services.hermes.request_boundary import FAILURES, FAILURE_DETAILS, COUNTS
             return {'guard_failures':list(FAILURES),'guard_failure_details':list(FAILURE_DETAILS),'model_boundary':dict(COUNTS),

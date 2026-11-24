@@ -1,4 +1,4 @@
-"""Carry a chat's Hermes native notes into its profile for a newer guard epoch (ADR-0289).
+"""Carry a chat's Hermes native notes into its profile for a newer guard epoch (ADR-0291).
 
 Each guard epoch gives a chat a new Hermes profile (ADR-0163). Its notes (MEMORY.md, USER.md) come along from the
 newest earlier profile of the same chat, once, when storage says every epoch since kept notes for this chat: a change

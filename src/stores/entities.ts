@@ -437,7 +437,7 @@ export class EntityRepository {
           if(authored.length===1) {
             const binding=digest(canonical([protocol,'confirmed-source',authored[0].target_id]));
             // Moving a sender from one person to another can stop a group seeing the first: only the owner's chat keeps
-            // its Hermes notes then (ADR-0289). `run` reads the options after this change.
+            // its Hermes notes then (ADR-0291). `run` reads the options after this change.
             const before=(await db.query('SELECT entity_id FROM memory_entity_bindings WHERE id=$1',[binding])).rows[0];
             if(before&&before.entity_id!==entity.id)options.notes='owner';
             await db.query(`INSERT INTO memory_entity_bindings(id,entity_id,binding_kind,source_object_id,label,state)

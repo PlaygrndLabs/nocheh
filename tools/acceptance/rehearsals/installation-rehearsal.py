@@ -336,27 +336,8 @@ const result=await response.json();if(!response.ok)throw Error(JSON.stringify({s
     http('/v1/ingest', reaction)
     wait('reaction_state_learned', lambda: query('nocheh_derived', "SELECT count(*) FROM learned_entries WHERE kind='state' AND active_revision IS NOT NULL") != '0', 300)
     assert query('nocheh_control', "SELECT count(*) FROM dispatches WHERE state<>'suppressed' OR attempts<>0") == '0', 'reaction learning must remain silent'
-    profile = http('/v1/runtime/profiles', {'name': 'installation-rehearsal', 'state': 'active', 'expected_revision': 0, 'operation_id': 'fixture-profile'})
-    browser = {'scope': '123', 'profile': profile['id'], 'conversation': 'fixture-conversation', 'id': 'input-one',
-        'revision': int(query('nocheh_control', 'SELECT epoch FROM guard_state WHERE singleton')),
-        'text': 'Describe the synthetic telescope. Password: fixture-secret-ORCHID-2718', 'files': []}
-    captured = http('/v1/browser/input', browser)
-    context = {**browser, 'event_id': captured['event_id']}
-    wait('browser_capture_handoff', lambda: query('nocheh_control', "SELECT state FROM source_intakes WHERE event_id='" + captured['event_id'] + "'") == 'ready')
-    http('/v1/browser/admit', context)
-    def browser_done():
-        row = json.loads(query('nocheh_control', "SELECT json_build_object('state',state,'error',error_code) FROM managed_runs WHERE event_id='" + captured['event_id'] + "'"))
-        if row['state'] in ('failed', 'interrupted', 'cancelled'):
-            raise AssertionError('native_browser_failed:' + str(row['error']))
-        return row['state'] == 'done'
-    wait('native_browser_turn_completed', browser_done, 300)
-    observed = http('/v1/browser/observe', context)
-    assert observed['visible'] and observed['delivery'] and '[mock]' in observed['text']
-    assert 'fixture-secret-ORCHID-2718' not in observed['text']
-    assert http('/v1/browser/undelivered', {'profile': profile['id']})['items']
-    delivery = http('/v1/browser/delivered', observed['delivery'])
-    wait('browser_delivery_archived', lambda: query('nocheh_archive', "SELECT count(*) FROM events WHERE id='" + delivery['event_id'] + "'") == '1')
-    assert not http('/v1/browser/undelivered', {'profile': profile['id']})['items']
+    # No agent turn here: the dashboard chat page is off until Nocheh has its own (Telegram only), and the tester's
+    # Telegram scenarios run the agent's turns.
     # Admission must remain available when every PostgreSQL store and the
     # workflow engine are stopped. Only fixture owners are affected.
     run(['stop', '-t', '30', 'inngest-server', 'nocheh-db'], stdout=subprocess.DEVNULL)
@@ -379,7 +360,7 @@ const result=await response.json();if(!response.ok)throw Error(JSON.stringify({s
         'live_acceptance': False, 'external_provider_calls': 0, 'live_state_changed': False, 'stats': stats, 'gates': gates,
             'checks': ['production_composition_started', 'three_store_health', 'inngest_connected', 'host_worker_registered', 'original_captured',
             'guard_prepared', 'native_memory_ingested', 'learned_convention_published', 'edit_learning_silent', 'guarded_egress',
-                'duplicate_capture_idempotent', 'native_browser_turn_completed', 'browser_recovery_and_delivery', 'database_and_workflow_outage_capture',
+                'duplicate_capture_idempotent', 'database_and_workflow_outage_capture',
                 'outage_capture_recovered', 'outage_handoff_recovered', 'outage_memory_recovered', 'reaction_state_learned', 'reaction_learning_silent']}
     (directory / 'result.json').write_text(json.dumps(report, indent=2) + '\n')
     print(json.dumps(report), flush=True)

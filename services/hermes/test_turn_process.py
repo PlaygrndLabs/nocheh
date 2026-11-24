@@ -42,11 +42,11 @@ class TurnProcessTests(unittest.IsolatedAsyncioTestCase):
         environment=patch.dict(os.environ,{'SERVICE_TOKEN':self.secret})
         environment.start();self.addCleanup(environment.stop)
 
-    def review_body(self,purpose='memory-review'):
+    def review_body(self,purpose='memory-review',key=None):
         claims={'scope':None,'space':'42','revision':1,'guard_epoch':1,'generation':'11111111-1111-1111-1111-111111111111',
                 'purpose':purpose,'event_id':'b'*64,'expires':int(time.time()*1000)+600000,'audience':'nocheh-assistant'}
         encoded=base64.urlsafe_b64encode(json.dumps(claims).encode()).decode().rstrip('=')
-        signature=base64.urlsafe_b64encode(hmac.new(self.secret.encode(),encoded.encode(),hashlib.sha256).digest()).decode().rstrip('=')
+        signature=base64.urlsafe_b64encode(hmac.new((key or self.secret).encode(),encoded.encode(),hashlib.sha256).digest()).decode().rstrip('=')
         return {'scope':'42','id':'a'*64,'event_id':'b'*64,'content':'synthetic','archive_credential':'turn.'+encoded+'.'+signature}
 
     async def execute(self,source,cancel=None,delivery_allowed=True,extra=None,progress=None,scope=None,labels=None,memory=None):
@@ -156,7 +156,7 @@ class TurnProcessTests(unittest.IsolatedAsyncioTestCase):
             await self.execute('import sys,json; body=json.load(sys.stdin); assert body["note_sources"]=={}; print(json.dumps({"state":"done","text":"hi"}))')
             self.assertEqual(counted,[('memory_read','done')])
     async def test_the_long_term_memory_a_turn_was_given_reaches_the_parent_even_when_its_answer_is_dropped(self):
-        # ADR-0289: the ids come on their own line as soon as the turn reads its memory, so a turn whose answer the guard
+        # ADR-0291: the ids come on their own line as soon as the turn reads its memory, so a turn whose answer the guard
         # drops still leaves them for its notes; only well-formed ids count.
         memory=[]
         source=('import sys,json; sys.stdin.read(); print(json.dumps({"event":"memory_sources","ids":["'+'d'*64+'","not an id"]})); '
@@ -184,7 +184,7 @@ class TurnProcessTests(unittest.IsolatedAsyncioTestCase):
                     else:await run_process(profile,Scope('42','42',True,'owner'),body,'model',None,'session')
                 origin=note_sources.load(profile)[note_sources.key('memory','Learned in this turn.')]['origins'][0]
                 self.assertEqual((origin['by'],origin['event'],origin['channel'],origin['complete']),('turn',event,'telegram',outcome=='done'))
-                # The note also rests on the turn's message and the long-term memory it was given (ADR-0289).
+                # The note also rests on the turn's message and the long-term memory it was given (ADR-0291).
                 from .retired_history import load_dependencies
                 self.assertEqual(load_dependencies(profile)['entries'][note_sources.key('memory','Learned in this turn.')],
                                  {'turn':[event],'sources':['d'*64]},'also when the turn stopped')
@@ -446,13 +446,21 @@ class TurnProcessTests(unittest.IsolatedAsyncioTestCase):
                 result=review(profile,Scopes({'enabled':True},Served.of('42')),'model',None,self.review_body())
                 self.assertEqual(result,{'state':'waiting','error_code':'profile_busy'});child.assert_not_called()
 
-    async def test_review_requires_verified_review_capability_before_opening_profile(self):
-        from .review_worker import review,start
-        ordinary=self.review_body('assistant');forged=self.review_body();forged['archive_credential']+='invalid'
+    async def test_review_requires_its_review_pass_before_opening_profile(self):
+        from .review_worker import review,start,review_profile
+        # Hermes reads a pass's claims, not its signature: an ordinary turn's pass, one for another event and one without
+        # its signature part are refused before any profile is touched.
+        ordinary=self.review_body('assistant');other=self.review_body();other['event_id']='c'*64
+        unsigned=self.review_body();unsigned['archive_credential']=unsigned['archive_credential'].rsplit('.',1)[0]
         with patch('services.hermes.review_worker.prepare_profile',side_effect=AssertionError('must not touch a profile')):
             for operation in (review,start):
-                for body in (ordinary,forged):
+                for body in (ordinary,other,unsigned):
                     with self.assertRaises(ValueError):operation(Path('/unused'),Scopes({'enabled':True},Served.of('42')),'model',None,body)
+        # One signed with another key but carrying the review's own claims opens it: Nocheh's services check the signature.
+        with patch('services.hermes.review_worker.prepare_profile',return_value=Path('/prepared')) as prepare:
+            self.assertEqual(review_profile(Path('/unused'),Scopes({'enabled':True},Served.of('42')),'model',
+                                            self.review_body(key='another-synthetic-key')),Path('/prepared'))
+            prepare.assert_called_once()
 
     async def test_already_cancelled_never_starts_a_child(self):
         cancel=threading.Event();cancel.set()

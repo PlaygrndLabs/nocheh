@@ -758,7 +758,7 @@ export class NativeMemoryRepository {
     // requests pages the archive, and a retired or withdrawn message is refused as it is for any new write.
     const history=body.from_archive===true;
     // Only spaces Nocheh recorded as its own memory generations are deleted; anything else in the engine is left alone.
-    // Hermes notes do not rest on the memory engine, so chats keep them (ADR-0289).
+    // Hermes notes do not rest on the memory engine, so chats keep them (ADR-0291).
     await new OwnerCommands(this.control).run(principal,string(body.operation_id,200),body,async db=>{
       const row=(await db.query('SELECT * FROM memory_engine_connection WHERE singleton FOR UPDATE')).rows[0];
       if(row.revision!==body.expected_revision)throw new HttpError(409,'memory_connection_conflict');

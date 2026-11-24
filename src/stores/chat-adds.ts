@@ -217,7 +217,7 @@ export class ChatAdds {
         if(row.project_id&&(await this.control.query(`SELECT 1 FROM projects p WHERE p.id=$1 AND p.state='active'
             AND NOT EXISTS(SELECT 1 FROM project_assignments a WHERE a.project_id=p.id AND a.mode='assigned')`,[row.project_id])).rowCount)
           await this.commands.run(asOwner,'chat-add-archive:'+row.event_id,{kind:'chat_add_archive',event_id:row.event_id,project_id:row.project_id},
-            // Archiving a project with no group in it takes nothing from any chat (ADR-0289).
+            // Archiving a project with no group in it takes nothing from any chat (ADR-0291).
             async db=>({project_id:row.project_id,archived:await archiveEmpty(db,row.project_id!)}),{notes:'all'});
         await this.finish(row,{});return;
       }

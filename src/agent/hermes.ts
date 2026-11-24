@@ -6,7 +6,9 @@ type Options={url:string;token:string;fetch?:typeof fetch};
 const states=new Set<TurnState>(['queued','waiting','running','not_found',...closedTurnStates]);
 /** Hermes's own refusals that the owner can act on, kept by their code. */
 const settingCodes=new Set(['configuration_conflict','unsupported_preference','profile_scope_denied','invalid_preference','invalid_persona',
-  'cron_job_not_found','cron_already_pending','cron_definition_not_captured','cron_operation_unavailable','cron_topic_scope_unavailable']);
+  'cron_job_not_found','cron_already_pending','cron_definition_not_captured','cron_operation_unavailable','cron_topic_scope_unavailable',
+  // Nocheh refused the change Hermes made: no grant for it (ADR-0290).
+  'cron_change_refused']);
 
 /** Hermes behind the agent socket (ADR-0234). Only this file knows Hermes's run, management and notes routes. */
 export function hermesAgent(options:Options):Agent {
@@ -39,7 +41,8 @@ export function hermesAgent(options:Options):Agent {
   };
   const manage=(action:string,settings=false)=>async(input:Readonly<Record<string,unknown>>)=>send('/internal/manage',{...input,action},120000,settings);
   return {
-    id:'hermes',name:'Hermes',channels:['telegram','browser','scheduler','background'],
+    // No browser: the dashboard chat page is off until Nocheh has its own chat page.
+    id:'hermes',name:'Hermes',channels:['telegram','scheduler','background'],
     async startTurn(ref,input) {
       // The run routes take `asynchronous`, which their requests have always carried; it is not part of a turn's identity.
       return receipt(ref,await send(route(ref,'start'),{...input,...identity(ref),...(returns(ref)?{}:{asynchronous:true})},10000));

@@ -13,7 +13,8 @@ test('workflow saturation leaves API guard callbacks available and API saturatio
   finally{await admin.end();}
   const passwords={archive:digest('archive-fixture'),derived:digest('derived-fixture'),control:digest('control-fixture')};
   await initializeStoreDatabases(config,passwords);
-  const groups=runtimeStoreGroups({NOCHEH_STORAGE_LAYOUT:'original-only-v1',PGHOST:config.host,
+  // The same cluster as above, also when it is not on the default port.
+  const groups=runtimeStoreGroups({NOCHEH_STORAGE_LAYOUT:'original-only-v1',PGHOST:config.host,PGPORT:process.env.PGPORT,
     NOCHEH_ARCHIVE_PASSWORD:passwords.archive,NOCHEH_DERIVED_PASSWORD:passwords.derived,NOCHEH_CONTROL_PASSWORD:passwords.control});
   try{
     for(const [occupied,available] of [[groups.workflow,groups.api],[groups.api,groups.workflow]]){

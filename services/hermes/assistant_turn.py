@@ -88,8 +88,11 @@ def schedule_turn(body,profile,review=False,background=False,box=False,machine=F
         rules=request('/v1/schedules/turn',{})
     except Exception:return False
     if not isinstance(rules,dict) or rules.get('allowed') is not True:return False
+    # Where Nocheh records what this turn sets (ADR-0290): the chat's logical profile and the chat itself.
+    if not isinstance(rules.get('profile'),str) or not re.fullmatch(r'nocheh-[a-f0-9]{24}',rules['profile']):return False
+    if not isinstance(rules.get('scope'),str) or not 0<len(rules['scope'])<=64:return False
     from services.hermes import schedule_gate
-    schedule_gate.bind(rules.get('time_zone'),rules.get('limit'),rules.get('count'))
+    schedule_gate.bind(rules.get('time_zone'),rules.get('limit'),rules.get('count'),profile=rules['profile'],scope=rules['scope'],home=profile)
     # Hermes offers its schedule tool only in a messaging gateway's session, which this turn is.
     os.environ['HERMES_GATEWAY_SESSION']='1'
     return True
@@ -234,7 +237,7 @@ RUNS=[]
 # Long-term memory this turn could not read in full, for the parent to count (memory_problem).
 PROBLEMS=[]
 # The ids the long-term memory this turn was given cites (nocheh:<kind>:<id>), sent to the parent as soon as it is read
-# (a memory_sources line), so the turn's notes rest on them even when the turn stops early (ADR-0289).
+# (a memory_sources line), so the turn's notes rest on them even when the turn stops early (ADR-0291).
 CITED=re.compile(r'nocheh:[a-z_]+:([a-f0-9]{64})(?![a-f0-9])')
 SEND=None
 
@@ -311,6 +314,19 @@ def job_result(result, session_id):
     if not text.strip() or not (result.get('completed') is True or reason.startswith('max_iterations_reached') or reason=='budget_exhausted'):
         return {'state':'failed','error_code':'model_unavailable'}
     return {'state':'done','text':text,'session_id':session_id}
+
+
+def turn_image(image,credential):
+    """A picture the turn's own message carries, by its hash. Sealed or not, the turn reads it from nocheh-security with
+    its own pass, which serves only its own event's files: Hermes has no mount of the stored files."""
+    import hashlib
+    from urllib.request import Request,urlopen
+    if not isinstance(image,str) or not re.fullmatch(r'[a-f0-9]{64}',image): raise ValueError('invalid_image_identity')
+    if not isinstance(credential,str) or not credential: raise ValueError('turn_pass_required')
+    request=Request(os.environ.get('GUARD_URL','http://nocheh-security:8786')+'/v1/turn-files/'+image,headers={'Authorization':'Bearer '+credential})
+    with urlopen(request,timeout=30) as response:data=response.read(26*1024*1024)
+    if hashlib.sha256(data).hexdigest()!=image: raise ValueError('image_hash_mismatch')
+    return data
 
 
 def run(body, emit=None, relay=None):
@@ -445,16 +461,10 @@ def run(body, emit=None, relay=None):
         if body.get('channel') in ('browser','scheduler','background'): options['persist_user_message'] = body.get('source_text',body['text'])
         message=body['text']
         if body.get('images'):
-            import base64,hashlib,re
+            import base64
             message=[{'type':'text','text':message}]
             for image in body['images']:
-                if not re.fullmatch(r'[a-f0-9]{64}',image): raise ValueError('invalid_image_identity')
-                if os.environ.get('NOCHEH_ISOLATED_TURN')=='1':
-                    from urllib.request import Request,urlopen
-                    req=Request('http://nocheh-security:8786/v1/turn-files/'+image,headers={'Authorization':'Bearer '+body['archive_credential']})
-                    with urlopen(req,timeout=30) as response:data=response.read(26*1024*1024)
-                else:data=(Path('/data/files')/image).read_bytes()
-                if hashlib.sha256(data).hexdigest()!=image: raise ValueError('image_hash_mismatch')
+                data=turn_image(image,body.get('archive_credential'))
                 # Explicitly trusted routes may receive originals. Required
                 # guarding rejects this opaque context at the existing boundary.
                 from PIL import Image

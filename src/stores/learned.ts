@@ -140,7 +140,7 @@ export class LearnedMemoryRepository {
       // reports carry across its epoch, as across a reaction (ADR-0200). Owner corrections go through
       // revokeBeforePublication and stay unrecorded. Only an epoch advanced here is recorded.
       if(changed)await db.query("INSERT INTO guard_quiet_epochs(generation,epoch,reason) VALUES($1,$2,'learning') ON CONFLICT DO NOTHING",[state.generation,epoch]);
-      // Every chat keeps its Hermes notes across it, as across an owner correction (ADR-0289).
+      // Every chat keeps its Hermes notes across it, as across an owner correction (ADR-0291).
       if(changed)await keepNotes(db,epoch,'all');
       for(const version of versions) {
         await db.query(`INSERT INTO guard_publications(id,operation_kind,source_id,revision,expected_revision,epoch) VALUES($1,'memory',$2,$3,$4,$5)`,

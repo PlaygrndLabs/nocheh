@@ -84,7 +84,7 @@ export class ImportRepository {
           ON CONFLICT DO NOTHING`,[source.id])).rowCount??0;
       }
       return {approved:true,accepted:learnable.length,newly_enabled:changed,telegram_replies:0};
-    // Approving an import only allows learning (ADR-0289).
+    // Approving an import only allows learning (ADR-0291).
     },{notes:'all'});
   }
 }

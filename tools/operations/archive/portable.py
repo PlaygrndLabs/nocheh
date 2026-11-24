@@ -89,7 +89,7 @@ def export_native(root,directory):
                 if name==SIDECAR and not sidecar_ok(source,root):continue
                 target=destination/name;target.parent.mkdir(parents=True,exist_ok=True,mode=0o700)
                 if name==DEPENDENCIES:
-                    # What each carried note rests on travels with it, checked again on the first turn after a restore (ADR-0289).
+                    # What each carried note rests on travels with it, checked again on the first turn after a restore (ADR-0291).
                     from services.hermes.retired_history import load_dependencies
                     entries=load_dependencies(profile)['entries']
                     if entries:target.write_text(json.dumps({'version':1,'checked':None,'entries':entries},sort_keys=True),encoding='utf-8');target.chmod(0o600)

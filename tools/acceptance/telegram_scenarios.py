@@ -20,8 +20,8 @@ import traceback
 import urllib.parse
 from tools.paths import ROOT
 from tools.acceptance import canaries
-from tools.acceptance.telegram_rehearsal import (MINI_APP_SERVICE, TELEGRAM_SERVICE, archived_delivery, telegram_health, validate_fixture,
-                                                 wait_telegram_connected)
+from tools.acceptance.telegram_rehearsal import (MINI_APP_SERVICE, TELEGRAM_SERVICE, archived_delivery, sent_buttons, telegram_health,
+                                                 validate_fixture, wait_telegram_connected)
 
 # Only the owner adds Nocheh to a group (ADR-0253). The owner adds it to GROUP and OTHER_GROUP when the fake Telegram
 # connects (telegram_rehearsal.adopt), and answers No project on the card that follows. UNSELECTED_GROUP is a group
@@ -138,15 +138,17 @@ console.log(JSON.stringify({status:response.status,body:text?JSON.parse(text):nu
     def app(self, path, body=None, allow_error=False):
         return self.http(path, body, service='nocheh-app', port=8780, allow_error=allow_error)
 
-    def native(self, path, body=None, method=None):
-        """The owner's native administration route, as `./bin/nocheh cron` calls it."""
-        script = """const [path,encoded,method]=process.argv.slice(1),body=JSON.parse(encoded);
+    def native(self, path, body=None, method=None, allow_error=False):
+        """The owner's native administration route, as `./bin/nocheh cron` calls it. `allow_error` returns {status, body}
+        instead of failing on an error."""
+        script = """const [path,encoded,method,tolerant]=process.argv.slice(1),body=JSON.parse(encoded);
 const response=await fetch('http://hermes:8785'+path,{method:method||(body===null?'GET':'POST'),
 headers:{'content-type':'application/json','X-Hermes-Session-Token':process.env.SERVICE_TOKEN},
 ...(body===null?{}:{body:JSON.stringify(body)}),signal:AbortSignal.timeout(60000)});
-const text=await response.text();if(!response.ok)throw Error('native_http_'+response.status+':'+text.slice(0,300));console.log(text);"""
+const text=await response.text();if(!response.ok&&tolerant!=='1')throw Error('native_http_'+response.status+':'+text.slice(0,300));
+console.log(tolerant==='1'?JSON.stringify({status:response.status,body:text?JSON.parse(text):null}):text);"""
         return json.loads(subprocess.check_output(self.command+['exec', '-T', 'nocheh-app', 'node', '--input-type=module', '-e', script,
-            path, json.dumps(body), method or ''], text=True))
+            path, json.dumps(body), method or '', '1' if allow_error else '0'], text=True))
 
     def mini(self, path, method='GET', body=None, headers=None):
         """A call to the Telegram mini app's edge (nocheh-miniapp) as a phone makes it through the tunnel: run inside that
@@ -676,15 +678,30 @@ class Scenarios:
                   and not self.cards_since(before, OWNER) and not self.cards_since(before, GROUP))
 
     def schedule_fires_and_sends_without_card(self):
-        # An owner-private schedule fires on its own cadence, runs once, and its Telegram result goes to the owner's
-        # private chat with no card: the owner approved that chat's schedules once (ADR-0266).
+        # An owner-private schedule set by asking in the owner's chat fires on its own cadence, runs once, and its Telegram
+        # result goes to the owner's private chat with no card: the owner approved that chat's schedules once (ADR-0266).
+        # Nocheh records who set it from which message, and grants its fire (ADR-0290).
         known = {row['id'] for row in self.proposals()}
-        before = len(self.f.sent())
         started = self.f.query('nocheh_control', 'SELECT now()')
-        job = self.f.native('/api/cron/jobs?profile=default', {'name': 'Synthetic reminder', 'prompt': 'یادآوری: آب بخور SCHEDMARK',
-                                                             'schedule': 'every 1m', 'deliver': 'telegram', 'repeat': 1})
-        self.gate('schedule_created', job.get('deliver') == 'telegram', job=job.get('id'))
-        self.wait('definition_captured', lambda: self.f.native('/api/cron/jobs/'+job['id']+'?profile=default').get('managed'), 120)
+        before = len(self.f.sent())
+        self.turn(self.f.message(OWNER, 'هر دقیقه یادم بنداز [[tool:cronjob_manage {"action":"create","name":"Synthetic reminder",'
+                                 '"prompt":"یادآوری: آب بخور SCHEDMARK","schedule":"every 1m","repeat":1}]]'), OWNER)
+        listed = lambda: self.f.app('/v1/agent/manage', {'action': 'schedules', 'operation': 'list'})['schedules']
+        job = next((row for row in listed() if row['name'] == 'Synthetic reminder' and row.get('owner_chat')), None)
+        self.gate('schedule_created', job is not None and job['deliver'] == 'telegram', job=job and job['id'])
+        profile = job['profile']
+        set_by = self.f.query('nocheh_control', "SELECT json_build_object('created_by',w.created_by,'via',v.set_by->>'via') FROM workflow_schedules w "
+                              "JOIN schedule_versions v ON v.id=w.version_id WHERE w.logical_profile='"+profile+"' AND w.job_id='"+job['id']+"'")
+        set_by = json.loads(set_by) if set_by else {}
+        self.gate('schedule_set_by_asking', set_by == {'created_by': 'owner', 'via': 'turn'}, **set_by)
+        notices = [row for row in self.f.sent()[before:] if row['message']['chat']['id'] == OWNER
+                   and any(str(button.get('callback_data') or '').startswith('nkd') for button in sent_buttons(row))]
+        self.gate('schedule_notice_sent', len(notices) == 1, count=len(notices))
+        refused = self.f.native('/api/cron/jobs?profile=default', {'name': 'Synthetic', 'prompt': 'x', 'schedule': 'every 1m'}, allow_error=True)
+        self.gate('native_cron_read_only', refused['status'] == 403 and (refused['body'] or {}).get('error') == 'cron_read_only',
+                  status=refused['status'])
+        # The notice has Pause and Delete buttons, so it would count as a card: count only what comes after it.
+        before = len(self.f.sent())
         run = self.wait('scheduled_run_done', lambda: self.f.query('nocheh_control', "SELECT json_build_object('id',event_id,'state',state,'error',error_code) "
             "FROM managed_runs WHERE channel='scheduler' AND created_at>='"+started+"' AND state IN ('done','failed','cancelled','interrupted')"), 300)
         run = json.loads(run)
@@ -701,9 +718,10 @@ class Scenarios:
         time.sleep(75)
         runs = self.f.query('nocheh_control', "SELECT count(*) FROM managed_runs WHERE channel='scheduler' AND created_at>='"+started+"'")
         self.gate('repeat_limit_honored', runs == '1', runs=runs)
-        # The owner can remove a schedule that has finished its runs.
-        self.gate('finished_schedule_removed', self.f.native('/api/cron/jobs/'+job['id']+'?profile=default', {}, 'DELETE') == {'ok': True}
-                  and all(row['id'] != job['id'] for row in self.f.native('/api/cron/jobs?profile=default')))
+        # The owner removes a schedule that has finished its runs through Nocheh, which grants the removal.
+        removed = self.f.app('/v1/agent/manage', {'action': 'schedules', 'operation': 'delete', 'profile': profile, 'job_id': job['id'],
+                                                  'request_id': 'scenario-delete-'+job['id']})
+        self.gate('finished_schedule_removed', removed == {'ok': True} and all(row['id'] != job['id'] for row in listed()))
 
     # Members ------------------------------------------------------------------
 

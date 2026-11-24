@@ -284,7 +284,7 @@ export function MessageListView({onOpen}: {onOpen: (id: string) => void}) {
             ? q
               ? `Nothing kept contains “${q}”. Try fewer or different words.`
               : 'Change or clear a filter to see more.'
-            : 'Messages appear here as soon as Nocheh receives them in Telegram or the browser chat. You can also import old Telegram chats.'}
+            : 'Messages appear here as soon as Nocheh receives them in Telegram. You can also import old Telegram chats.'}
         </Empty>
       )}
       {!!visible.length && (
