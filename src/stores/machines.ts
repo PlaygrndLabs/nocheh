@@ -437,7 +437,7 @@ export class MachineRepository {
     if(left<=0)throw new HttpError(409,'machine_time_up');
     const pin=job.machine as MachinePin,timeout=Math.min(body.timeout,left,COMMAND_SECONDS);
     // Before its first command: the login still acts as admin as its card said, and its start-up files are read.
-    await this.begin(job.id,pin);
+    await this.begin(job.id,pin,source.id);
     if(controller.signal.aborted)return;
     const log=await this.log({machine_id:pin.id,machine_name:pin.name,job_id:job.id,run_event_id:source.id,kind:body.kind,command:body.command,
       script_sha256:createHash('sha256').update(body.script).digest('hex')});
@@ -503,14 +503,15 @@ export class MachineRepository {
    *  its start-up files and tools as they are, to compare when it ends. A login whose admin rights are not what the card said
    *  stops the job before anything runs, and the machine needs a new test. A machine that cannot be reached fails the command,
    *  as one would; start-up files that cannot be read leave the job unchecked, and its card says so when it ends. */
-  private async begin(id:string,pin:MachinePin):Promise<void> {
+  private async begin(id:string,pin:MachinePin,run:string):Promise<void> {
     let running=beginning.get(id);
-    if(!running){running=this.probeStart(id,pin).finally(()=>beginning.delete(id));beginning.set(id,running);}
+    if(!running){running=this.probeStart(id,pin,run).finally(()=>beginning.delete(id));beginning.set(id,running);}
     await running;
   }
-  private async probeStart(id:string,pin:MachinePin):Promise<void> {
+  private async probeStart(id:string,pin:MachinePin,run:string):Promise<void> {
     if((await this.control.query('SELECT machine_check FROM background_jobs WHERE id=$1',[id])).rows[0]?.machine_check)return;
-    const log=await this.log({machine_id:pin.id,machine_name:pin.name,job_id:id,kind:'test',command:'check admin rights and start-up files before the job'});
+    // Logged with the run whose first command it comes before, as the checks a job's run makes.
+    const log=await this.log({machine_id:pin.id,machine_name:pin.name,job_id:id,run_event_id:run,kind:'test',command:'check admin rights and start-up files before the job'});
     let answer:Record<string,unknown>;
     try{answer=await machinesJson('/probe',target(pin),AbortSignal.timeout(150000));}
     catch(error){answer={ok:false,error:error instanceof HttpError?error.code:'machine_unavailable'};}
@@ -543,7 +544,9 @@ export class MachineRepository {
       const job=(await this.control.query("SELECT id,machine,machine_files FROM background_jobs WHERE id=$1 AND machine_check='pending'",[id])).rows[0];
       if(!job?.machine)return;
       const pin=job.machine as MachinePin,before=job.machine_files as Record<string,unknown>|null;
-      log=await this.log({machine_id:pin.id,machine_name:pin.name,job_id:id,kind:'test',command:'check start-up files after the job'});
+      // Logged with the job's last run that worked on the machine.
+      const run=(await this.control.query('SELECT run_event_id FROM machine_commands WHERE job_id=$1 AND run_event_id IS NOT NULL ORDER BY started_at DESC LIMIT 1',[id])).rows[0]?.run_event_id;
+      log=await this.log({machine_id:pin.id,machine_name:pin.name,job_id:id,run_event_id:run??undefined,kind:'test',command:'check start-up files after the job'});
       let after:Record<string,unknown>|null=null,code:string|null=null;
       try {
         const answer=await machinesJson('/probe',target(pin),AbortSignal.timeout(150000));

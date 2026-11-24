@@ -15,9 +15,10 @@ import {BackgroundJobLimits} from '../system/jobs';
 import {useSubTab} from '../../lib/navigation';
 import {SubPanel, SubTabs} from '../../ui/page';
 
-/** The one thing in a group that never waits, whichever is chosen: a group's web pages and outside tools (step 3). */
+/** The one thing in a group that skips the card, whichever is chosen: a group's web pages and outside tools (step 3), unless
+ *  they could carry data (ADR-0291). */
 const groupTools =
-  'In a group, web pages and outside tools run without a card when you ask, or a member with “Web pages and outside tools” on asks; commands still wait, and Notion is never used in a group.';
+  'In a group, web pages and outside tools run without a card when you ask, or a member with “Web pages and outside tools” on asks, unless the model built an address or input that could carry data; commands still wait, and Notion is never used in a group.';
 
 const freedom = [
   {
