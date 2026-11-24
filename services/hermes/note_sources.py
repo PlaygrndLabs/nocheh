@@ -367,6 +367,129 @@ def tool_read(row):
     return None if name in NOT_READS else TOOL_READS.get(name,'other')
 
 
+# What "Do what I ask" counts as reaching a turn besides the owner's typed words (ADR-0293): every read token above but a
+# command's own output, and Nocheh's word about a message it was asked to send or a time zone it was asked to set,
+# which says only what became of that request.
+GATE_IGNORED=frozenset({'mcp__nocheh__shell','mcp__nocheh__action_request','mcp__nocheh__my_time_zone'})
+# A voice note's or audio file's transcript in a stored message: words that were not typed.
+TRANSCRIPT='[Derived voice transcript'
+# A message or answer withheld from the session because its source was retired: what the turn read for it is gone.
+RETIRED=('[Retired message: ','[Retired reply: ')
+# What carried messages read in the session they came from, by the session they were carried into (ADR-0293). A carry
+# keeps typed messages and answers but drops tool results, so an answer that repeats a page would read clean without it.
+CARRIED_READS='nocheh-carried-reads.json'
+CARRIED_SESSIONS=200
+
+
+def gate_read(name,content):
+    """The read token a tool result counts as for "Do what I ask" (ADR-0293), or None: tool_read's, except for a
+    command's own output and the tools in GATE_IGNORED. A task list counts whoever's chat it is: in the owner's chat it
+    holds what members and groups wrote too."""
+    if name in GATE_IGNORED:return None
+    if name==TASKS:return 'archive'
+    token=tool_read({'tool_name':name,'content':content})
+    return None if token=='commands' else token
+
+
+def rows_reads(rows):
+    """The read tokens a session's stored rows hold (ADR-0293): the lines Nocheh puts in a message, a transcript, a
+    reply to anything but the owner's own typed message, a retired message, every tool result gate_read counts, and a
+    compaction's summary, which may hold any of them."""
+    from .retired_history import _summary
+    from .turn_process import REPLY_BY
+    reads=[]
+    def add(token):
+        if token not in reads:reads.append(token)
+    for row in rows:
+        content=row.get('content') if isinstance(row.get('content'),str) else None
+        if _summary({**row,'content':row.get('content')}):add('past');continue
+        if content is not None and any(marker in content for marker in RETIRED):add('other')
+        if row.get('role')=='user' and content is not None:
+            for marker,token in MARKERS:
+                if marker in content and (token!='forward' or _forwards(content)):add(token)
+            if TRANSCRIPT in content:add('file')
+            if any(by!='owner' for by in REPLY_BY.findall(content)):add('reply')
+        elif row.get('role')=='tool':
+            token=gate_read(row.get('tool_name'),row.get('content'))
+            if token:add(token)
+    return reads
+
+
+def carried_reads(profile,session):
+    """What the messages carried into `session` read where they came from, or None when the record cannot be read."""
+    path=Path(profile)/CARRIED_READS
+    if not path.exists() and not path.is_symlink():return []
+    try:
+        if path.is_symlink():raise ValueError('carried_reads_path_denied')
+        value=json.loads(path.read_text(encoding='utf-8'))
+        sessions=value.get('sessions') if isinstance(value,dict) and value.get('version')==1 else None
+        if not isinstance(sessions,dict):raise ValueError('carried_reads_invalid')
+        reads=sessions.get(session,[])
+        if not isinstance(reads,list) or not all(token in READS for token in reads):raise ValueError('carried_reads_invalid')
+        return reads
+    except (OSError,ValueError):return None
+
+
+def record_carried(profile,session,reads):
+    """Keep what messages carried into `session` read, added to what it already holds. Raises when it cannot, so the
+    messages are not carried without it."""
+    from .native_memory import save_receipt
+    path=Path(profile)/CARRIED_READS
+    if path.is_symlink():raise ValueError('carried_reads_path_denied')
+    known=[] if not path.exists() else carried_reads(profile,session)
+    if known is None:raise ValueError('carried_reads_invalid')
+    try:sessions=json.loads(path.read_text(encoding='utf-8'))['sessions'] if path.exists() else {}
+    except (OSError,ValueError,KeyError,TypeError) as failure:raise ValueError('carried_reads_invalid') from failure
+    merged=known+[token for token in dict.fromkeys(reads) if token not in known]
+    sessions.pop(session,None);sessions[session]=merged
+    sessions=dict(list(sessions.items())[-CARRIED_SESSIONS:])
+    save_receipt(path,json.dumps({'version':1,'sessions':sessions},ensure_ascii=False,separators=(',',':')))
+
+
+def carry_reads(profile,session,source_profile,previous,rows):
+    """Record what the rows a carry reads from (`rows`, tool results included) and what was carried into `previous`
+    read, for `session` (ADR-0293)."""
+    inherited=carried_reads(source_profile,previous)
+    if inherited is None:inherited=['past']
+    reads=inherited+[token for token in rows_reads(rows) if token not in inherited]
+    if reads:record_carried(profile,session,reads)
+
+
+def conversation_reads(database,session,body,profile=None):
+    """What reaches a turn besides the owner's typed words before its model starts, as read tokens (ADR-0293): in the
+    message it answers, a forward of someone else's, any file, voice note or audio file, other people's recent group
+    messages and a reply to anything but the owner's own typed message; anywhere in the session it runs in, what
+    rows_reads finds; and what messages carried into it read where they came from (`profile`'s record). None when the
+    session or that record could not be read, so the turn stays unreported and a command in it asks first."""
+    from .retired_history import _columns,_read_only
+    from .turn_process import forwarded,recent_group,reply_block
+    reads=[]
+    def add(token):
+        if token not in reads:reads.append(token)
+    if forwarded(body.get('forwarded')) and body['forwarded'] not in OWN_FORWARDS:add('forward')
+    if body.get('files') or body.get('transcripts'):add('file')
+    if recent_group(body.get('recent_group')):add('recent')
+    if reply_block(body.get('reply')) and body['reply']['by']!='owner':add('reply')
+    if profile is not None:
+        carried=carried_reads(profile,session)
+        if carried is None:return None
+        for token in carried:add(token)
+    database=Path(database)
+    if not database.is_file():return reads
+    try:
+        connection=_read_only(database)
+        try:
+            available=_columns(connection,'messages')
+            if not available:return reads
+            selected=['role','content']+[name for name in ('tool_name','_compressed_summary') if name in available]
+            connection.row_factory=sqlite3.Row
+            rows=[dict(row) for row in connection.execute('SELECT '+','.join(selected)+' FROM messages WHERE session_id=? ORDER BY id',(session,))]
+        finally:connection.close()
+    except sqlite3.Error:return None
+    for token in rows_reads(rows):add(token)
+    return reads
+
+
 def _forwards(text):
     """Whether a stored message holds a forwarded line other than the owner's forward of their own earlier message. A
     sender's own earlier message elsewhere may be a member's words, so it counts."""

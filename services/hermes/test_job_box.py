@@ -366,7 +366,7 @@ box_server.run=recorded
 server=box_server.listen(str(folder/'exec.sock'),os.getgid());threading.Thread(target=box_server.serve,args=(server,-1),daemon=True).start()
 os.environ.update(NOCHEH_ISOLATED_TURN='1',TERMINAL_ENV='nocheh_box',NOCHEH_BOX_SOCKET=str(folder/'exec.sock'),TERMINAL_CWD=str(folder/'work'))
 from services.hermes import archive_tools,assistant_turn,job_box,request_boundary,subscription
-archive=lambda path,value=None:value if path=='/v1/context/prepare' else {'hits':[]}
+archive=lambda path,value=None:value if path.split('?')[0]=='/v1/context/prepare' else {'hits':[]}
 install=request_boundary.install
 with patch.object(request_boundary,'install',lambda:install(request_boundary.Boundary('on',transform=lambda url,payload:payload))),\\
      patch.object(subscription,'configured_urls',lambda:{body['base_url']}),patch.object(archive_tools,'request',archive):

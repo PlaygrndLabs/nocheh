@@ -398,6 +398,10 @@ export class ActionCommandRepository {
     // The note goes last, so no entity before it moves.
     const noted=!!note&&card.text.length+note.length<=room;
     if(noted)card={...card,text:card.text+note};
+    // A command "Do what I ask" left to its card says why, last and only where it fits: it never costs the summary or
+    // a rule's note (ADR-0293).
+    const outside=Array.isArray(row?.outside_reads)&&row.outside_reads.length?'\n\n'+line.outside_note:'';
+    if(outside&&card.text.length+outside.length<=room)card={...card,text:card.text+outside};
     const code=action.error_code??(typeof action.result?.result?.error==='string'?action.result.result.error:null);
     // The executor runs only after its start is recorded, so an operation never started did not run.
     const started=!!(await this.tools.row(id)).started_at;
