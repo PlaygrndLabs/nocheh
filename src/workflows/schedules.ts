@@ -32,9 +32,21 @@ export async function recordSchedule(pool:pg.Pool,source:string,input:unknown){
     }
     await client.query(`UPDATE workflow_registry SET state='skipped',waiting_reason='superseded',revision=revision+1,updated_at=now()
       WHERE family='schedules' AND job_id LIKE $1 AND job_id<>$2 AND state IN ('queued','waiting','retryable_failed')`,['schedule:'+id+':%','schedule:'+id+':'+cursor]);
-    await client.query("SELECT nocheh_workflow_request('schedules',$1)",['schedule:'+id+':'+cursor]);
+    // A Run now moves the cursor away and back again (pending, running, then idle with the same next run), so the cursor's
+    // earlier row may already be closed as superseded: a new generation runs it, or the schedule would never wake again.
+    await client.query(`SELECT nocheh_workflow_touch('schedules',$1) WHERE NOT EXISTS(SELECT 1 FROM workflow_registry
+      WHERE family='schedules' AND job_id=$1 AND state IN ('queued','waiting','running','retryable_failed'))`,['schedule:'+id+':'+cursor]);
     await client.query('COMMIT');
   }catch(error){await client.query('ROLLBACK');throw error;}finally{client.release();}
+}
+/** A schedule whose current cursor has no open workflow, only one closed as superseded, gets a new generation; such a
+ * schedule was left without a run by a Run now before this was fixed (ADR-0266). Returns how many were started again. */
+export async function reviveSchedules(pool:pg.Pool):Promise<number> {
+  return (await pool.query(`SELECT nocheh_workflow_touch('schedules','schedule:'||s.id||':'||s.cursor) FROM workflow_schedules s
+    WHERE EXISTS(SELECT 1 FROM workflow_registry w WHERE w.family='schedules' AND w.job_id='schedule:'||s.id||':'||s.cursor
+      AND w.state='skipped' AND w.waiting_reason='superseded')
+    AND NOT EXISTS(SELECT 1 FROM workflow_registry w WHERE w.family='schedules' AND w.job_id='schedule:'||s.id||':'||s.cursor
+      AND w.state NOT IN ('skipped','cancelled'))`)).rowCount??0;
 }
 export async function scheduledContext(pool:pg.Pool,config:Settings,input:unknown){
   const b=object(input),row=(await pool.query(`SELECT r.*,e.scope,e.payload,o.epoch,o.owner,o.admission FROM managed_runs r

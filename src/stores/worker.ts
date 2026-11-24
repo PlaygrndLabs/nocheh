@@ -4,6 +4,7 @@ import type {Settings} from '../config.js';
 import {startLoops} from '../worker-loops.js';
 import {workflowClient} from '../workflows/client.js';
 import {publishOutbox,rearmWaiting,retireSupersededSourceWorkflows} from '../workflows/store.js';
+import {reviveSchedules} from '../workflows/schedules.js';
 import {drainSourceSpool} from './capture.js';
 import {requestStrandedSources} from './native-review.js';
 import {expireStageTimings} from './stage-timings.js';
@@ -32,8 +33,8 @@ export function startStorageCapture(s:StorageServices,config:Settings,interval=1
       if(staleSourcesReconciled&&!strandedRequested)strandedRequested=(await requestStrandedSources(s.stores.control,started))<100;
       // A schedule waits in Inngest until its next run. A full restart can lose that wait, and the schedule would never run
       // again, so each waiting schedule is armed again once at startup, and one whose run is two minutes overdue with no
-      // word from Inngest is armed again (ADR-0266).
-      if(!schedulesArmed)schedulesArmed=(await rearmWaiting(s.stores.control,['schedules'],null))<100;
+      // word from Inngest is armed again. A schedule a Run now left with no open run starts again at startup (ADR-0266).
+      if(!schedulesArmed){await reviveSchedules(s.stores.control);schedulesArmed=(await rearmWaiting(s.stores.control,['schedules'],null))<100;}
       if(Date.now()-lostChecked>=60000){lostChecked=Date.now();await rearmWaiting(s.stores.control,['schedules'],'2 minutes');}
       publisher??=workflowClient('pipeline');await publishOutbox(s.stores.control,event=>publisher!.send(event));
     },

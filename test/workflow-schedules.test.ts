@@ -4,7 +4,7 @@ import pg from 'pg';
 import {settings} from './fixture-settings.js';
 import {initialize} from '../src/database.js';
 import {captureInput,claimRun,finishRun,recoverScheduled,scheduleDefinition,cancelScheduled} from '../src/managed-runs.js';
-import {scheduleOperation,scheduledContext,scheduledAuthority} from '../src/workflows/schedules.js';
+import {reviveSchedules,scheduleOperation,scheduledContext,scheduledAuthority} from '../src/workflows/schedules.js';
 import {managedRunOperation} from '../src/workflows/browser.js';
 import {pauseFamily,switchFamily} from '../src/workflows/store.js';
 import {hermesAgent} from '../src/agent/hermes.js';
@@ -31,6 +31,18 @@ test('scheduled workflows preserve native cursors, capacity, occurrence identity
     await assert.rejects(scheduleDefinition(pool,config,{...request,workflow_sequence:2}),/schedule_sequence_conflict/);
     assert.equal((await controller(job,{owner:'inngest',epoch:2})).state,'skipped');assert.equal(nextCalls,1);
     assert.equal((await pool.query('SELECT state FROM workflow_registry WHERE job_id=$1',[job])).rows[0].state,'skipped');
+    // A Run now moves the cursor away and back to an earlier one, whose row is closed: a new generation runs it.
+    await scheduleDefinition(pool,config,{...request,workflow_sequence:3});
+    const back=(await pool.query("SELECT state,generation FROM workflow_registry WHERE job_id=$1 ORDER BY generation",[job])).rows;
+    assert.deepEqual(back.map(row=>[row.state,row.generation]),[['skipped',1],['queued',2]]);
+    await scheduleDefinition(pool,config,{...request,workflow_sequence:3});
+    assert.equal((await pool.query('SELECT count(*)::int n FROM workflow_registry WHERE job_id=$1',[job])).rows[0].n,2,'a repeat leaves the open run alone');
+    // A schedule an earlier Run now left with only a superseded row starts again once.
+    await pool.query("UPDATE workflow_registry SET state='skipped',waiting_reason='superseded' WHERE job_id=$1",[job]);
+    assert.equal(await reviveSchedules(pool),1);assert.equal(await reviveSchedules(pool),0);
+    assert.equal((await pool.query("SELECT count(*)::int n FROM workflow_registry WHERE job_id=$1 AND state='queued' AND generation=3",[job])).rows[0].n,1);
+    await pool.query("UPDATE workflow_registry SET state='skipped',waiting_reason='superseded' WHERE job_id=$1",[job]);
+    await scheduleDefinition(pool,config,{...request,workflow_cursor:'b'.repeat(64),workflow_sequence:4});
     await pauseFamily(pool,'schedules',1);await switchFamily(pool,'schedules',1,'inngest');
     const authority={owner:'inngest' as const,epoch:2};
     const source={id:'fire',conversation:'native-job',scope:'42',profile:'private',text:definition.prompt,job_id:'native-job',
