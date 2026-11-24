@@ -102,6 +102,11 @@ export function shortInput(input:unknown):boolean {
   };
   return walk(input,0)&&canonical(input).length<=2000;
 }
+/** Whether a web read or another server's tool sends nothing beyond a short address (ADR-0291): its address carries no
+ *  data and, for a tool call, its input is short enough for a tool rule to cover. */
+export function sendsNoData(args:{url?:unknown;tool?:unknown;input?:unknown;operation?:unknown}):boolean {
+  return typeof args.url==='string'&&!carriesData(args.url)&&(args.tool===undefined||shortInput(args.input));
+}
 /** The rule key of another server's tool call: its exact server address and tool, only for short input from an address
  *  that carries no data. A list of its tools and a connected service have none. */
 export function toolRuleKey(args:{url?:unknown;tool?:unknown;input?:unknown;operation?:unknown;connection?:unknown}):string|null {

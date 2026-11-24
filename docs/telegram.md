@@ -288,7 +288,9 @@ guard epoch.
 - **Talk to Nocheh in groups they joined**, on by default. Under it, each on by
   default and each off while talk is off: **Small jobs (no daily limit)**, **Post
   to their other groups** (they confirm each post with their own card) and **Web
-  pages and outside tools (no approval)**.
+  pages and outside tools (no approval)**. Under it, a read or tool call whose
+  address or input carries data, or past ten reads for one message, still asks
+  with your card ([ADR-0291](adr/0291-group-tools-run-only-what-carries-no-data.md)).
 - **Tasks**: **Read and write**, or **Read only**, where they list and read the
   task list of their group's project and change nothing. It counts in groups and in the
   [members' app](#members-app) alike; write includes the trash. Under it,

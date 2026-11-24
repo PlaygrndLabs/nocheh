@@ -1,6 +1,6 @@
 import {test} from 'node:test';
 import assert from 'node:assert/strict';
-import {browserRuleKey,carriesData,freeRead,messageLinks,namedSite,reflects,shortInput,toolRuleKey,type OpenedPage} from '../src/link-check.js';
+import {browserRuleKey,carriesData,freeRead,messageLinks,namedSite,reflects,sendsNoData,shortInput,toolRuleKey,type OpenedPage} from '../src/link-check.js';
 import {notionAddress,notionSafeChange} from '../src/stores/notion.js';
 
 const owner=(text:string,extra:Record<string,unknown>={})=>messageLinks({message:{message_id:1,date:1,chat:{id:1,type:'private'},from:{id:1},text,...extra}});
@@ -76,6 +76,19 @@ test('a tool rule covers one server\'s tool, for short input with no web address
   assert.equal(toolRuleKey({...call,input:{note:'see https://evil.example/'}}),null);
   assert.equal(toolRuleKey({url:'https://tools.example/mcp',operation:'list'}),null);
   assert.ok(!shortInput({nested:{a:{b:{c:{d:{e:1}}}}}}));
+});
+
+test('a group\'s tools permission covers only a read or tool call that sends no data beyond a short address', ()=>{
+  assert.ok(sendsNoData({url:'https://news.example.com/story?id=7'}));
+  assert.ok(sendsNoData({url:'https://tools.example/mcp',operation:'list'}));
+  assert.ok(sendsNoData({url:'https://tools.example/mcp',tool:'lookup',input:{city:'Berlin',days:3}}));
+  assert.ok(!sendsNoData({url:'https://news.example.com/?d='+'x'.repeat(200)}),'a long address');
+  assert.ok(!sendsNoData({url:'https://proxy.example/fetch?u=https://other.example/'}),'an address inside');
+  assert.ok(!sendsNoData({url:'https://tools.example/mcp?d='+'x'.repeat(200),operation:'list'}),'a list from a long address');
+  assert.ok(!sendsNoData({url:'https://tools.example/mcp',tool:'lookup',input:{city:'x'.repeat(201)}}),'long input');
+  assert.ok(!sendsNoData({url:'https://tools.example/mcp',tool:'lookup',input:{note:'see https://other.example/'}}),'an address in the input');
+  assert.ok(!sendsNoData({url:'https://tools.example/mcp',tool:'lookup'}),'a call with no input to check');
+  assert.ok(!sendsNoData({}));
 });
 
 test('Notion: an image or signed-file address of Notion is outside, and a change may hold only plain links or given ones', ()=>{

@@ -160,6 +160,22 @@ test('members are checked before every effect in their groups, the owner first, 
     // The owner's own request in a group needs no card either (the one switch in groupToolsGrant), and has no asker.
     const owned=await web(await asked(GP1,GP1,OWNER,'Read it for me'),'owner');
     assert.equal(owned.state,'approved');assert.deepEqual([(await tools.row(owned.id)).authority,(await tools.row(owned.id)).asker_account],['group_tools',null]);
+    // Only what sends no data a model chose runs under it (ADR-0291). An address that carries data asks with its card, the
+    // owner's own too, unless it is a link typed in the asking message; so does a tool call with long input. A message
+    // opens at most ten reads without a card, as in the owner's private chat.
+    const browse=(principal:Reader,url:string)=>tools.propose(principal,{kind:'browser',arguments:{url}});
+    const long='https://example.com/page?d='+'x'.repeat(200);
+    for(const [label,from] of [['a member',MEMBER_GP],['the owner',OWNER]] as const) {
+      const held=await browse(await asked(GP1,GP1,from,'Read the page with the details'),long);
+      assert.deepEqual([held.state,(await tools.row(held.id)).authority],['proposed',null],label);
+    }
+    const pasted=await browse(await asked(GP1,GP1,MEMBER_GP,'Read '+long),long),pastedRow=await tools.row(pasted.id);
+    assert.deepEqual([pasted.state,pastedRow.authority,pastedRow.free_read],['approved','group_tools','typed']);
+    const longInput=await tools.propose(await asked(NG2_TG,NG2,MEMBER_NG,'Ask the tool again'),{kind:'mcp',arguments:{url:'https://example.com/mcp',tool:'search',input:{q:'x'.repeat(201)}}});
+    assert.deepEqual([longInput.state,(await tools.row(longInput.id)).authority],['proposed',null]);
+    const many=await asked(GP1,GP1,MEMBER_GP,'Read every item'),states:string[]=[];
+    for(let n=0;n<11;n++)states.push((await browse(many,'https://example.com/item-'+n)).state);
+    assert.deepEqual(states,[...Array(10).fill('approved'),'proposed']);
     // With their tools permission off, a member's request is refused before anything is recorded.
     use(fixtureMemberDirectory({[MEMBER_GP_ID]:{group_tools:false}}));
     await assert.rejects(web(await asked(GP1,GP1,MEMBER_GP,'Read again'),'off'),{status:403,code:'tool_not_permitted'});
