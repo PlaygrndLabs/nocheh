@@ -3294,7 +3294,7 @@ test('a change whose answer was lost is applied when made again after a later ch
 
 test('the owner reads where group web pages and outside tools skip the card, and that members are chosen on Members', async () => {
   const groupTools =
-    'In a group, web pages and outside tools run without a card when you ask, or a member with “Web pages and outside tools” on asks; commands still wait, and Notion is never used in a group.';
+    'In a group, web pages and outside tools run without a card when you ask, or a member with “Web pages and outside tools” on asks, unless the model built an address or input that could carry data; commands still wait, and Notion is never used in a group.';
   const {page, problems} = await open('home');
   await page.getByText('Turn Nocheh on in a group and see who are members there.').waitFor();
   // The preview keeps no owner freedom setting, and the Inbox has no allowed action left here.
@@ -3317,7 +3317,7 @@ test('the owner reads where group web pages and outside tools skip the card, and
   await page.goto(origin + '/#chats?chat=-10073&tab=tools');
   const allowed = page.locator('section', {has: page.getByRole('heading', {name: 'Allowed actions'})});
   const groupAllowed =
-    'Web pages and outside tools other than Notion run without a card when you ask here, or a member with “Web pages and outside tools” on asks, and a message for this chat asked for here goes out without one. Commands still wait for your approval in the Inbox.';
+    'Web pages and outside tools other than Notion run without a card when you ask here, or a member with “Web pages and outside tools” on asks, unless the model built an address or input that could carry data. A message for this chat asked for here goes out without one. Commands still wait for your approval in the Inbox.';
   await allowed.getByText(groupAllowed).waitFor();
   assert.equal(await allowed.getByText('Anything else waits', {exact: false}).count(), 0);
   const privateAllowed = 'Nothing without asking. Each action waits for your approval in the Inbox.';

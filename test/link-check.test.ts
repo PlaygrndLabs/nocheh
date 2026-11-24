@@ -88,6 +88,10 @@ test('a group\'s tools permission covers only a read or tool call that sends no 
   assert.ok(!sendsNoData({url:'https://tools.example/mcp',tool:'lookup',input:{city:'x'.repeat(201)}}),'long input');
   assert.ok(!sendsNoData({url:'https://tools.example/mcp',tool:'lookup',input:{note:'see https://other.example/'}}),'an address in the input');
   assert.ok(!sendsNoData({url:'https://tools.example/mcp',tool:'lookup'}),'a call with no input to check');
+  assert.ok(!sendsNoData({url:`https://${'a'.repeat(63)}.${'b'.repeat(63)}.${'c'.repeat(63)}.example.com/`}),'a long site name counts');
+  assert.ok(!sendsNoData({url:'https://news.example.com/'+'x'.repeat(190)}),'the site name and path count together');
+  assert.ok(!sendsNoData({url:'https://tools.example/mcp',tool:'x'.repeat(128),input:{a:'y'.repeat(100)}}),'a tool name counts');
+  assert.ok(!sendsNoData({url:'https://tools.example/mcp',tool:'lookup',input:Object.fromEntries(Array.from({length:5},(_,n)=>['k'+n+'x'.repeat(50),{}]))}),'input keys count');
   assert.ok(!sendsNoData({}));
 });
 

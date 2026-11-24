@@ -173,6 +173,10 @@ test('members are checked before every effect in their groups, the owner first, 
     assert.deepEqual([pasted.state,pastedRow.authority,pastedRow.free_read],['approved','group_tools','typed']);
     const longInput=await tools.propose(await asked(NG2_TG,NG2,MEMBER_NG,'Ask the tool again'),{kind:'mcp',arguments:{url:'https://example.com/mcp',tool:'search',input:{q:'x'.repeat(201)}}});
     assert.deepEqual([longInput.state,(await tools.row(longInput.id)).authority],['proposed',null]);
+    // The site name counts too, and a path is read as it is sent: a dot segment is refused before anything is recorded.
+    const longSite=await browse(await asked(GP1,GP1,MEMBER_GP,'Read that site'),`https://${'a'.repeat(63)}.${'b'.repeat(63)}.${'c'.repeat(63)}.example.com/`);
+    assert.deepEqual([longSite.state,(await tools.row(longSite.id)).authority],['proposed',null]);
+    await assert.rejects(browse(await asked(GP1,GP1,MEMBER_GP,'Read the next page'),'https://example.com/'+'x'.repeat(300)+'/../p'),{status:400,code:'plain_path_required'});
     const many=await asked(GP1,GP1,MEMBER_GP,'Read every item'),states:string[]=[];
     for(let n=0;n<11;n++)states.push((await browse(many,'https://example.com/item-'+n)).state);
     assert.deepEqual(states,[...Array(10).fill('approved'),'proposed']);

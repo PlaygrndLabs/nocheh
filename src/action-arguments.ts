@@ -7,8 +7,15 @@ import {gmailArguments} from './gmail-arguments.js';
 /** Whether a web address's host is written plainly, so the card, a chat rule, the executor and any other parser all read
  * the same one (ADR-0214): no backslash, percent escape, user name, port spelling or non-ASCII name. */
 export const plainHost=(address:string,url:URL)=>/^https:\/\/([^/?#]*)/i.exec(address)?.[1]?.toLowerCase()===url.host&&/^[a-z0-9.-]+$/.test(url.hostname);
+/** Whether a web address with a plain host has its path written as it is sent (ADR-0291): no backslash and no `.` or `..`
+ * segment, escaped or not. A URL parser drops such a segment with the one before it, so every check would read a shorter
+ * address than the executor sends. */
+export const plainPath=(address:string,url:URL)=>{
+  const path=address.slice(('https://'+url.host).length).split('?')[0]!;
+  return !path.includes('\\')&&!/(?:^|\/)(?:\.|%2e){1,2}(?:\/|$)/i.test(path);
+};
 
-/** `stored` re-reads a saved operation: it keeps every check except the plain host one, which only new
+/** `stored` re-reads a saved operation: it keeps every check except the plain host and path ones, which only new
  * proposals need, since a chat rule only ever covers an operation proposed with a plain host (ADR-0214). */
 export function actionArguments(kind:unknown,value:unknown,stored=false) {
   const args=object(value), keys=Object.keys(args);
@@ -40,6 +47,7 @@ export function actionArguments(kind:unknown,value:unknown,stored=false) {
     try {url=new URL(address);}catch{throw new HttpError(400,'invalid_action_url');}
     if(url.protocol!=='https:'||url.username||url.password||url.hash||(url.port&&url.port!=='443')||url.hostname==='localhost')throw new HttpError(400,'public_https_required');
     if(!stored&&!plainHost(address,url))throw new HttpError(400,'plain_host_required');
+    if(!stored&&!plainPath(address,url))throw new HttpError(400,'plain_path_required');
     if(kind==='browser') {
       if(keys.some(k=>k!=='url'))throw new HttpError(400,'invalid_browser_action');
       return {url:address};
