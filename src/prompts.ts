@@ -212,7 +212,7 @@ export const labeledPlaceholders:Partial<Record<PromptKey,Readonly<Record<string
     job_turn:['{place}','{date}','{read}'],more:['{count}']},
   'telegram.member_read_texts':{source:['{member}'],closed:['{member}'],failed:['{member}']},
   'members.reminder_texts':{note_line:['{line}']},
-  'schedules.notice_texts':{set:['{name}'],when:['{when}'],next:['{next}'],quiet:['{name}']},
+  'schedules.notice_texts':{set:['{name}'],set_changed:['{name}'],when:['{when}'],next:['{next}'],does:['{prompt}'],held:['{reads}'],quiet:['{name}']},
 };
 /** The owner's lines of a labeled text that drop a value Nocheh fills in. Own lookups only, so a line named like an
  *  Object property ('constructor', '__proto__') is just a line; a text with no such lines is not read at all. */
@@ -442,16 +442,24 @@ export function privateAnswerLines(text:string|undefined):Record<PrivateAnswerTe
   return labeledLines(privateAnswerTexts,text) as Record<PrivateAnswerText,string>;
 }
 /** The message Nocheh posts in the owner's private chat when a reply set a schedule there with the agent's own schedule
- * tool (ADR-0266), one "name: text" line each: set, when, next and note are its lines ({name}, {when}, {next}), with the pause and delete
- * buttons; paused and deleted answer a press and are added under it; unnamed stands in for a schedule with no name and
+ * tool (ADR-0266), one "name: text" line each: set, when, next, does (its saved instruction, {prompt}) and note are its
+ * lines ({name}, {when}, {next}), with the pause and delete buttons. A schedule saved paused (ADR-0294) says waiting, or
+ * held when the reply that set it read outside content ({reads}, from the read_ lines), and set_changed when it was
+ * changed, with Start instead of Pause; paused, started and deleted answer a press and are added under it; unnamed stands in for a schedule with no name and
  * no_next for one with no next run; changed and only_owner answer a press that cannot act; quiet is what Run now sends there
  * when the run has nothing new ({name}). Code writes it, never a model. */
-export const scheduleNoticeTexts=['set: ⏰ New schedule: {name}','when: 🔁 {when}','next: ⏭ Next run: {next}',
+export const scheduleNoticeTexts=['set: ⏰ New schedule: {name}','set_changed: ⏰ Schedule changed: {name}','when: 🔁 {when}','next: ⏭ Next run: {next}',
+  'does: 📝 Does: {prompt}',
   'note: Each result comes here, and a run with nothing new sends nothing. All schedules are on the Schedules page.',
-  'pause: ⏸ Pause','delete: 🗑 Delete','paused: ⏸ Paused. Resume it on the Schedules page.','deleted: 🗑 Deleted.',
+  'held: ⏸ Saved paused, because the reply that set it read {reads}. Check what it does, then press Start.',
+  'waiting: ⏸ Saved paused. Press Start to run it.',
+  'read_forward: a forwarded message','read_file: a file','read_reply: a message you replied to','read_web: a web page',
+  'read_tools: an outside tool such as Gmail or Notion','read_other: content from outside this chat','read_and: and',
+  'pause: ⏸ Pause','start: ▶️ Start','delete: 🗑 Delete','paused: ⏸ Paused. Resume it on the Schedules page.','started: ▶️ Started.','deleted: 🗑 Deleted.',
   'unnamed: a schedule','no_next: none','changed: This schedule changed or is gone. See the Schedules page.','only_owner: Only the owner can do this.',
   'quiet: ✅ {name}: ran now, nothing new right now.'].join('\n');
-export type ScheduleNoticeText='set'|'when'|'next'|'note'|'pause'|'delete'|'paused'|'deleted'|'unnamed'|'no_next'|'changed'|'only_owner'|'quiet';
+export type ScheduleNoticeText='set'|'set_changed'|'when'|'next'|'does'|'note'|'held'|'waiting'|'read_forward'|'read_file'|'read_reply'|'read_web'|
+  'read_tools'|'read_other'|'read_and'|'pause'|'start'|'delete'|'paused'|'started'|'deleted'|'unnamed'|'no_next'|'changed'|'only_owner'|'quiet';
 /** The schedule notice lines, with any line the owner removed or left empty, or stored without a value it must keep, taken
  * from the default. */
 export function scheduleNoticeLines(text:string|undefined):Record<ScheduleNoticeText,string> {

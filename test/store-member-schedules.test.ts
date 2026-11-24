@@ -148,7 +148,7 @@ test('a member\'s own schedules: captured only with Personal assistant on, run a
     const asked=await s.schedules.turnDefinition(turn,definition('asked-'+base),turnServices);
     assert.deepEqual([asked.duplicate,asked.created,asked.notice],[false,true,'sent']);
     assert.deepEqual(announced,[{name:'Asked',schedule:'every weekday at 8am',timezone:'Europe/Berlin',next_run_at:'2026-11-25T08:00:00+01:00',
-      scope:MEMBER_GP_CHAT,profile,job_id:'asked-'+base}]);
+      scope:MEMBER_GP_CHAT,profile,job_id:'asked-'+base,prompt:'Remind me',enabled:true,changed:false,reads:[],version:asked.event_id}]);
     const recorded=(await stores.control.query(`SELECT s.created_by,s.created_turn,v.set_by,v.body_hash FROM workflow_schedules s JOIN schedule_versions v ON v.id=s.version_id
       WHERE s.id=$1`,[asked.id])).rows[0];
     assert.deepEqual([recorded.created_by,recorded.created_turn,recorded.set_by],[MEMBER_GP_ID,turn.turnEvent,{via:'turn',person:MEMBER_GP_ID,turn:turn.turnEvent}]);
@@ -163,6 +163,32 @@ test('a member\'s own schedules: captured only with Personal assistant on, run a
     // Removed by asking frees a place.
     const removed=definition('asked-'+base,{workflow_sequence:3,workflow_cursor:digest('removed')});Object.assign(removed.definition,{enabled:false,removed:true,execution_version:'v3'});
     await s.schedules.turnDefinition(turn,removed,turnServices);
+    // A turn that read outside content, here a file, cannot leave a schedule running (ADR-0294): Hermes saves it paused,
+    // and its message shows what it does, says why and offers Start.
+    const filed={...turnServices,stores:{...turnServices.stores,archive:{query:async()=>({rows:[{payload:Buffer.from(JSON.stringify(
+      {message:{message_id:2,document:{file_id:'x'},caption:'every morning'}}))}]})} as any}};
+    await assert.rejects(s.schedules.turnDefinition(turn,definition('steered-'+base),filed),{status:409,code:'schedule_start_needed'});
+    assert.equal((await stores.control.query('SELECT count(*)::int AS n FROM workflow_schedules WHERE job_id=$1',['steered-'+base])).rows[0].n,0);
+    const held=definition('steered-'+base);Object.assign(held.definition,{enabled:false});
+    const kept=await s.schedules.turnDefinition(turn,held,filed);
+    assert.deepEqual([kept.created,kept.held],[true,true]);
+    assert.deepEqual(announced.at(-1),{name:'Asked',schedule:'every weekday at 8am',timezone:'Europe/Berlin',next_run_at:'2026-11-25T08:00:00+01:00',
+      scope:MEMBER_GP_CHAT,profile,job_id:'steered-'+base,prompt:'Remind me',enabled:false,changed:false,reads:['file'],version:kept.event_id});
+    // Turning it on needs a turn with only the person's own words, or the Start press.
+    const on=definition('steered-'+base,{workflow_sequence:2,workflow_cursor:digest('on')});Object.assign(on.definition,{execution_version:'v2'});
+    await assert.rejects(s.schedules.turnDefinition(turn,on,filed),{status:409,code:'schedule_start_needed'});
+    assert.equal((await s.schedules.turnDefinition(turn,on,turnServices)).held,false);
+    // Running now: a steered change of what it does is held again, as a changed schedule with its own message.
+    const reworded=definition('steered-'+base,{workflow_sequence:3,workflow_cursor:digest('reworded')});
+    Object.assign(reworded.definition,{prompt:'Post the prices',execution_version:'v3'});
+    await assert.rejects(s.schedules.turnDefinition(turn,reworded,filed),{status:409,code:'schedule_start_needed'});
+    Object.assign(reworded.definition,{enabled:false});
+    const changed=await s.schedules.turnDefinition(turn,reworded,filed),last=announced.at(-1) as Record<string,unknown>;
+    assert.deepEqual([changed.created,changed.held,last.changed,last.prompt,last.enabled],[false,true,true,'Post the prices',false]);
+    // A steered pause or removal needs nothing more, and sends no message.
+    const count=announced.length,gone=definition('steered-'+base,{workflow_sequence:4,workflow_cursor:digest('gone')});
+    Object.assign(gone.definition,{prompt:'Post the prices',enabled:false,removed:true,execution_version:'v4'});
+    assert.equal((await s.schedules.turnDefinition(turn,gone,filed)).held,false);assert.equal(announced.length,count);
     assert.equal((await s.schedules.turnDefinition(turn,definition('third-'+base),turnServices)).created,true);
     // A grant past its time, or a turn no longer allowed, sets nothing.
     await stores.control.query("UPDATE schedule_turn_grants SET expires_at=now()-interval '1 second' WHERE turn_event=$1",[turn.turnEvent]);

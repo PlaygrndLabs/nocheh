@@ -14,6 +14,7 @@ import {OperationRepository} from './operations.js';
 import {RuntimeProfileRepository} from './runtime-profiles.js';
 import {forwardedMessage} from './owner-member-asks.js';
 import {ownerTimeZone,setOwnerTimeZone,timeZone} from './task-settings.js';
+import {outsideReads} from './turn-reads.js';
 
 export const scheduleStorageSchema=`
 CREATE TABLE IF NOT EXISTS schedule_versions (
@@ -48,12 +49,16 @@ ALTER TABLE schedule_versions ADD COLUMN IF NOT EXISTS body_hash text;
 ALTER TABLE schedule_versions ADD COLUMN IF NOT EXISTS set_by jsonb;
 ALTER TABLE managed_runs ADD COLUMN IF NOT EXISTS scheduled_for timestamptz;
 ALTER TABLE managed_runs ADD COLUMN IF NOT EXISTS fired_by text;
+-- The id of Nocheh's latest message about a schedule set by asking, which a press on it edits (ADR-0294).
+ALTER TABLE workflow_schedules ADD COLUMN IF NOT EXISTS notice_id text;
 `;
 const identity=(value:unknown)=>{const id=string(value,128);if(!/^[a-zA-Z0-9_-]+$/.test(id))throw new HttpError(400,'invalid_schedule_identity');return id;};
 /** A profile or job id as Hermes names them; 400 `invalid_schedule_identity` otherwise. */
 export const scheduleIdentity=identity;
 const hash=(value:unknown)=>{const id=string(value,64);if(!/^[a-f0-9]{64}$/.test(id))throw new HttpError(400,'invalid_schedule_hash');return id;};
 const scheduleId=(profile:string,job:string)=>digest(canonical([profile,job]));
+/** A schedule's id in Nocheh's records, from its profile and Hermes job id. */
+export const scheduleKey=scheduleId;
 /** A request id a press or Hermes carries: what binds a grant to one change or one Run now. */
 const requestId=(value:unknown,code:string)=>{if(typeof value!=='string'||!/^[a-zA-Z0-9_-]{1,128}$/.test(value))throw new HttpError(400,code);return value;};
 const grantId=(kind:'edit'|'run_now',schedule:string,request:string)=>digest(canonical(['schedule-grant',kind,schedule,request]));
@@ -144,10 +149,16 @@ export class ScheduleRepository {
       return {set_by:{via:'edit',person:row.person,request_id:row.request_id}};
     };
   }
-  /** A person's live turn (schedule_turn_grants): any change in that turn's own chat, within a member's cap. */
-  private turnChange(grant:{scope:string;person:string},turn:string,limit:number|null):ScheduleAuthorizer {
+  /**
+   * A person's live turn (schedule_turn_grants): any change in that turn's own chat, within a member's cap. A turn that
+   * read outside content (`steered`, ADR-0294) may not leave a schedule running unless it already ran with that very
+   * instruction: 409 `schedule_start_needed`, and Hermes saves it paused instead, for its person's Start.
+   */
+  private turnChange(grant:{scope:string;person:string},turn:string,limit:number|null,steered=false):ScheduleAuthorizer {
     return async(db,current,document,{version})=>{
       if(current&&current.scope!==grant.scope)throw new HttpError(403,'profile_scope_denied');
+      if(steered&&document.enabled===true&&document.removed!==true&&!(current&&current.configuration?.enabled!==false&&
+        !current.configuration?.removed&&bodyHash(document)===await this.currentBody(current)))throw new HttpError(409,'schedule_start_needed');
       if(grant.person!=='owner'&&!document.removed&&(!current||current.configuration?.removed)) {
         // Two turns of one chat cannot both take its last place.
         if(version)await db.query('SELECT pg_advisory_xact_lock(hashtextextended($1,803369))',['schedule-chat:'+grant.scope]);
@@ -247,14 +258,21 @@ export class ScheduleRepository {
     if(document.deliver!=='telegram'||schedule.kind==='interval'&&(!Number.isSafeInteger(schedule.minutes)||Number(schedule.minutes)<1)||
       typeof document.timezone==='string'&&!knownZone(document.timezone))throw new HttpError(400,'invalid_schedule_definition');
     if(schedule.kind==='cron'&&!parseCron(schedule.expr))throw new HttpError(400,'schedule_cron_unsupported');
-    const result=await this.record(body,this.turnChange(grant,turn,rules.limit));
-    if(result.duplicate)return {id:result.id,event_id:result.event_id,duplicate:true,superseded:result.superseded,created:false,notice:null};
+    // What outside content reached this turn so far, and the instruction the schedule ran with before it (ADR-0294).
+    const reads=await outsideReads(this.control,s.stores.archive,turn);
+    const before=(await this.control.query(currentSql,[scheduleId(grant.profile,identity(body.job_id))])).rows[0];
+    const earlier=before&&!before.configuration?.removed?await this.currentBody(before):null;
+    const result=await this.record(body,this.turnChange(grant,turn,rules.limit,reads.length>0));
+    if(result.duplicate)return {id:result.id,event_id:result.event_id,duplicate:true,superseded:result.superseded,created:false,notice:null,held:false};
+    // Held: saved paused, by a turn that read outside content, as new or with another instruction. Its person starts it.
+    const held=reads.length>0&&!document.removed&&document.enabled===false&&(result.created||earlier!==bodyHash(document));
     let state:string|null=null;
-    if(result.created&&!document.removed) {
+    if(!document.removed&&(result.created||held)) {
       const fields=Object.fromEntries(['name','schedule','timezone','next_run_at'].filter(key=>key in notice).map(key=>[key,notice[key]]));
-      state=(await s.scheduleNotices.announce({...fields,scope:grant.scope,profile:grant.profile,job_id:body.job_id}).catch(()=>({state:'failed'}))).state;
+      state=(await s.scheduleNotices.announce({...fields,scope:grant.scope,profile:grant.profile,job_id:body.job_id,prompt:document.prompt,
+        enabled:document.enabled,changed:!result.created,reads:held?reads:[],version:result.event_id}).catch(()=>({state:'failed'}))).state;
     }
-    return {id:result.id,event_id:result.event_id,duplicate:false,created:result.created,notice:state};
+    return {id:result.id,event_id:result.event_id,duplicate:false,created:result.created,notice:state,held};
   }
   /**
    * Whether a fire Hermes captured may run (ADR-0290): a timed fire needs the clock grant Nocheh issued around this

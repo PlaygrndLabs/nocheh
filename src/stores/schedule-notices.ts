@@ -12,7 +12,7 @@ import {HttpError,object,string} from '../http.js';
 import {fillTemplate,ownerPrompts,scheduleNoticeLines,type ScheduleNoticeText} from '../prompts.js';
 import type {RuntimeCall} from '../runtime.js';
 import {memberReads} from './member-reads.js';
-import {issueScheduleGrant} from './schedules.js';
+import {issueScheduleGrant,scheduleKey} from './schedules.js';
 
 /*
  * The owner's own message when a reply in their private chat set a schedule with the agent's own schedule tool (ADR-0266).
@@ -40,10 +40,12 @@ export async function authorizeScheduleNotice(db:Pick<pg.Pool,'query'>,request:{
   return !!target&&target.topic===undefined&&target.chat_id===request.chat;
 }
 
-/** A button's data: `nk`, the choice (p pauses, d deletes), the 24 hex of the chat's schedule store and the schedule's
- *  12 hex id, as Hermes makes them. */
-export const scheduleButton=/^nk([pd])([a-f0-9]{24})([a-f0-9]{12})$/;
-export type ScheduleChoice='p'|'d';
+/** A button's data: `nk`, the choice (p pauses, s starts one saved paused, d deletes), the 24 hex of the chat's schedule
+ *  store and the schedule's 12 hex id, as Hermes makes them. */
+export const scheduleButton=/^nk([psd])([a-f0-9]{24})([a-f0-9]{12})$/;
+export type ScheduleChoice='p'|'s'|'d';
+/** How much of a schedule's saved instruction its message shows; the Schedules page shows all of it. */
+const PROMPT_POINTS=700;
 const PROFILE=/^nocheh-([a-f0-9]{24})$/,JOB=/^[a-f0-9]{12}$/;
 /** At most `size` code points, as Telegram counts a button's label and a press's answer. */
 const points=(text:string,size:number)=>Array.from(text).slice(0,size).join('');
@@ -59,20 +61,42 @@ export function ownerTime(value:unknown,zone:string):string|null {
   try{return format(zone);}catch{return format('UTC')+' UTC';}
 }
 
+/** A schedule's saved instruction as its message shows it: the start of it, on one paragraph's worth of lines. */
+function instruction(value:unknown):string|null {
+  if(typeof value!=='string'||!value.trim())return null;
+  const text=value.replace(/\r\n?/g,'\n').replace(/\n{3,}/g,'\n\n').trim(),shown=points(text,PROMPT_POINTS);
+  return shown.length<text.length?shown.trimEnd()+'…':shown;
+}
+/** The outside content a turn read, in the owner's words: "a web page and a file". */
+function readsText(lines:Record<ScheduleNoticeText,string>,reads:unknown[]):string {
+  const known:Record<string,ScheduleNoticeText>={forward:'read_forward',file:'read_file',reply:'read_reply',web:'read_web',tools:'read_tools'};
+  const names=[...new Set(reads.map(read=>lines[known[String(read)]??'read_other']))];
+  return names.length<2?names[0]??'':names.slice(0,-1).join(', ')+' '+lines.read_and+' '+names.at(-1);
+}
+
 export class ScheduleNotices {
-  constructor(readonly control:pg.Pool,readonly policy:()=>Pick<AssistantPolicy,'owner_id'|'owner_chat'>,readonly call:RuntimeCall,readonly agent:Agent){}
+  /** `instruction` reads a schedule's saved instruction now, for its message after a press (ADR-0294). */
+  constructor(readonly control:pg.Pool,readonly policy:()=>Pick<AssistantPolicy,'owner_id'|'owner_chat'>,readonly call:RuntimeCall,readonly agent:Agent,
+    readonly instruction:(profile:string,job:string)=>Promise<string|null>=async()=>null){}
 
   private async lines():Promise<Record<ScheduleNoticeText,string>> {
     return scheduleNoticeLines((await ownerPrompts(this.control))['schedules.notice_texts']);
   }
   private static id(profile:string,job:string){return digest('schedule-notice:'+profile+':'+job);}
 
-  /** The message's text from the schedule's fields: its name, how often and in which zone it runs, and its next run. */
+  /**
+   * The message's text from the schedule's fields: its name, how often and in which zone it runs, its next run and what
+   * it does, its saved instruction (ADR-0294). One saved paused says so, and why when the reply that set it read outside
+   * content (`reads`), when its message first announces it (`saved_paused`); `changed` names it as changed rather than new.
+   */
   text(lines:Record<ScheduleNoticeText,string>,body:Record<string,unknown>):string {
-    const zone=typeof body.timezone==='string'?body.timezone:null,when=line(body.schedule,120)??'';
-    return [fillTemplate(lines.set,{name:line(body.name,80)??lines.unnamed}),
+    const zone=typeof body.timezone==='string'?body.timezone:null,when=line(body.schedule,120)??'',off=body.enabled===false,waiting=off&&body.saved_paused===true;
+    const reads=Array.isArray(body.reads)?readsText(lines,body.reads):'';
+    return [fillTemplate(body.changed===true?lines.set_changed:lines.set,{name:line(body.name,80)??lines.unnamed}),
       fillTemplate(lines.when,{when:when&&zone?`${when} (${zone})`:when||zone}),
-      fillTemplate(lines.next,{next:ownerTime(body.next_run_at,zone??'UTC')??lines.no_next}),lines.note].filter(Boolean).join('\n');
+      off?'':fillTemplate(lines.next,{next:ownerTime(body.next_run_at,zone??'UTC')??lines.no_next}),
+      fillTemplate(lines.does,{prompt:instruction(body.prompt)}),
+      waiting?reads?fillTemplate(lines.held,{reads}):lines.waiting:'',lines.note].filter(Boolean).join('\n');
   }
 
   /**
@@ -86,13 +110,18 @@ export class ScheduleNotices {
     const owner=ownerChat(this.policy()),member=!!owner&&scope!==owner&&memberAssistant(scope),target=telegramAddress(member?scope:owner);
     if(!owner||scope!==owner&&!member||!target)return {state:'skipped'};
     if(!PROFILE.test(profile))throw new HttpError(400,'invalid_schedule_identity');
-    const lines=await this.lines(),text=this.text(lines,body),id=ScheduleNotices.id(profile,job);
+    // A schedule's first message keeps its id; a later one, about a change saved paused, is its own message (ADR-0294).
+    const lines=await this.lines(),text=this.text(lines,{...body,saved_paused:body.enabled===false}),
+      id=body.changed===true?digest('schedule-notice:'+profile+':'+job+':'+string(body.version,128)):ScheduleNotices.id(profile,job);
+    await this.control.query('UPDATE workflow_schedules SET notice_id=$2 WHERE id=$1',[scheduleKey(profile,job),id]);
     const notice={id,...target,text,send_class:'notice'};
     // A member's chat takes it only after nocheh-telegram's one ask (authorizeScheduleNotice), for each exact text it may
     // send: with its buttons, or without them when Telegram refuses them.
     if(member)await this.control.query(`INSERT INTO schedule_notice_grants(id,chat_id,text_digest) VALUES($1,$2,$3)
       ON CONFLICT(id) DO UPDATE SET chat_id=$2,text_digest=$3,created_at=now()`,[id,scope,noticeDigest(text)]);
-    const buttons=JOB.test(job)?[[{text:points(lines.pause,40),callback:'nkp'+profile.slice(7)+job},{text:points(lines.delete,40),callback:'nkd'+profile.slice(7)+job}]]:null;
+    // Pause, or Start for one saved paused, and Delete.
+    const first=body.enabled===false?{text:points(lines.start,40),callback:'nks'+profile.slice(7)+job}:{text:points(lines.pause,40),callback:'nkp'+profile.slice(7)+job};
+    const buttons=JOB.test(job)?[[first,{text:points(lines.delete,40),callback:'nkd'+profile.slice(7)+job}]]:null;
     try{return {state:String((await this.call('telegram.notice',buttons?{...notice,buttons}:notice,30000))?.state??'failed')};}
     catch(error) {
       if(!buttons||!(error instanceof HttpError)||error.code!=='telegram_rejected_request')return {state:'failed'};
@@ -102,9 +131,9 @@ export class ScheduleNotices {
 
   /**
    * A press on the message, already checked to be the owner's own in their private chat, or a member's own in theirs
-   * (`chat`): pause or delete that chat's schedule through the agent, as the Schedules page does. The message then shows
-   * the answer under its text and loses its buttons. Nocheh grants that one change first, as the presser's (ADR-0290).
-   * Returns the answer to the press.
+   * (`chat`): pause, start (resume) or delete that chat's schedule through the agent, as the Schedules page does. The
+   * message then shows the answer under its text and loses its buttons. Nocheh grants that one change first, as the
+   * presser's (ADR-0290). Returns the answer to the press.
    */
   async press(choice:ScheduleChoice,store:string,job:string,press:string,chat?:string):Promise<string> {
     const lines=await this.lines(),profile='nocheh-'+store,owner=chat??ownerChat(this.policy()),target=telegramAddress(owner);
@@ -118,14 +147,17 @@ export class ScheduleNotices {
       // The owner, or the member whose own chat this is; a chat that is no longer a member's changes nothing.
       const person=chat===undefined?'owner':(await memberReads(this.control,chat,ownerChat(this.policy())))?.member;
       if(!person)return lines.changed;
-      const operation=choice==='p'?'pause':'delete',request='press-'+press.slice(0,64);
+      const operation=choice==='p'?'pause':choice==='s'?'resume':'delete',request='press-'+press.slice(0,64);
       await issueScheduleGrant(this.control,{profile,job_id:job,operation,person,request_id:request,scope:String(found.scope)});
       const result=await manage({operation,profile,job_id:job,request_id:request});
-      text=this.text(lines,choice==='p'&&result.schedule&&typeof result.schedule==='object'?result.schedule as Record<string,unknown>:found);
-      reply=choice==='p'?lines.paused:lines.deleted;
+      const now=choice!=='d'&&result.schedule&&typeof result.schedule==='object'?result.schedule as Record<string,unknown>:found;
+      text=this.text(lines,{...now,prompt:await this.instruction(profile,job).catch(()=>null)});
+      reply=choice==='p'?lines.paused:choice==='s'?lines.started:lines.deleted;
     }catch(error){if(!(error instanceof HttpError)||error.status>=500&&error.code!=='agent_rejected')throw error;return lines.changed;}
-    // The message shows the answer and loses its buttons; an edit that fails changes nothing else.
-    if(target)await this.call('telegram.notice',{id:ScheduleNotices.id(profile,job),...target,text:text+'\n\n'+points(reply,280),edit:true},30000).catch(()=>{});
+    // The message shows the answer and loses its buttons; an edit that fails changes nothing else. The latest message
+    // about the schedule is the one with buttons.
+    const notice=(await this.control.query<{notice_id:string|null}>('SELECT notice_id FROM workflow_schedules WHERE id=$1',[scheduleKey(profile,job)])).rows[0]?.notice_id;
+    if(target)await this.call('telegram.notice',{id:notice??ScheduleNotices.id(profile,job),...target,text:text+'\n\n'+points(reply,280),edit:true},30000).catch(()=>{});
     return reply;
   }
 }

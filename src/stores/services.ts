@@ -55,7 +55,7 @@ import {BrowserCaptureRepository} from './browser-capture.js';
 import {BrowserRunRepository} from './browser-runs.js';
 import {BrowserDeliveryRepository} from './browser-delivery.js';
 import {ScheduledRunRepository} from './scheduled-runs.js';
-import {ScheduleRepository} from './schedules.js';
+import {ScheduleRepository,scheduleKey} from './schedules.js';
 import {RuntimeProfileRepository} from './runtime-profiles.js';
 import {EntityRepository} from './entities.js';
 import {MemoryAccessRepository} from './memory-access.js';
@@ -123,7 +123,11 @@ export function storageServices(stores:StorePools,options:{dataDir:string;detect
   // What is left to do once someone adds Nocheh to a group or removes it: leave, the card and the owner's notes (ADR-0253).
   const chatAdds=new ChatAdds(stores.control,options.policy,options.runtime,chats);
   // The owner's message when a reply set a schedule in their private chat, with Pause and Delete (ADR-0266).
-  const scheduleNotices=new ScheduleNotices(stores.control,options.policy,options.runtime,options.agent);
+  const scheduleNotices=new ScheduleNotices(stores.control,options.policy,options.runtime,options.agent,async(profile,job)=>{
+    const version=(await stores.control.query<{version_id:string}>('SELECT version_id FROM workflow_schedules WHERE id=$1',[scheduleKey(profile,job)])).rows[0]?.version_id;
+    const saved=version?await derived.checkpoint('schedule-prompt:'+version):undefined;
+    return saved?saved.content.toString():null;
+  });
   const telegramActions=new TelegramActionRepository(stores,access,derived,guards,prepared,turns,options.runtime,detect);
   const memoryAccess=new MemoryAccessRepository(stores,access,derived,guards,prepared,entities,projects,telegramActions,detect);
   const memoryMap=new MemoryMapRepository(stores,memoryAccess);
