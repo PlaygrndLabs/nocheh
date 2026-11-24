@@ -3,7 +3,7 @@ import type pg from 'pg';
 import {admin,boundReader,type Reader} from '../access.js';
 import {canonical,digest} from '../archive.js';
 import {HttpError,object,string} from '../http.js';
-import {enterFamily,leaveFamily,releaseOperation,requestWorkflow} from '../workflows/store.js';
+import {enterFamily,leaveFamily,releaseOperation,requestOpenWorkflow,requestWorkflow} from '../workflows/store.js';
 import type {SourceAccessRepository} from './access.js';
 import type {DerivedRepository,DerivativeReference} from './derived.js';
 import type {GuardBinding} from './guards.js';
@@ -115,7 +115,9 @@ export class ScheduleRepository {
         ON CONFLICT(id) DO UPDATE SET version_id=$5,cursor=$6,sequence=$7,updated_at=now()`,[id,profile,job,scope,operation.id,cursor,sequence]);
       await db.query(`UPDATE workflow_registry SET state='skipped',waiting_reason='superseded',revision=revision+1,updated_at=now()
         WHERE family='schedules' AND job_id LIKE $1 AND job_id<>$2 AND state IN ('queued','waiting','retryable_failed')`,['schedule:'+id+':%','schedule:'+id+':'+cursor]);
-      await requestWorkflow(db,'schedules','schedule:'+id+':'+cursor);await db.query('COMMIT');
+      // A Run now moves the cursor away and back again (pending, running, then idle with the same next run); the cursor's
+      // earlier row is then closed, and a new generation runs it (ADR-0266).
+      await requestOpenWorkflow(db,'schedules','schedule:'+id+':'+cursor);await db.query('COMMIT');
       return {id,event_id:operation.id,duplicate:false,definition:output,prompt:prepared};
     }catch(error){await db.query('ROLLBACK');throw error;}finally{db.release();}
   }
