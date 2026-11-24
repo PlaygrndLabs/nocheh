@@ -585,35 +585,32 @@ started, whether it was timed or Run now, how it ended (Sent, Nothing new, Waiti
 for your yes, Not sent, Skipped, Failed) and how long it took. A timed run with
 nothing new sends nothing; the log shows it as Nothing new.
 
-Open **Hermes → Cron** to create a prompt schedule for the owner-private profile or
-one selected group. The native schedule builder supports intervals, cron expressions
-and one-time schedules. Each fire starts a fresh session with that profile's memory.
-Set **Run settings** to override agent steps and time for one job, or leave them
-blank to inherit. Production model selection remains in Nocheh Settings.
+Nocheh decides that a schedule may be set or run (ADR-0290). A schedule is set only
+by asking in a chat; Nocheh records who set it and from which message. Pause, Resume,
+Run now and Delete each carry Nocheh's own grant for that one press, and Hermes runs a
+timed schedule only when Nocheh's clock agrees that its time has come. Runs more than
+60 seconds late are recorded as missed and are not replayed; there is no catch-up.
+A schedule whose last change Nocheh did not save (a new one Nocheh refused is removed)
+shows **Not running: ask again to set it** and offers only Delete; a change whose
+answer was lost on the way is posted again until Nocheh answers. A cron Nocheh cannot
+time exactly, such as `0 23/2 * * *`, is refused when it is set.
+Original prompts and generated results remain separately inspectable in Inbox ›
+History, including after deleting a schedule.
 
-**Local** saves results in Inbox › History. **Telegram** sends the result to your private
-chat with no card, or proposes the exact result to a group for owner approval. Overlong results stay local with a visible delivery error.
-Pause prevents future starts; Cancel run interrupts an active run. Runs more than
-60 seconds late are recorded as missed; **Catch up once** is an explicit extra run.
-It does not replay every missed interval. Original prompts and generated results
-remain separately inspectable in Inbox › History, including after deleting a schedule.
+**Hermes → Cron** and `nocheh cron` only read: they list schedules, show one and its
+runs. Creating, editing, pausing, running and deleting there are refused
+(`cron_read_only`); use the Schedules page or ask in chat.
 
 ```sh
 ./bin/nocheh cron list --profile all
-./bin/nocheh cron create --profile PROFILE --file job.json
 ./bin/nocheh cron show JOB_ID --profile PROFILE
-./bin/nocheh cron update JOB_ID --profile PROFILE --file changes.json --revision REVISION
-./bin/nocheh cron pause JOB_ID --profile PROFILE
-./bin/nocheh cron trigger JOB_ID --profile PROFILE --request-id UNIQUE_REQUEST_ID
-./bin/nocheh cron catch-up JOB_ID --profile PROFILE --request-id UNIQUE_REQUEST_ID
-./bin/nocheh cron cancel JOB_ID --profile PROFILE
 ./bin/nocheh cron runs JOB_ID --profile PROFILE
 ```
 
-A minimal job file is `{"name":"Daily review","prompt":"Review today's archived notes.","schedule":"0 18 * * *","deliver":"local"}`.
-The native parser uses the profile's Hermes timezone; ISO dates include their UTC
-offset. Reuse the same request ID only when retrying the same manual request.
-Custom skills/scripts, alternate providers and topic schedules are not enabled.
+A schedule that is not set by asking (copied into Hermes's store by hand, or brought
+back from an export) stays inert until it is set again by asking. Custom
+skills/scripts, alternate providers, new group schedules and topic schedules are
+not enabled.
 
 ## Original and guarded versions (ADR-0033)
 

@@ -10,7 +10,7 @@ import type {GuardBinding} from './guards.js';
 import type {RuntimeTurnRepository} from './turns.js';
 import {OperationRepository} from './operations.js';
 import {ManagedExecutionRepository,managedEventId,managedIdentity,type ManagedInput} from './managed-execution.js';
-import type {ScheduleRepository} from './schedules.js';
+import {issueClockGrant,type ScheduleRepository} from './schedules.js';
 import {silentResult,type TelegramActionRepository} from './telegram-actions.js';
 import {ownerChat} from '../assistant-policy.js';
 import {servedDestination} from '../destinations.js';
@@ -39,7 +39,9 @@ export class ScheduledRunRepository extends ManagedExecutionRepository {
     return member===null?principal:this.access.bindReads({...principal,member});
   }
   constructor(access:SourceAccessRepository,derived:DerivedRepository,turns:RuntimeTurnRepository,token:string,agent:Agent,
-    readonly schedules:ScheduleRepository,readonly actions:TelegramActionRepository){super(access,derived,turns,token,agent);}
+    readonly schedules:ScheduleRepository,readonly actions:TelegramActionRepository,
+    /** The owner's card for a result that waits for them (ActionCommandRepository.offer). */
+    readonly offer?:(result:Record<string,any>)=>Promise<unknown>){super(access,derived,turns,token,agent);}
   protected async readiness(_row:any){return observation('completed','preparation');}
   private async version(row:any){
     const version=(await this.control.query('SELECT * FROM schedule_versions WHERE id=$1',[row.schedule_version])).rows[0];
@@ -133,8 +135,10 @@ export class ScheduledRunRepository extends ManagedExecutionRepository {
     return {runs};
   }
   async delivery(input:unknown){return this.actions.requestScheduled({admin:true,scope:null},managedEventId(object(input).event_id));}
+  /** Nocheh delivers a completed run itself, and a result that waits for the owner gets its card here; Hermes no longer
+   *  asks for either (ADR-0290). A card that cannot be posted leaves the result in the Inbox. */
   override async run(id:string,authority:ExecutionAuthority):Promise<Observation>{const result=await super.run(id,authority);
-    if(result.state==='completed')await this.delivery({event_id:id});return result;}
+    if(result.state==='completed'){const sent=await this.delivery({event_id:id});if(this.offer)await this.offer(sent as Record<string,any>).catch(()=>{});}return result;}
   async operation(job:string,authority:ExecutionAuthority):Promise<Observation>{
     if(job.startsWith('run:'))return this.run(managedEventId(job.slice(4)),authority);
     const match=/^schedule:([a-f0-9]{64}):([a-f0-9]{64})$/.exec(job);if(!match)return observation('failed','admission');
@@ -153,7 +157,11 @@ export class ScheduledRunRepository extends ManagedExecutionRepository {
     if(binding.mode==='on')await this.guards.prepare(row.prompt_reference,this.schedules.detectorVersion,this.schedules.detect);
     const ownership=await this.schedules.ownership();
     if(ownership.owner!==authority.owner||ownership.epoch!==authority.epoch||!ownership.admission)return observation('waiting','schedule',0,Date.now()+30000,'owner_paused');
+    // Hermes may capture one timed fire of this cursor only while this advance runs (ADR-0290). An advance this side
+    // gave up on (its call timed out) may still be capturing, so its grant then ends only when it expires.
+    const grant=await issueClockGrant(this.control,row.id,row.cursor,authority.epoch);
     const result=await agentOperation(this.agent,'advanceSchedules')({logical_profile:row.logical_profile,job_id:row.job_id,cursor:row.cursor,owner_epoch:authority.epoch});
+    await this.control.query('DELETE FROM schedule_grants WHERE id=$1',[grant]).catch(()=>{});
     if(!['waiting','completed','skipped'].includes(String(result.state))||result.state==='waiting'&&(!Number.isSafeInteger(result.next_attempt)||Number(result.next_attempt)<0))
       throw new HttpError(503,'invalid_schedule_observation');
     return observation(result.state as 'waiting'|'completed'|'skipped','schedule',0,result.state==='waiting'?Number(result.next_attempt):Date.now(),result.state==='waiting'?'prerequisite':null);

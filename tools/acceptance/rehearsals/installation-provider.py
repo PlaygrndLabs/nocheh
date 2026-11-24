@@ -34,9 +34,9 @@ class ScriptedAgent:
     # as a model notes what it read, so a scenario sees which messages a review read and how the note is labelled.
     REVIEW_NOTE = re.compile(r'\[\[review-note:([^\]]{1,300})\]\]')
     # Any Nocheh tool (Hermes names Nocheh's MCP tools mcp__nocheh__<tool>), Hermes's own memory or to-do tool, or a
-    # Hermes tool of a job's sealed box, with exact JSON arguments: [[tool:mcp__nocheh__tasks {"action":"list"}]],
+    # Hermes tool of a job's sealed box, or Hermes's schedule tool in a reply that may set schedules, with exact JSON arguments: [[tool:mcp__nocheh__tasks {"action":"list"}]],
     # [[tool:memory {"action":"add",...}]]. Several in one turn are called one after another.
-    TOOL = re.compile(r'\[\[tool:(mcp__nocheh__[a-z_]+|memory|todo_list|terminal|read_file|write_file|search_files|patch|execute_code)\s+(\{.*?\})\]\]', re.S)
+    TOOL = re.compile(r'\[\[tool:(mcp__nocheh__[a-z_]+|memory|todo_list|terminal|read_file|write_file|search_files|patch|execute_code|cronjob_manage)\s+(\{.*?\})\]\]', re.S)
     # [[usage:N]] reports N prompt tokens for each scripted answer in that turn, so a background job's cost adds up.
     USAGE = re.compile(r'\[\[usage:([0-9]{1,9})\]\]')
     # [[delay:S]] makes each scripted answer in that turn wait S seconds (1 to 90, under the broker's request deadline),

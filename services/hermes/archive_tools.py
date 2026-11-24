@@ -47,8 +47,10 @@ def request(path,body=None,timeout=None):
                                  data=None if body is None else json.dumps(body,ensure_ascii=False).encode(),
                                  headers={'Authorization': 'Bearer ' + credential,'Content-Type':'application/json'})
     # Prepared context can include a cold guard-model pass. It is still bounded,
-    # but must not share the short timeout used by ordinary archive reads.
-    timeout = timeout or (60 if path == '/v1/context/prepare' else 15)
+    # but must not share the short timeout used by ordinary archive reads. A
+    # schedule set by asking can take the same pass, then Nocheh's message in
+    # the chat (two tries of 30 s), all within the broker's two minutes.
+    timeout = timeout or {'/v1/context/prepare':60,'/v1/schedules/turn/definition':110}.get(path,15)
     with urllib.request.urlopen(req,timeout=timeout) as response:
         data=response.read(2*1024*1024+1)
         if len(data)>2*1024*1024:

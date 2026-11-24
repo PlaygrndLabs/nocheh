@@ -1,8 +1,12 @@
 """Hermes's schedule tool in the owner's private chat (ADR-0266): the gate, the result notes and the mounted store."""
+import io
 import json
+import os
 import tempfile
 import unittest
 from pathlib import Path
+from unittest.mock import patch
+from urllib.error import HTTPError
 from services.hermes import schedule_gate as gate
 from services.hermes import security_launcher as launcher
 
@@ -56,20 +60,45 @@ class GateTests(unittest.TestCase):
         self.assertEqual(self.call(action='create',prompt='p',schedule='every 1h',script='',skills=[],no_agent=False,paused=False)['action'],'modify')
 
     def test_a_member_limit_counts_what_this_reply_adds(self):
-        gate.bind('UTC',limit=2,count=1)
+        gate.bind('UTC',limit=2,count=1,profile=LOGICAL,scope='701',home='/nonexistent')
         self.assertEqual(self.call(action='create',prompt='p',schedule='every 1h')['action'],'modify')
-        gate.tool_result(tool_name=gate.TOOL,result=json.dumps({'success':True,'job_id':'abc'}))
+        with patch('services.hermes.native_cron.turn_capture',lambda *a:{'created':True}):
+            gate.tool_result(tool_name=gate.TOOL,args={'action':'create'},result=json.dumps({'success':True,'job_id':'abc'}))
         self.assertIn('2 schedules',self.call(action='create',prompt='p',schedule='every 1h')['message'])
 
     def test_a_result_keeps_hermes_fields_and_gets_nocheh_note(self):
-        gate.bind('UTC')
+        gate.bind('UTC',profile=LOGICAL,scope='42',home='/nonexistent')
         raw=json.dumps({'success':True,'job_id':'abc','name':'Morning','next_run_at':'2026-11-21T08:00:00+00:00',
                         'message':'Delivered by the gateway to your home channel','delivery_warning':'gateway not running'})
-        value=json.loads(gate.tool_result(tool_name=gate.TOOL,result=raw))
+        with patch('services.hermes.native_cron.turn_capture',lambda *a:{'created':True}):
+            value=json.loads(gate.tool_result(tool_name=gate.TOOL,args={'action':'create'},result=raw))
         self.assertEqual(set(value),{'success','job_id','name','next_run_at','note'})
         self.assertEqual(value['note'],gate.NOTE)
-        self.assertNotIn('note',json.loads(gate.tool_result(tool_name=gate.TOOL,result='{"success":false,"error":"bad schedule"}')))
+        self.assertNotIn('note',json.loads(gate.tool_result(tool_name=gate.TOOL,args={'action':'create'},result='{"success":false,"error":"bad schedule"}')))
         self.assertIsNone(gate.tool_result(tool_name=gate.TOOL,result='not json'))
+
+    def test_a_schedule_nocheh_did_not_record_says_so_and_is_not_counted(self):
+        gate.bind('UTC',limit=5,count=1,profile=LOGICAL,scope='701',home='/nonexistent')
+        def refuse(code):
+            def capture(*_):raise HTTPError('http://nocheh/v1/schedules/turn/definition',403,'refused',{},io.BytesIO(json.dumps({'error':code}).encode()))
+            return capture
+        for code,message in (('schedule_limit_reached',gate.LIMIT_NOW),('schedule_turn_not_allowed',gate.NOT_SAVED)):
+            with patch('services.hermes.native_cron.turn_capture',refuse(code)):
+                value=json.loads(gate.tool_result(tool_name=gate.TOOL,args={'action':'create'},result=json.dumps({'success':True,'job_id':'abc'})))
+            self.assertEqual(value,{'success':False,'error':message,'job_id':'abc'})
+        with patch('services.hermes.native_cron.turn_capture',refuse('schedule_turn_not_allowed')):
+            value=json.loads(gate.tool_result(tool_name=gate.TOOL,args={'action':'update','job_id':'abc'},result=json.dumps({'success':True,'job':{'job_id':'abc'}})))
+        self.assertEqual((value['success'],value['error']),(False,gate.NOT_SAVED_CHANGE),'a refused change says the schedule no longer runs')
+        # A post whose answer was lost may still be saved: the model is not told it failed, nor to set it again.
+        def lost(*_):raise TimeoutError('timed out')
+        with patch('services.hermes.native_cron.turn_capture',lost):
+            value=json.loads(gate.tool_result(tool_name=gate.TOOL,args={'action':'create'},result=json.dumps({'success':True,'job_id':'abc'})))
+        self.assertEqual((value['success'],value['error']),(False,gate.UNCONFIRMED))
+        self.assertEqual(gate._BOUND['count'],1,'nothing Nocheh refused counts toward the limit')
+        # An unbound store (no chat recorded) never reports success.
+        gate._BOUND=None;gate.bind('UTC')
+        value=json.loads(gate.tool_result(tool_name=gate.TOOL,args={'action':'create'},result=json.dumps({'success':True,'job_id':'abc'})))
+        self.assertEqual(value['error'],gate.NOT_SAVED)
 
 
 class HermesToolTests(unittest.TestCase):
@@ -77,30 +106,51 @@ class HermesToolTests(unittest.TestCase):
     def setUp(self):gate._BOUND=None
     def tearDown(self):gate._BOUND=None
 
-    def test_a_create_through_the_gate_lands_in_the_chat_store(self):
-        import os
-        from unittest.mock import patch
+    def test_a_create_through_the_gate_lands_in_the_chat_store_and_its_turn_records_it(self):
         from tools.cronjob_tools import _cronjob_handler,check_cronjob_requirements
         from services.hermes.native_cron import inspect,store
-        with tempfile.TemporaryDirectory() as temp,patch.dict(os.environ,{'HERMES_GATEWAY_SESSION':'1'}):
+        posted=[]
+        def request(path,body=None,timeout=None):
+            posted.append((path,body));return {'id':'s'*64,'event_id':'v'*64,'duplicate':False,'created':True,'notice':'sent'}
+        with tempfile.TemporaryDirectory() as temp,patch.dict(os.environ,{'HERMES_GATEWAY_SESSION':'1'}),\
+                patch('services.hermes.archive_tools.request',request):
             self.assertTrue(check_cronjob_requirements(),'a reply that may set schedules is offered the tool')
-            gate.bind('Asia/Tokyo')
-            args={'action':'create','prompt':'Brief me. Answer [SILENT] if nothing is new.','schedule':'0 8 * * 1-5','name':'Morning brief'}
-            changed=gate.tool_call(tool_name=gate.TOOL,args=args)
             home=Path(temp)
-            with store(home):
-                raw=_cronjob_handler({**args,**changed['args']})
-            value=json.loads(gate.tool_result(tool_name=gate.TOOL,result=raw))
-            self.assertTrue(value['success'],raw);self.assertEqual(value['note'],gate.NOTE)
+            gate.bind('Asia/Tokyo',profile=LOGICAL,scope='42',home=home)
+            def tool(args):
+                changed=gate.tool_call(tool_name=gate.TOOL,args=args)
+                args={**args,**changed['args']} if changed else args
+                with store(home):raw=_cronjob_handler(args)
+                return json.loads(gate.tool_result(tool_name=gate.TOOL,args=args,result=raw))
+            value=tool({'action':'create','prompt':'Brief me. Answer [SILENT] if nothing is new.','schedule':'0 8 * * 1-5','name':'Morning brief'})
+            self.assertTrue(value['success'],value);self.assertEqual(value['note'],gate.NOTE)
             job,=inspect(home)
             self.assertEqual((job['deliver'],job['timezone'],job['name']),('telegram','Asia/Tokyo','Morning brief'))
-            self.assertFalse(job.get('nocheh_registered'),'nothing runs before Nocheh captures it')
+            # The turn posts it from inside, with its own pass (archive_tools.request), to the turn route.
+            (path,body),=posted
+            self.assertEqual((path,body['scope'],body['profile'],body['job_id']),('/v1/schedules/turn/definition','42',LOGICAL,job['id']))
+            self.assertEqual((body['definition']['profile'],body['definition']['timezone'],body['definition']['execution_version']),
+                             (LOGICAL,'Asia/Tokyo',job['nocheh_definition_version']))
+            self.assertEqual((body['notice']['name'],body['notice']['timezone']),('Morning brief','Asia/Tokyo'))
+            self.assertTrue(job['nocheh_registered'] and job['nocheh_announced'])
             # A zone the owner named reaches the store as named.
-            named={'action':'create','prompt':'Weekly review','schedule':'0 18 * * 5','name':'Review','timezone':'Europe/Berlin'}
-            with store(home):
-                raw=_cronjob_handler({**named,**gate.tool_call(tool_name=gate.TOOL,args=named)['args']})
-            self.assertTrue(json.loads(raw)['success'],raw)
+            value=tool({'action':'create','prompt':'Weekly review','schedule':'0 18 * * 5','name':'Review','timezone':'Europe/Berlin'})
+            self.assertTrue(value['success'],value)
             self.assertEqual({row['name']:row['timezone'] for row in inspect(home)},{'Morning brief':'Asia/Tokyo','Review':'Europe/Berlin'})
+            # A pause in a later reply is a new version, recorded by that turn.
+            posted.clear()
+            self.assertTrue(tool({'action':'pause','job_id':job['id']})['success'])
+            (path,body),=posted
+            self.assertEqual((body['definition']['enabled'],body['job_id']),(False,job['id']))
+            self.assertNotEqual(body['definition']['execution_version'],job['nocheh_definition_version'])
+            # A removal by name: Nocheh records it from the copy kept before the job left the store.
+            posted.clear()
+            self.assertTrue(tool({'action':'remove','job_id':'morning brief'})['success'])
+            self.assertEqual([row['name'] for row in inspect(home)],['Review'])
+            (path,body),=posted
+            self.assertEqual((path,body['job_id'],body['definition']['removed'],body['definition']['enabled']),
+                             ('/v1/schedules/turn/definition',job['id'],True,False))
+            self.assertNotIn('notice',body)
 
 
 class TurnTests(unittest.TestCase):
@@ -109,13 +159,11 @@ class TurnTests(unittest.TestCase):
     def tearDown(self):gate._BOUND=None
 
     def test_only_the_owners_own_isolated_reply_with_its_store_gets_the_tool(self):
-        import os
-        from unittest.mock import patch
         from services.hermes import assistant_turn
         body={'owner':True,'channel':'telegram'}
         answers=[]
         def request(path,body=None,timeout=None):
-            answers.append(path);return {'allowed':True,'time_zone':'Asia/Tokyo','limit':None,'count':None}
+            answers.append(path);return {'allowed':True,'time_zone':'Asia/Tokyo','limit':None,'count':None,'profile':LOGICAL,'scope':'42'}
         with tempfile.TemporaryDirectory() as temp,patch.dict(os.environ,{'NOCHEH_ISOLATED_TURN':'1'}),\
                 patch('services.hermes.archive_tools.request',request):
             os.environ.pop('HERMES_GATEWAY_SESSION',None);os.environ.pop('NOCHEH_SCHEDULE_STORE',None)
@@ -133,14 +181,20 @@ class TurnTests(unittest.TestCase):
             self.assertEqual(answers,[],'Nocheh is asked only for a reply that could get the tool')
             with patch('services.hermes.archive_tools.request',lambda *a,**k:{'allowed':False}):
                 self.assertFalse(assistant_turn.schedule_turn(body,profile),'Nocheh said no: a forward, or not the owner\'s message')
+            # Nocheh names where it records this turn's schedules: without a chat profile and chat, no tool.
+            for missing in ({'profile':None},{'profile':'default'},{'scope':''},{'scope':None}):
+                with patch('services.hermes.archive_tools.request',lambda *a,missing=missing,**k:{**request('/v1/schedules/turn'),**missing}):
+                    self.assertFalse(assistant_turn.schedule_turn(body,profile),missing)
+            answers.clear()
             self.assertFalse(gate.bound())
             self.assertTrue(assistant_turn.schedule_turn(body,profile))
             self.assertEqual((answers,gate._BOUND['time_zone'],os.environ.get('HERMES_GATEWAY_SESSION')),(['/v1/schedules/turn'],'Asia/Tokyo','1'))
+            self.assertEqual((gate._BOUND['profile'],gate._BOUND['scope'],gate._BOUND['home']),(LOGICAL,'42',profile))
             # A member's own reply in their private chat (members' schedules): not the owner's, with the member's limit.
             gate._BOUND=None;answers.clear()
             member={'owner':False,'channel':'telegram'}
             self.assertFalse(assistant_turn.schedule_turn(member,profile),'not a member turn')
-            with patch('services.hermes.archive_tools.request',lambda *a,**k:{'allowed':True,'time_zone':'Asia/Tokyo','limit':5,'count':2}):
+            with patch('services.hermes.archive_tools.request',lambda *a,**k:{'allowed':True,'time_zone':'Asia/Tokyo','limit':5,'count':2,'profile':LOGICAL,'scope':'701'}):
                 for flags in ({'member':True,'member_read':True},{'member':True,'background':True},{'member':True,'answer':True}):
                     self.assertFalse(assistant_turn.schedule_turn(member,profile,**flags),flags)
                 self.assertTrue(assistant_turn.schedule_turn(member,profile,member=True))

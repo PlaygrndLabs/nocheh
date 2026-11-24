@@ -33,11 +33,15 @@ export interface BrokerStorage {
   bindReads?(principal:Reader):Promise<Reader>;
 }
 export interface BrokerOptions {pool:pg.Pool; token:string; archive:string; prepare:(principal:Reader,input:unknown)=>Promise<any>; hermes:string; model:string; fetch?:typeof fetch;storage?:BrokerStorage;assertActive?:()=>void;assertReady?:()=>Promise<void>;health?:()=>Promise<unknown>;}
+/** Why Nocheh did not save a schedule a turn set (ADR-0290); any other refusal stays opaque. */
+export const scheduleErrors=new Set(['schedule_turn_required','schedule_turn_not_allowed','schedule_limit_reached','schedule_cron_unsupported',
+  'invalid_schedule_definition','invalid_schedule_prompt','invalid_schedule_preference','profile_scope_denied','schedule_sequence_conflict',
+  'schedule_execution_version_conflict']);
 /** A fixed label for preparation-only guard requests; nothing is sent there. */
 const PREPARATION_DESTINATION='https://preparation.nocheh.invalid';
 const relayRoutes:[string,RegExp][]=[
   ['GET',/^\/v1\/(search|archive\/page|imports\/pending|events\/[a-f0-9]{64}|artifacts\/[a-f0-9]{64}\/bytes|memory\/check|memory\/context|memory\/(shared|filtered|grants)\/[a-f0-9]{64}|memory\/learned\/[a-f0-9]{64}\/[1-9][0-9]{0,8}|memory\/notes\/[a-f0-9]{12}|memory\/facts\/[a-f0-9]{64}(?:\/[1-9][0-9]{0,2})?|knowledge\/(context|proposals\/[a-f0-9]{64})|owner\/(conversations|conversation-context|projects|project-assignments|people|telegram-identities|memory-map|tasks(?:\/[a-f0-9]{64})?)|tools\/actions(?:\/[a-f0-9]{64})?|telegram\/destinations|notion\/connections|github\/repos)$/],
-  ['POST',/^\/v1\/(context\/prepare|memory\/(recall|longterm\/(recall|context|search))|jobs\/(start|status|stop)|machines\/exec|tools\/propose|knowledge\/proposals|action-requests|member-asks|schedules\/(turn|time-zone)|owner\/tasks(?:\/[a-f0-9]{64}(?:\/comments)?)?)$/],
+  ['POST',/^\/v1\/(context\/prepare|memory\/(recall|longterm\/(recall|context|search))|jobs\/(start|status|stop)|machines\/exec|tools\/propose|knowledge\/proposals|action-requests|member-asks|schedules\/(turn(?:\/definition)?|time-zone)|owner\/tasks(?:\/[a-f0-9]{64}(?:\/comments)?)?)$/],
 ];
 export function scopedRoute(method:string,path:string):boolean {return relayRoutes.some(([m,re])=>method===m&&re.test(path));}
 /** The installation rehearsal's fixture provider; accepted only when the fixture flag is set. */
@@ -222,6 +226,7 @@ export function brokerServer(options:BrokerOptions) {
         // The owner's ask about a member (step 4b) is the owner's live private turn's too, read as the owner's memory.
         const tasks=/^\/v1\/owner\/tasks(?:\/|$)/.test(relay),ask=relay==='/v1/member-asks';
         const knowledge=relay.startsWith('/v1/knowledge/')||relay.startsWith('/v1/owner/')||ask;
+        const scheduling=relay==='/v1/schedules/turn/definition';
         // Fixed scoped routes keep runtime tools away from owner credentials.
         // Storage independently verifies a current live owner-private turn.
         // A job's run reads the owner's views and task lists only in the owner's private chat; storage lets only a schedule's
@@ -244,9 +249,11 @@ export function brokerServer(options:BrokerOptions) {
         if(!response.ok) {
           // A job request is told what to correct, such as a member's daily limit or a box it may not have; a machine command
           // why it did not run, also when the machine could not be reached; a proposal, that the owner turned its tool off here;
-          // a message request, that its chat is not one Nocheh serves; a task change, why a reminder time was not saved.
+          // a message request, that its chat is not one Nocheh serves; a task change, why a reminder time was not saved; a
+          // schedule set by asking, why Nocheh did not save it.
           const codes=relay.startsWith('/v1/jobs/')&&response.status<500?jobErrors:exec?machineErrors:relay==='/v1/tools/propose'&&response.status<500?proposeErrors:
-            relay==='/v1/action-requests'&&response.status<500?actionErrors:tasks&&response.status<500?taskErrors:ask&&response.status<500?askErrors:null;
+            relay==='/v1/action-requests'&&response.status<500?actionErrors:tasks&&response.status<500?taskErrors:ask&&response.status<500?askErrors:
+            scheduling&&response.status<500?scheduleErrors:null;
           // A task refusal may name up to 50 projects (D14): read within a bound that fits 50 names of 200 characters, each
           // escaped in JSON at worst.
           const refused=codes&&response.status>=400?await refusalBody(response,tasks?TASK_REFUSAL_BYTES:4096):(await response.body?.cancel(),null),code=refused?.code??null;

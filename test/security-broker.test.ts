@@ -22,6 +22,10 @@ test('broker supports only explicit scoped routes and the configured reply provi
   for(const route of ['/v1/export','/v1/tools/claim','/internal/security/transport','/v1/memory/shares','//example.com'])assert.equal(scopedRoute('POST',route),false);
   assert.equal(scopedRoute('POST','/v1/context/prepare'),true);
   assert.equal(scopedRoute('GET','/v1/search'),true);
+  // A turn may ask whether it may set schedules, and post the one it set (ADR-0290); nothing else under the turn route.
+  for(const route of ['/v1/schedules/turn','/v1/schedules/turn/definition','/v1/schedules/time-zone'])assert.equal(scopedRoute('POST',route),true,route);
+  for(const route of ['/v1/schedules/turn/definition/x','/v1/schedules/turn/other','/v1/scheduler/definition','/v1/scheduler/input'])assert.equal(scopedRoute('POST',route),false,route);
+  assert.equal(scopedRoute('GET','/v1/schedules/turn/definition'),false);
   // The agent's reading tools reach storage, which checks who may read what.
   for(const route of ['/v1/archive/page','/v1/imports/pending'])assert.equal(scopedRoute('GET',route),true);
   // archive_read opens a grant and an owner-corrected entry (ADR-0261); nothing else under them is relayed.

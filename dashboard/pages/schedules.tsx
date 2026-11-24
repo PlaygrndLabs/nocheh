@@ -1,6 +1,7 @@
 /**
- * Schedules: every chat's schedules, set by asking in your private chat or from the command line, in one table (ADR-0266).
- * Each row can be paused, resumed, run now or deleted. The same page is a tab of the mini app.
+ * Schedules: every chat's schedules, set by asking in a chat, in one table (ADR-0266, ADR-0290). Each row can be paused,
+ * resumed, run now or deleted, each press with Nocheh's grant for it; one Nocheh did not save shows as not running and can
+ * only be deleted. The same page is a tab of the mini app.
  */
 import * as React from 'react';
 import {CalendarClock, History, Pause, Play, PlayCircle, Trash2} from 'lucide-react';
@@ -29,6 +30,8 @@ export type Schedule = {
   running: boolean;
   pending: boolean;
   set_in_chat: boolean;
+  /** False when Nocheh did not save its last change: it does not run until it is set again by asking (ADR-0290). */
+  saved?: boolean;
   owner_chat: boolean;
   member_chat?: boolean;
   chat_title: string | null;
@@ -92,6 +95,7 @@ export function lastResult(row: Schedule): {label: string; tone: Tone} {
 
 /** When a schedule runs next: its time, or why it does not. */
 function nextRun(row: Schedule): string {
+  if (row.saved === false && row.state !== 'completed') return 'Not running: ask again to set it';
   if (!row.enabled) return row.state === 'completed' ? 'Finished' : 'Paused';
   return row.next_run_at ? dateTime(row.next_run_at) : '—';
 }
@@ -299,7 +303,7 @@ function ScheduleRow({row}: {row: Schedule}) {
             >
               <History aria-hidden />
             </Button>
-            {row.state !== 'completed' && (
+            {row.state !== 'completed' && row.saved !== false && (
               <Button
                 size="icon-sm"
                 variant="ghost"
@@ -316,7 +320,7 @@ function ScheduleRow({row}: {row: Schedule}) {
               size="icon-sm"
               variant="ghost"
               busy={busy === 'run'}
-              disabled={!!busy || row.running || row.pending}
+              disabled={!!busy || row.running || row.pending || row.saved === false}
               onClick={() => act('run')}
               aria-label="Run now"
               title="Run now"

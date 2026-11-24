@@ -225,7 +225,9 @@ test('the members\' app listener: who is a member now, their groups confirmed la
       schedule:'0 8 * * *',timezone:'Europe/Berlin',enabled:true,state:'scheduled',next_run_at:'2026-11-24T08:00:00+01:00',last_run_at:null,last_status:null,
       running:false,pending:false,deliver:'telegram',prompt:'never shown',...extra});
     const managed:Record<string,unknown>[]=[];
-    let jobs=[job('mine1',MEMBER_GP_CHAT),job('mine2',MEMBER_GP_CHAT,{enabled:false,state:'paused',last_status:'error'}),job('owners',OWNER),job('nils',MEMBER_NG_CHAT)];
+    // mine3's last change Nocheh did not save (ADR-0290): it is listed as not running, with no next run.
+    let jobs=[job('mine1',MEMBER_GP_CHAT),job('mine2',MEMBER_GP_CHAT,{enabled:false,state:'paused',last_status:'error'}),
+      job('mine3',MEMBER_GP_CHAT,{saved:false,state:'not_saved',next_run_at:null}),job('owners',OWNER),job('nils',MEMBER_NG_CHAT)];
     const scheduled=await serve(tasks,async input=>{
       managed.push(input);
       if(input.operation==='list')return {schedules:jobs};
@@ -248,7 +250,8 @@ test('the members\' app listener: who is a member now, their groups confirmed la
     const listed=await plan('/schedules');
     assert.deepEqual(listed,{status:200,body:{limit:3,time_zone:null,schedules:[
       {id:'mine1',name:'Brief mine1',schedule:'0 8 * * *',state:'scheduled',next_run_at:'2026-11-24T07:00:00.000Z',last_run_at:null,last_ok:null},
-      {id:'mine2',name:'Brief mine2',schedule:'0 8 * * *',state:'paused',next_run_at:'2026-11-24T07:00:00.000Z',last_run_at:null,last_ok:false}]}});
+      {id:'mine2',name:'Brief mine2',schedule:'0 8 * * *',state:'paused',next_run_at:'2026-11-24T07:00:00.000Z',last_run_at:null,last_ok:false},
+      {id:'mine3',name:'Brief mine3',schedule:'0 8 * * *',state:'not_saved',next_run_at:null,last_run_at:null,last_ok:null}]}});
     assert.ok(!/never shown|Europe|nocheh-c|owners|nils/.test(JSON.stringify(listed.body)));
     // Another chat's schedule is not hers: not found, and the agent is never asked to change it.
     assert.deepEqual(await plan('/schedules/owners',{operation_id:'22222222-2222-4222-8222-222222222222',action:'delete'}),{status:404,body:{error:'member_schedule_not_found'}});
@@ -257,8 +260,18 @@ test('the members\' app listener: who is a member now, their groups confirmed la
     assert.deepEqual([paused.status,paused.body.schedule.state],[200,'paused']);
     assert.deepEqual(managed.filter(item=>item.operation!=='list'),[{operation:'pause',profile:'nocheh-'+'c'.repeat(24),job_id:'mine1',request_id:'member-44444444-4444-4444-8444-444444444444'}]);
     assert.deepEqual(await plan('/schedules/mine2',{operation_id:'55555555-5555-4555-8555-555555555555',action:'delete'}),{status:200,body:{schedule:null}});
-    assert.deepEqual(jobs.map(item=>item.id),['mine1','owners','nils']);
-    assert.equal((await db.query('SELECT window_writes FROM member_app_limits WHERE member_id=$1',[MEMBER_GP_ID])).rows[0].window_writes,4,'each change counts, refused ones too');
+    assert.deepEqual(jobs.map(item=>item.id),['mine1','mine3','owners','nils']);
+    // Each change is granted as hers first, by its operation id (ADR-0290); Run now gets its own grant.
+    const run=await plan('/schedules/mine1',{operation_id:'66666666-6666-4666-8666-666666666666',action:'run'});assert.equal(run.status,200);
+    assert.deepEqual((await db.query("SELECT kind,operation,person,request_id FROM schedule_grants WHERE request_id LIKE 'member-%' ORDER BY request_id")).rows,[
+      {kind:'edit',operation:'pause',person:MEMBER_GP_ID,request_id:'member-44444444-4444-4444-8444-444444444444'},
+      {kind:'edit',operation:'delete',person:MEMBER_GP_ID,request_id:'member-55555555-5555-4555-8555-555555555555'},
+      {kind:'run_now',operation:'run',person:MEMBER_GP_ID,request_id:'member-66666666-6666-4666-8666-666666666666'}]);
+    // The same operation id for another change is not granted, and the agent is not asked.
+    const changes=()=>managed.filter(item=>item.operation!=='list').length,changed=changes();
+    assert.deepEqual(await plan('/schedules/mine1',{operation_id:'44444444-4444-4444-8444-444444444444',action:'resume'}),{status:404,body:{error:'member_schedule_not_found'}});
+    assert.equal(changes(),changed);
+    assert.equal((await db.query('SELECT window_writes FROM member_app_limits WHERE member_id=$1',[MEMBER_GP_ID])).rows[0].window_writes,6,'each change counts, refused ones too');
     // Her own time zone for new schedules (members' time zones): a known name, or null for the owner's, which is never named.
     for(const body of [{operation_id:'66666666-6666-4666-8666-666666666666',time_zone:'Mars/Olympus'},{operation_id:'x',time_zone:'Asia/Tokyo'},
       {operation_id:'77777777-7777-4777-8777-777777777777',time_zone:'Asia/Tokyo',extra:1}])

@@ -165,7 +165,8 @@ class Handler(BaseHTTPRequestHandler):
             if self.path == '/internal/manage':
                 code = str(error) if str(error) in ('configuration_conflict', 'unsupported_preference',
                     'profile_scope_denied', 'invalid_preference', 'invalid_persona', 'cron_job_not_found', 'cron_already_pending',
-                    'cron_definition_not_captured', 'cron_operation_unavailable', 'cron_topic_scope_unavailable') else 'invalid_management_request'
+                    'cron_definition_not_captured', 'cron_operation_unavailable', 'cron_topic_scope_unavailable',
+                    'cron_change_refused') else 'invalid_management_request'
                 return self.reply(409 if code == 'configuration_conflict' else 400, {'error': code})
             self.reply(400, {'error': 'invalid_request'})
         except (KeyError, TypeError):

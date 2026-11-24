@@ -16,6 +16,7 @@ import {honchoEngine} from '../src/memory/honcho.js';
 import {githubRunRefusal} from '../src/stores/github-lookups.js';
 import {gmailRunRefusal} from '../src/stores/gmail-lookups.js';
 import {notionRunRefusal} from '../src/stores/notion.js';
+import {issueClockGrant,issueScheduleGrant,recordScheduleDefinition} from '../src/stores/schedules.js';
 
 test('scheduled execution uses guarded operation roots and stages exact delivery without reopening a closed turn',
  {skip:process.env.NOCHEH_STORES_FIXTURE!=='1',timeout:180000},async()=>{
@@ -26,7 +27,7 @@ test('scheduled execution uses guarded operation roots and stages exact delivery
   let failCompletion=false,mode='done',serial=0,answer='Scheduled answer fixture-secret';const calls:any[]=[],native=new Map<string,any>(),contexts=new Map<string,any>(),claims=new Map<string,any>(),tasksRead:string[]=[],lookups:{state:string;id:string}[]=[],refusals:(string|null)[]=[];
   // The groups the owner serves, which a test turns off as the owner would; `deselect` turns them off as a run finishes.
   // Notices to the owner are kept apart: the bot sends each id once.
-  let groups=['-123'],deselect=false;const notices:any[]=[];
+  let groups=['-123'],deselect=false,advanceTimeout=false;const notices:any[]=[];const clocks:any[][]=[],cards:any[]=[];
   const control=new Proxy(stores.control,{get(target,key){if(key==='connect')return async()=>{
     const db=await target.connect();return new Proxy(db,{get(client,name){if(name==='query')return (sql:any,...args:any[])=>{
       if(failCompletion&&String(sql).startsWith('UPDATE managed_runs SET state=$2,result_reference')){failCompletion=false;return Promise.reject(Error('lost control completion'));}
@@ -35,7 +36,12 @@ test('scheduled execution uses guarded operation roots and stages exact delivery
   const runtime:FakeCall=async(op,body)=>{
     if(op==='guard.detect')return {literals:String(body.text).includes('fixture-secret')?['fixture-secret']:[]};
     if(op==='telegram.notice'){notices.push(body);return {state:'done'};}
-    calls.push({op,body});if(op==='schedule.advance')return {state:'waiting',next_attempt:Date.now()+60000};
+    if(op==='telegram.approval'){cards.push(body);return {state:'done'};}
+    calls.push({op,body});
+    // Hermes may capture a timed fire only while Nocheh's advance runs: its clock grant is there then, for that cursor.
+    if(op==='schedule.advance'){clocks.push((await stores.control.query("SELECT cursor,owner_epoch FROM schedule_grants WHERE kind='clock' AND used_by IS NULL")).rows);
+      if(advanceTimeout){advanceTimeout=false;throw Error('advance timed out');}
+      return {state:'waiting',next_attempt:Date.now()+60000};}
     assert.ok(op.startsWith('run.'),'no external delivery while staging a proposal');const id=String(body.event_id);
     if(op==='run.resume'){assert.equal(body.observe_only,true);return native.get(id)??{state:'not_found'};}
     if(op==='run.cancel'){native.set(id,{state:'cancelled'});return {state:'cancelled'};}
@@ -79,9 +85,14 @@ test('scheduled execution uses guarded operation roots and stages exact delivery
     const scope=String(options.scope??'123'),profile='nocheh-'+digest(scope).slice(0,24),job='execution-'+base+'-'+(++serial);
     const definition={profile,name:'Fixture',prompt:'Prompt fixture-secret',schedule:{kind:'interval',minutes:60},deliver:'local',repeat:null,enabled:true,removed:false,
       preferences:{'agent.reasoning_effort':'high'},execution_version:'v1',...options};delete (definition as any).scope;delete (definition as any).fire_reason;
-    const saved=await s.schedules.definition(owner,{scope,profile,job_id:job,definition,workflow_cursor:digest(job),workflow_sequence:1});
+    // Set by asking (the turn route's own record), then fired by a press's Run now grant or the clock grant of an advance.
+    const saved=await recordScheduleDefinition(s.schedules,{scope,profile,job_id:job,definition,workflow_cursor:digest(job),workflow_sequence:1});
+    const reason=String(options.fire_reason??'manual'),epoch=(await authority()).epoch;
+    if(reason==='manual')await issueScheduleGrant(stores.control,{profile,job_id:job,operation:'run',person:'owner',request_id:'run-'+job});
+    else await issueClockGrant(stores.control,saved.id,digest(job),epoch);
     const fire=await s.schedules.capture(owner,{scope,space:scope,profile,job_id:job,id:'first',text:definition.prompt,files:[],definition,
-      job_revision:digest(canonical(definition)),scheduled_for:'2026-09-18T12:00:00Z',fire_reason:String(options.fire_reason??'manual'),owner_epoch:(await authority()).epoch});
+      job_revision:digest(canonical(definition)),scheduled_for:new Date(Date.now()-1000).toISOString(),fire_reason:reason,owner_epoch:epoch,
+      ...(reason==='manual'?{request_id:'run-'+job}:{})});
     return {...fire,scope,profile,job,definition,schedule:saved.id};
   };
   const run=async(id:string)=>{const result=await storageWorkflowOperations(s,runtime).schedules!('run:'+id,await authority());safeMetadata(result);return result;};
@@ -102,6 +113,8 @@ test('scheduled execution uses guarded operation roots and stages exact delivery
     await assert.rejects(s.knowledge.ownerReader(reader({headers:{authorization:'Bearer '+claims.get(local.event_id).archive_credential}} as any,token)),{code:'runtime_turn_changed'});
     const delivered=await capture({scope:'-123',deliver:'telegram'});await run(delivered.event_id);
     const proposal=await s.scheduled.delivery(delivered);assert.equal(proposal.state,'proposed');assert.ok('id' in proposal);
+    // Nocheh offers the owner's card itself once the run completes; Hermes no longer asks (ADR-0290).
+    assert.deepEqual(cards.filter(card=>card.id===proposal.id).map(card=>card.kind),['card']);
     const inspected=await s.telegramActions.inspect(owner,proposal.id!);assert.ok(!JSON.stringify(inspected).includes('fixture-secret'));
     assert.equal((await s.scheduled.delivery(delivered)).state,'proposed');assert.equal((await saved(delivered.event_id)).state,'done');
     assert.equal((await stores.control.query('SELECT count(*)::int AS n FROM telegram_action_requests WHERE source_reference->>\'id\'=$1',[delivered.event_id])).rows[0].n,1);
@@ -178,6 +191,15 @@ test('scheduled execution uses guarded operation roots and stages exact delivery
     assert.match(notices[0].text,/finished, but its result was not sent: your settings changed while it ran\./);
     mode='done';const off=await capture({prompt:'Explicit guard off'});assert.equal((await run(off.event_id)).state,'completed');
     assert.equal((await storageWorkflowOperations(s,runtime).schedules!('schedule:'+off.schedule+':'+digest(off.job),await authority())).state,'waiting');
+    assert.deepEqual(clocks,[[{cursor:digest(off.job),owner_epoch:String((await authority()).epoch)}]]);
+    assert.equal((await stores.control.query("SELECT count(*)::int AS n FROM schedule_grants WHERE kind='clock' AND used_by IS NULL")).rows[0].n,0,'gone once advance answered');
+    // An advance this side gave up on (its call timed out) may still be capturing in Hermes: its grant stays, past the
+    // call's 20 s, until it expires.
+    advanceTimeout=true;
+    await assert.rejects(storageWorkflowOperations(s,runtime).schedules!('schedule:'+off.schedule+':'+digest(off.job),await authority()),/advance timed out/);
+    assert.deepEqual((await stores.control.query(`SELECT cursor,expires_at>now()+interval '60 seconds' AS lasts FROM schedule_grants
+      WHERE kind='clock' AND used_by IS NULL`)).rows,[{cursor:digest(off.job),lasts:true}]);
+    await stores.control.query("DELETE FROM schedule_grants WHERE kind='clock'");
     assert.equal((await storageWorkflowOperations(s,runtime).schedules!('schedule:'+off.schedule+':'+digest('obsolete'),await authority())).state,'skipped');
     assert.equal((await stores.archive.query("SELECT count(*)::int AS n FROM events WHERE channel='scheduler'")).rows[0].n,0);
     const receipts=(await stores.control.query("SELECT state FROM workflow_receipts WHERE step='scheduler' AND workflow_id IN (SELECT id FROM workflow_registry WHERE family='schedules' AND job_id=$1)",['run:'+recovered.event_id])).rows;

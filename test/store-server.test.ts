@@ -15,6 +15,7 @@ import {storageServer} from '../src/stores/server.js';
 import {countMemoryStep} from '../src/stores/note-sources.js';
 import {startStorageCapture} from '../src/stores/worker.js';
 import {honchoEngine} from '../src/memory/honcho.js';
+import {recordScheduleDefinition} from '../src/stores/schedules.js';
 
 test('separated application captures through control outages, exposes owner repositories and fences inactive restores',
  {skip:process.env.NOCHEH_STORES_FIXTURE!=='1',timeout:180000},async()=>{
@@ -46,7 +47,8 @@ test('separated application captures through control outages, exposes owner repo
     if(operation==='guard.detect')return {literals:[]};
     if(operation==='prompts.defaults')return {defaults:{'reply.common':'Common','reply.owner':'Owner','reply.group':'Group','reply.private':'Private answer','reply.member':'Member','reply.member_read':'Member read','memory.limited':'Limited',
       'memory.evidence':'Evidence','memory.notes_review':'Review','guard.secret_check':'Secrets','sharing.group_filter':'Filter','images.read':'Images','reply.scheduled':'Scheduled','reply.schedules':'Schedules','reply.member_schedules':'Member schedules'}};
-    if(operation.startsWith('persona.')||operation==='config.read')return {operation,input};
+    if(operation.startsWith('persona.')||operation==='config.read'||operation==='schedules.manage')return {operation,input};
+    if(operation==='telegram.notice')return {state:'done'};
     if(operation==='memory.read')return {scope:input.scope,profile:'p-owner',memories:[{name:'MEMORY.md',text:'Juniper',
       entries:[{target:'memory',text:'Juniper',key:'e'.repeat(64),origins:[{by:'unknown'}],more:0,cites:[]}]}],sessions:[]};
     if(operation==='memory.recall'){nativeCalls++;assert.equal(input.generation,(await services.guards.state()).generation);assert.equal(input.guard_epoch,(await services.guards.state()).epoch);return {hits:recalled,truncated:false,next_profile:null};}
@@ -180,16 +182,40 @@ test('separated application captures through control outages, exposes owner repo
     // the scheduled run below.
     for(const operation of ['admit','workflow-context','claim','prepare','heartbeat','finish','observe','undelivered','delivered'])
       assert.equal((await request('/v1/browser/'+operation,{...browserInput,event_id:digest(key)},404)).error,'browser_chat_off',operation);
+    // Nocheh alone decides that a schedule is set or fired (ADR-0290): ownership, delivery and a schedule's message are its
+    // own, Hermes's definition post is only a checkpoint without a press's grant, and a Run now needs the press's grant.
     await request('/v1/scheduler/ownership',{},403,credential);
-    const scheduleOwner=await request('/v1/scheduler/ownership',{}),scheduleJob='http-job-'+Date.now();
+    for(const operation of ['ownership','announce','delivery'])assert.equal((await request('/v1/scheduler/'+operation,{},404)).error,'not_found',operation);
+    const scheduleOwner=await services.schedules.ownership(),scheduleJob='http-job-'+Date.now();
     const scheduleDefinition={profile:ownerProfile,name:'HTTP fixture',prompt:'Synthetic scheduled prompt',schedule:{kind:'interval',minutes:60},
       deliver:'local',repeat:null,enabled:true,removed:false,preferences:{},execution_version:'v1'};
-    await request('/v1/scheduler/definition',{scope:'123',profile:ownerProfile,job_id:scheduleJob,definition:scheduleDefinition,
-      workflow_cursor:digest(scheduleJob),workflow_sequence:1});
-    const scheduled=await request('/v1/scheduler/input',{scope:'123',space:'123',profile:ownerProfile,job_id:scheduleJob,id:'first',
+    const scheduleBody={scope:'123',profile:ownerProfile,job_id:scheduleJob,definition:scheduleDefinition,workflow_cursor:digest(scheduleJob),workflow_sequence:1};
+    assert.equal((await request('/v1/scheduler/definition',scheduleBody,403)).error,'schedule_definition_not_allowed');
+    await recordScheduleDefinition(services.schedules,scheduleBody);
+    assert.equal((await request('/v1/scheduler/definition',scheduleBody)).duplicate,true);
+    const scheduleInput={scope:'123',space:'123',profile:ownerProfile,job_id:scheduleJob,id:'first',
       text:scheduleDefinition.prompt,files:[],definition:scheduleDefinition,job_revision:digest(canonical(scheduleDefinition)),
-      scheduled_for:'2026-09-18T12:00:00Z',fire_reason:'manual',owner_epoch:scheduleOwner.epoch});
+      scheduled_for:new Date().toISOString(),fire_reason:'manual',owner_epoch:scheduleOwner.epoch};
+    assert.equal((await request('/v1/scheduler/input',scheduleInput,400)).error,'invalid_scheduled_fire');
+    assert.equal((await request('/v1/scheduler/input',{...scheduleInput,request_id:'page-run-1'},403)).error,'fire_grant_run_now');
+    assert.equal((await request('/v1/scheduler/input',{...scheduleInput,id:'catch-up',fire_reason:'catch_up'},403)).error,'schedule_catch_up_off');
+    assert.equal((await request('/v1/scheduler/input',{...scheduleInput,id:'timed',fire_reason:'scheduled'},403)).error,'fire_grant_clock');
+    // The owner's Run now on the Schedules page: Nocheh grants it for the page's request id, then asks Hermes.
+    const manage={action:'schedules',operation:'run',profile:ownerProfile,job_id:scheduleJob,request_id:'page-run-1'};
+    assert.deepEqual(await request('/v1/agent/manage',manage),{operation:'schedules.manage',input:{operation:'run',profile:ownerProfile,job_id:scheduleJob,request_id:'page-run-1'}});
+    assert.deepEqual((await connected.control.query('SELECT kind,operation,person FROM schedule_grants WHERE request_id=$1',['page-run-1'])).rows,
+      [{kind:'run_now',operation:'run',person:'owner'}]);
+    await request('/v1/agent/manage',{...manage,operation:'pause',request_id:'page-edit-1'});
+    assert.equal((await request('/v1/agent/manage',{...manage,operation:'resume',request_id:'page-edit-1'},409)).error,'schedule_request_conflict');
+    assert.equal((await request('/v1/agent/manage',{...manage,operation:'create'},400)).error,'invalid_schedule_action');
+    assert.equal((await request('/v1/agent/manage',{...manage,request_id:'../x'},400)).error,'invalid_schedule_action');
+    assert.equal((await request('/v1/agent/manage',{...manage,job_id:'../x'},400)).error,'invalid_schedule_identity');
+    const generated=await request('/v1/agent/manage',{action:'schedules',operation:'pause',profile:ownerProfile,job_id:scheduleJob});
+    assert.match(generated.input.request_id,/^[a-f0-9]{32}$/);
+    assert.equal((await request('/v1/agent/manage',{action:'schedules',operation:'list'})).operation,'schedules.manage');
+    const scheduled=await request('/v1/scheduler/input',{...scheduleInput,request_id:'page-run-1'});
     assert.equal(scheduled.state,'captured');
+    assert.equal((await connected.control.query('SELECT fired_by FROM managed_runs WHERE event_id=$1',[scheduled.event_id])).rows[0].fired_by,'owner');
     assert.equal((await connected.archive.query('SELECT 1 FROM events WHERE id=$1',[scheduled.event_id])).rowCount,0);
     const scheduledContext=await request('/v1/scheduler/workflow-context',{event_id:scheduled.event_id,owner_epoch:scheduleOwner.epoch});
     const scheduledClaim=await request('/v1/scheduler/claim',scheduledContext);assert.equal(scheduledClaim.claimed,true);
@@ -199,7 +225,19 @@ test('separated application captures through control outages, exposes owner repo
     assert.equal((await request('/v1/memory/check',undefined,200,otherScope)).valid,false);
     assert.equal((await request('/v1/scheduler/prepare',scheduledContext)).files.length,0);
     await request('/v1/scheduler/finish',{event_id:scheduled.event_id,actor:scheduledContext.actor,state:'done',session:scheduledContext.conversation,text:'Scheduled result'});
-    assert.equal((await request('/v1/scheduler/delivery',{event_id:scheduled.event_id})).state,'local');
+    assert.equal((await services.scheduled.delivery({event_id:scheduled.event_id})).state,'local');
+    // The owner's own live turn may set schedules: Nocheh answers with the chat and profile they must name and keeps a turn
+    // grant, and a definition posted as that turn is recorded as the owner's, with its message in the chat.
+    const asking=await request('/v1/schedules/turn',{},200,credential);
+    assert.deepEqual([asking.allowed,asking.profile,asking.scope],[true,ownerProfile,'123']);
+    const askedJob='asked-'+Date.now(),asked={scope:'123',profile:ownerProfile,job_id:askedJob,workflow_cursor:digest(askedJob),workflow_sequence:1,
+      definition:{...scheduleDefinition,deliver:'telegram',schedule:{kind:'cron',expr:'0 8 * * 1-5',display:'0 8 * * 1-5'},timezone:'UTC'},
+      notice:{name:'HTTP fixture',schedule:'every weekday at 8am',timezone:'UTC',next_run_at:'2026-11-25T08:00:00Z'}};
+    assert.equal((await request('/v1/schedules/turn/definition',asked,403)).error,'schedule_turn_required','never with the service token');
+    assert.equal((await request('/v1/schedules/turn/definition',{...asked,scope:'-42'},403,credential)).error,'schedule_turn_not_allowed');
+    const recorded=await request('/v1/schedules/turn/definition',asked,200,credential);
+    assert.deepEqual([recorded.duplicate,recorded.created,recorded.notice],[false,true,'done']);
+    assert.equal((await connected.control.query('SELECT created_by FROM workflow_schedules WHERE id=$1',[recorded.id])).rows[0].created_by,'owner');
     // A finished run's pass reads no more.
     await request('/v1/memory/check',undefined,409,scheduledClaim.archive_credential);
 

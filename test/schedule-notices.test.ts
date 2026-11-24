@@ -1,5 +1,6 @@
 import {test} from 'node:test';
 import assert from 'node:assert/strict';
+import {canonical,digest} from '../src/archive.js';
 import {installChatsForTest} from '../src/chats.js';
 import {HttpError} from '../src/http.js';
 import {promptKeys,promptProblem,scheduleNoticeLines,scheduleNoticeTexts} from '../src/prompts.js';
@@ -10,12 +11,21 @@ import {seededDirectory} from './fixture-seeded-chats.js';
 
 const OWNER='42',STORE='1'.repeat(24),PROFILE='nocheh-'+STORE,JOB='a1b2c3d4e5f6';
 const policy=()=>({owner_id:OWNER,owner_chat:OWNER,group_ids:['-10042']});
-const control={query:async()=>({rows:[]})} as any;
+/** The control store as a press's grant uses it: what was granted, and the row read back (none for a refused one). */
+function grants(granted:unknown[][]=[],refuse=false) {
+  return {query:async(sql:string,values:unknown[]=[])=>{
+    if(sql.startsWith('INSERT INTO schedule_grants')){granted.push(values);return {rows:[]};}
+    if(sql.startsWith('SELECT operation,person FROM schedule_grants')){const row=granted.find(item=>item[0]===values[0]);
+      return {rows:row&&!refuse?[{operation:row[3],person:row[5]}]:[]};}
+    return {rows:[]};
+  }} as any;
+}
+const control=grants();
 const schedule={scope:OWNER,profile:PROFILE,job_id:JOB,name:'Morning brief',schedule:'0 8 * * 1-5',timezone:'Asia/Tokyo',next_run_at:'2026-11-23T23:00:00+00:00'};
 
-function notices(sent:Record<string,any>[],manage:FakeCall=async()=>({})) {
+function notices(sent:Record<string,any>[],manage:FakeCall=async()=>({}),store=control) {
   const call=(async(operation:string,input:Record<string,unknown>)=>{sent.push({operation,...input});return {state:'done'};}) as any;
-  return new ScheduleNotices(control,policy,call,fixtureAgent(async(operation,input)=>operation==='schedules.manage'?manage(operation,input):{}));
+  return new ScheduleNotices(store,policy,call,fixtureAgent(async(operation,input)=>operation==='schedules.manage'?manage(operation,input):{}));
 }
 
 test('a schedule set by asking gets one message in the owner\'s words, in their time zone, with Pause and Delete (ADR-0266)',async()=>{
@@ -45,17 +55,29 @@ test('a press pauses or deletes only a schedule of the owner\'s private chat, th
   try {
     const asked:Record<string,unknown>[]=[],listed=[{id:JOB,profile:PROFILE,scope:OWNER,name:'Morning brief',schedule:'0 8 * * 1-5',timezone:'Asia/Tokyo',next_run_at:null}];
     const manage:FakeCall=async(_,input)=>{asked.push(input);return input.operation==='list'?{schedules:listed}:input.operation==='pause'?{schedule:{...listed[0],enabled:false}}:{ok:true};};
-    const sent:Record<string,any>[]=[],paused=await notices(sent,manage).press('p',STORE,JOB,'f'.repeat(64));
+    // Nocheh grants the owner's press that one change first, by the press's request id (ADR-0290).
+    const granted:unknown[][]=[],sent:Record<string,any>[]=[],paused=await notices(sent,manage,grants(granted)).press('p',STORE,JOB,'f'.repeat(64));
     assert.equal(paused,scheduleNoticeLines('').paused);
     assert.deepEqual(asked.map(input=>input.operation),['list','pause']);
     assert.deepEqual(asked[1],{operation:'pause',profile:PROFILE,job_id:JOB,request_id:'press-'+'f'.repeat(64)});
+    assert.deepEqual(granted.map(values=>values.slice(2,6)),[['edit','pause','press-'+'f'.repeat(64),'owner']]);
+    assert.equal(granted[0]![1],digest(canonical([PROFILE,JOB])));
+    // A grant Nocheh cannot give (the same press asked for something else) changes nothing.
+    asked.length=0;
+    assert.equal(await notices([],manage,grants([],true)).press('d',STORE,JOB,'c'.repeat(64)),scheduleNoticeLines('').changed);
+    assert.deepEqual(asked.map(input=>input.operation),['list']);
+    // A chat that is no longer a member's own: no grant, nothing changed.
+    asked.length=0;const memberListed=[{...listed[0],scope:'777'}],none:unknown[][]=[];
+    const member:FakeCall=async(_,input)=>{asked.push(input);return input.operation==='list'?{schedules:memberListed}:{ok:true};};
+    assert.equal(await notices([],member,grants(none)).press('d',STORE,JOB,'b'.repeat(64),'777'),scheduleNoticeLines('').changed);
+    assert.deepEqual([asked.map(input=>input.operation),none.length],[['list'],0]);
     assert.equal(sent[0]!.edit,true);assert.equal(sent[0]!.buttons,undefined);assert.ok(sent[0]!.text.endsWith('\n\n'+paused));
     // A schedule that is gone, or another chat's, is not touched.
     asked.length=0;
     assert.equal(await notices([],manage).press('d',STORE,'ffffffffffff','e'.repeat(64)),scheduleNoticeLines('').changed);
     assert.deepEqual(asked.map(input=>input.operation),['list']);
     // The agent refusing it reads as changed, never as a failure of the press.
-    const refusing:FakeCall=async(_,input)=>{if(input.operation==='list')return {schedules:listed};throw new HttpError(400,'cron_job_not_found');};
+    const refusing:FakeCall=async(_,input)=>{if(input.operation==='list')return {schedules:listed};throw new HttpError(400,'cron_change_refused');};
     assert.equal(await notices([],refusing).press('d',STORE,JOB,'d'.repeat(64)),scheduleNoticeLines('').changed);
   } finally {restore();}
 });

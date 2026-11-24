@@ -155,17 +155,21 @@ class RuntimeProfileTests(unittest.TestCase):
         with self.assertRaisesRegex(ValueError, 'profile_scope_denied'): self.catalog.resolve('default')
 
     def test_scheduler_uses_stable_profile_for_definitions_and_fires(self):
-        from .native_cron import manage, inspect, workflow_cursor
+        from cron import jobs as native
+        from .native_cron import manage, inspect, store, turn_capture, workflow_cursor
         from .scheduler import Scheduler
         entry = self.create(); calls = []
         def call(route, body):
             calls.append((route, body))
-            if route == 'ownership': return {'owner': 'inngest', 'epoch': 7, 'admission': True}
             if route == 'input': return {'event_id': 'a' * 64}
             return {}
-        job = manage(self.app, '/api/cron/jobs', 'POST', {'profile': ['research']},
-            {'name': 'Fixture', 'prompt': 'Retain exact\r\n prompt', 'schedule': 'every 1h'}, {}, call)
-        home = Path(job['hermes_home']); self.assertEqual(home.name, entry['logical_profile'])
+        # Set by asking in that chat (ADR-0290): Hermes's tool writes the store, and the turn has Nocheh record it.
+        name, physical = self.app.profile('research'); home = self.app.preference_home(name, physical)
+        self.assertEqual(home.name, entry['logical_profile'])
+        with store(home):
+            job = native.create_job(prompt='Retain exact\r\n prompt', schedule='every 1h', name='Fixture')
+            native.update_job(job['id'], {'prompt': 'Retain exact\r\n prompt'})
+        turn_capture(job['id'], home, home.name, self.app.binding(name).chat_id, lambda path, body: call('definition', body))
         manage(self.app, '/api/cron/jobs/' + job['id'] + '/trigger', 'POST', {'profile': ['research']},
             {'request_id': 'manual-fixture'}, {}, call)
         scheduler = Scheduler(self.app, None, call)

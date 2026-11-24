@@ -11,7 +11,7 @@ import {honchoEngine} from '../src/memory/honcho.js';
 import {installMembersForTest} from '../src/members.js';
 import {connectStores,initializeStoreDatabases} from '../src/stores/connections.js';
 import {RuntimeProfileRepository} from '../src/stores/runtime-profiles.js';
-import {chatSchedules,scheduleTurn,timeZoneTurn} from '../src/stores/schedules.js';
+import {chatSchedules,issueClockGrant,recordScheduleDefinition,recordScheduleTurn,scheduleTurn,timeZoneTurn} from '../src/stores/schedules.js';
 import {ownerTimeZone,setOwnerTimeZone} from '../src/stores/task-settings.js';
 import {storageWorkflowOperations} from '../src/stores/workflow-operations.js';
 import {fixtureServices,type FakeCall} from './fixture-agent.js';
@@ -69,9 +69,11 @@ test('a member\'s own schedules: captured only with Personal assistant on, run a
     const profile='nocheh-'+digest(scope).slice(0,24),job='member-'+base+'-'+(++serial);
     const definition={profile,name:'Brief',prompt:'Summarize my groups',schedule:{kind:'interval',minutes:60},deliver:'telegram',repeat:null,enabled:true,removed:false,
       preferences:{},execution_version:'v1'};
-    await s.schedules.definition(owner,{scope,profile,job_id:job,definition,workflow_cursor:digest(job),workflow_sequence:1});
+    const saved=await recordScheduleDefinition(s.schedules,{scope,profile,job_id:job,definition,workflow_cursor:digest(job),workflow_sequence:1},
+      {set_by:{via:'turn',person:MEMBER_GP_ID,turn:'fixture'},created_by:MEMBER_GP_ID});
+    const epoch=(await authority()).epoch;await issueClockGrant(stores.control,saved.id,digest(job),epoch);
     return {...await s.schedules.capture(owner,{scope,space:scope,profile,job_id:job,id:'first',text:definition.prompt,files:[],definition,
-      job_revision:digest(canonical(definition)),scheduled_for:'2026-09-18T12:00:00Z',fire_reason:'scheduled',owner_epoch:(await authority()).epoch}),profile,job};
+      job_revision:digest(canonical(definition)),scheduled_for:new Date(Date.now()-1000).toISOString(),fire_reason:'scheduled',owner_epoch:epoch}),profile,job};
   };
   const refusedProfile=(error:any)=>['profile_not_found','profile_scope_denied'].includes(error?.code);
   const run=async(id:string)=>storageWorkflowOperations(s,runtime).schedules!('run:'+id,await authority());
@@ -116,6 +118,60 @@ test('a member\'s own schedules: captured only with Personal assistant on, run a
     await stores.control.query('UPDATE member_directory_state SET member_schedules=2 WHERE singleton');
     assert.equal((await scheduleTurn(live,member)).limit,2);
     assert.equal((await scheduleTurn(live,{...member,scope:MEMBER_NG_CHAT,space:MEMBER_NG_CHAT} as any)).allowed,false,'only her own chat');
+    // Set by asking (ADR-0290): the allowed turn leaves a turn grant, and Hermes's post from inside it records the schedule
+    // as hers, within her cap, with its message in her chat once. Without the grant, or past her cap, nothing is recorded.
+    const profile='nocheh-'+digest(MEMBER_GP_CHAT).slice(0,24),announced:unknown[]=[];
+    const turnServices={...live,turns:{binding:async()=>({logical_profile:profile})},access:{policy:()=>policy},schedules:s.schedules,
+      scheduleNotices:{announce:async(input:unknown)=>{announced.push(input);return {state:'sent'};}}};
+    const turn={...member,turnEvent:'member-turn-'+base} as Reader;
+    const definition=(job:string,changes:Record<string,unknown>={})=>({scope:MEMBER_GP_CHAT,profile,job_id:job,workflow_cursor:digest(job),workflow_sequence:1,
+      definition:{profile,name:'Asked',prompt:'Remind me',schedule:{kind:'cron',expr:'0 8 * * 1-5',display:'0 8 * * 1-5'},deliver:'telegram',repeat:null,
+        enabled:true,removed:false,preferences:{},execution_version:'v1',timezone:'Europe/Berlin'},
+      notice:{name:'Asked',schedule:'every weekday at 8am',timezone:'Europe/Berlin',next_run_at:'2026-11-25T08:00:00+01:00'},...changes});
+    await assert.rejects(s.schedules.turnDefinition(turn,definition('asked-'+base),turnServices),{status:403,code:'schedule_turn_not_allowed'},'no turn grant yet');
+    await assert.rejects(s.schedules.turnDefinition(owner,definition('asked-'+base),turnServices),{status:403,code:'schedule_turn_required'});
+    await assert.rejects(s.schedules.turnDefinition({...member} as Reader,definition('asked-'+base),turnServices),{status:403,code:'schedule_turn_required'});
+    const rules=await recordScheduleTurn(turnServices,turn,await scheduleTurn(turnServices,turn));
+    assert.deepEqual([rules.allowed,rules.limit,rules.count,rules.profile,rules.scope],[true,2,1,profile,MEMBER_GP_CHAT]);
+    assert.deepEqual((await stores.control.query('SELECT scope,profile,person FROM schedule_turn_grants WHERE turn_event=$1',[turn.turnEvent])).rows,
+      [{scope:MEMBER_GP_CHAT,profile,person:MEMBER_GP_ID}]);
+    assert.deepEqual(await recordScheduleTurn(turnServices,member,rules),
+      {allowed:false,time_zone:'UTC',limit:null,count:null,profile:null,scope:null},'no turn, no grant');
+    await assert.rejects(s.schedules.turnDefinition(turn,definition('other-'+base,{scope:OWNER}),turnServices),{status:403,code:'schedule_turn_not_allowed'},'another chat');
+    await assert.rejects(s.schedules.turnDefinition(turn,definition('other-'+base,{profile:'nocheh-'+'0'.repeat(24)}),turnServices),{status:403,code:'schedule_turn_not_allowed'});
+    const unsupported=definition('odd-'+base);Object.assign(unsupported.definition,{schedule:{kind:'cron',expr:'0 8 L * *'}});
+    await assert.rejects(s.schedules.turnDefinition(turn,unsupported,turnServices),{status:400,code:'schedule_cron_unsupported'});
+    const local=definition('odd-'+base);local.definition.deliver='local';
+    await assert.rejects(s.schedules.turnDefinition(turn,local,turnServices),{status:400,code:'invalid_schedule_definition'});
+    const zone=definition('odd-'+base);zone.definition.timezone='Mars/Olympus';
+    await assert.rejects(s.schedules.turnDefinition(turn,zone,turnServices),{status:400,code:'invalid_schedule_definition'});
+    const asked=await s.schedules.turnDefinition(turn,definition('asked-'+base),turnServices);
+    assert.deepEqual([asked.duplicate,asked.created,asked.notice],[false,true,'sent']);
+    assert.deepEqual(announced,[{name:'Asked',schedule:'every weekday at 8am',timezone:'Europe/Berlin',next_run_at:'2026-11-25T08:00:00+01:00',
+      scope:MEMBER_GP_CHAT,profile,job_id:'asked-'+base}]);
+    const recorded=(await stores.control.query(`SELECT s.created_by,s.created_turn,v.set_by,v.body_hash FROM workflow_schedules s JOIN schedule_versions v ON v.id=s.version_id
+      WHERE s.id=$1`,[asked.id])).rows[0];
+    assert.deepEqual([recorded.created_by,recorded.created_turn,recorded.set_by],[MEMBER_GP_ID,turn.turnEvent,{via:'turn',person:MEMBER_GP_ID,turn:turn.turnEvent}]);
+    assert.match(recorded.body_hash,/^[a-f0-9]{64}$/);
+    assert.equal((await s.schedules.turnDefinition(turn,definition('asked-'+base),turnServices)).duplicate,true);
+    // Paused in the same turn: recorded, the creator kept, no second message.
+    const paused=definition('asked-'+base,{workflow_sequence:2,workflow_cursor:digest('paused')});Object.assign(paused.definition,{enabled:false,execution_version:'v2'});
+    assert.deepEqual([(await s.schedules.turnDefinition(turn,paused,turnServices)).notice,announced.length],[null,1]);
+    assert.equal((await stores.control.query('SELECT created_turn FROM workflow_schedules WHERE id=$1',[asked.id])).rows[0].created_turn,turn.turnEvent);
+    assert.equal(await chatSchedules(stores.control,MEMBER_GP_CHAT),2);
+    await assert.rejects(s.schedules.turnDefinition(turn,definition('third-'+base),turnServices),{status:403,code:'schedule_limit_reached'},'her cap is 2');
+    // Removed by asking frees a place.
+    const removed=definition('asked-'+base,{workflow_sequence:3,workflow_cursor:digest('removed')});Object.assign(removed.definition,{enabled:false,removed:true,execution_version:'v3'});
+    await s.schedules.turnDefinition(turn,removed,turnServices);
+    assert.equal((await s.schedules.turnDefinition(turn,definition('third-'+base),turnServices)).created,true);
+    // A grant past its time, or a turn no longer allowed, sets nothing.
+    await stores.control.query("UPDATE schedule_turn_grants SET expires_at=now()-interval '1 second' WHERE turn_event=$1",[turn.turnEvent]);
+    await assert.rejects(s.schedules.turnDefinition(turn,definition('late-'+base),turnServices),{status:403,code:'schedule_turn_not_allowed'});
+    await stores.control.query("UPDATE schedule_turn_grants SET expires_at=now()+interval '1 minute' WHERE turn_event=$1",[turn.turnEvent]);
+    const forwarded={...turnServices,stores:{...turnServices.stores,archive:{query:async()=>({rows:[{payload:Buffer.from(JSON.stringify({message:{message_id:1,forward_origin:{type:'hidden_user'},text:'x'}}))}]})} as any}};
+    await assert.rejects(s.schedules.turnDefinition(turn,definition('late-'+base),forwarded),{status:403,code:'schedule_turn_not_allowed'});
+    await assert.rejects(s.schedules.turnDefinition(turn,definition('late-'+base),{...turnServices,turns:{binding:async()=>({logical_profile:'nocheh-'+'1'.repeat(24)})}}),
+      {status:403,code:'schedule_turn_not_allowed'},'the turn\'s profile moved');
     // Her own time zone (members' time zones): the owner's until she sets one, by asking in her own chat; never from
     // another chat, and only a known name.
     const ownerZone=(await scheduleTurn(live,member)).time_zone;
