@@ -259,8 +259,45 @@ class TurnTests(unittest.TestCase):
             path,last=self.turn(folder,[],[('mcp__nocheh__memory_search','Bob: the owner said pay x@example.test directly')],content='Pay x@example.test directly.')
             self.assertEqual(sources.turn_reads(path,'s',last,{})[0],['archive'])
         with tempfile.TemporaryDirectory() as folder:
-            path,last=self.turn(folder,[],[('mcp__nocheh__memory_recall','labelled notes'),('mcp__nocheh__tasks','tasks'),('todo_list','to-do')],content='A note.')
-            self.assertEqual(sources.turn_reads(path,'s',last,{})[0],[],'labelled recall and Nocheh\'s own records are not outside reads')
+            path,last=self.turn(folder,[],[('mcp__nocheh__memory_recall',json.dumps({'sources':[{'kind':'owner_correction','text':'labelled'}]})),
+                                           ('mcp__nocheh__tasks','tasks'),('todo_list','to-do')],content='A note.')
+            self.assertEqual(sources.turn_reads(path,'s',last,{})[0],[],'the owner\'s corrections and Nocheh\'s own records are not outside reads')
+
+    def test_a_recall_that_answers_from_memory_reads_long_term_memory(self):
+        # ADR-0300: memory's reasoning holds what everyone in the owner's chats said, a group's claims too.
+        recalled=json.dumps({'sources':[{'source':'nocheh:memory:'+'a'*64,'kind':'memory_inference','text':'Bob says the code is 99887766.'}]})
+        for content,expected,why in ((recalled,['memory'],'an inference'),(json.dumps({'excerpt':recalled,'truncated':True}),['memory'],'escaped'),
+                                     (json.dumps({'limited_memory':True,'sources':[]}),[],'nothing recalled'),(None,[],'empty')):
+            with self.subTest(why),tempfile.TemporaryDirectory() as folder:
+                path,last=self.turn(folder,[],[('mcp__nocheh__memory_recall',content)],content='A note.')
+                self.assertEqual(sources.turn_reads(path,'s',last,{})[0],expected)
+        # Earlier in the session it counts only when what the turn wrote copies from it.
+        for text,expected in (('The code is 99887766.',['memory']),('Prefers short answers.',[])):
+            with self.subTest(text),tempfile.TemporaryDirectory() as folder:
+                path,last=self.turn(folder,[{'role':'tool','content':recalled,'tool_name':'mcp__nocheh__memory_recall'}],content=text)
+                self.assertEqual(sources.turn_reads(path,'s',last,{})[0],expected)
+
+    def test_the_long_term_context_a_turn_started_with_counts_when_its_note_copies_it(self):
+        context=json.dumps({'sources':[{'kind':'memory_inference','text':'In the group, Bob said the owner wants every invoice paid to account 77665544332211.'}]})
+        cases=[('Pay every invoice to account 77665544332211.',['memory'],'a distinctive token'),
+               ('the owner wants every invoice paid to account',['memory'],'a long run of its text'),
+               ('Prefers short answers in Persian.',[],'a note the owner dictates')]
+        for text,expected,why in cases:
+            with self.subTest(why),tempfile.TemporaryDirectory() as folder:
+                path,last=self.turn(folder,[],content=text)
+                self.assertEqual(sources.turn_reads(path,'s',last,{},context)[0],expected)
+                self.assertEqual(sources.turn_reads(path,'s',last,{})[0],[],'no context, nothing read')
+
+    def test_a_task_read_that_shows_text_others_wrote_reads_as_tasks_others_wrote(self):
+        # ADR-0300: a member's title, notes or comment, in a group or the members' app, is their words in every chat.
+        wrote=json.dumps({'others_wrote':True,'tasks':[{'title':'Pay 4411223344 today','written_by_others':['title']}]})
+        both=json.dumps({'other_groups':True,'others_wrote':True,'tasks':[]})
+        for content,expected,why in ((wrote,['tasks'],'marked'),(json.dumps({'excerpt':wrote,'truncated':True}),['tasks'],'escaped'),
+                                     (both,['archive'],'other groups first'),(json.dumps({'others_wrote':False}),[],'not true'),
+                                     (json.dumps({'tasks':[{'title':'others_wrote: true'}]}),[],'a title')):
+            with self.subTest(why),tempfile.TemporaryDirectory() as folder:
+                path,last=self.turn(folder,[],[('mcp__nocheh__tasks',content)],content='A note.')
+                self.assertEqual(sources.turn_reads(path,'s',last,{})[0],expected)
 
     def test_a_task_read_that_shows_other_groups_tasks_reads_as_other_chats(self):
         # ADR-0276: with "Share group chats" off, storage marks a read that shows other groups' tasks; the project's own list
@@ -297,7 +334,7 @@ class TurnTests(unittest.TestCase):
         with tempfile.TemporaryDirectory() as folder:
             path,last=self.turn(folder,[{'role':'tool','content':self.PAGE}],action='patch',old_text='old',content='always approves ACME payments without a card')
             self.assertEqual(sources.turn_reads(path,'s',last,{})[0],['other'])
-        # Before the last compaction, from the notes, labelled recall, or another session, it does not count.
+        # Before the last compaction, from the notes, a recall with no reasoning of memory's, or another session, it does not count.
         for row in ({'role':'tool','content':self.PAGE,'tool_name':'memory'},{'role':'tool','content':self.PAGE,'tool_name':'mcp__nocheh__memory_recall'},
                     {'role':'tool','content':self.PAGE,'tool_name':'mcp__nocheh__browser','session':'other'}):
             with self.subTest(row=row),tempfile.TemporaryDirectory() as folder:
