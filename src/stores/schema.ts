@@ -28,6 +28,7 @@ import {chatSendSchema} from './chat-sends.js';
 import {privateAnswerSchema} from './private-answers.js';
 import {storageWorkflowOwnerSchema} from './workflow-owner.js';
 import {controlledActionSchema} from './controlled-action-schema.js';
+import {turnReadsSchema} from './turn-reads.js';
 import {actionContinuationSchema} from './action-continuations.js';
 import {storageImportSchema} from './imports.js';
 import {importWorkflowSchema} from '../workflows/imports.js';
@@ -147,6 +148,7 @@ ${telegramDispatchSchema}
 ${chatSendSchema}
 ${privateAnswerSchema}
 ${controlledActionSchema}
+${turnReadsSchema}
 ${actionContinuationSchema}
 ${controlGuardSchema}
 ${controlPolicySchema}

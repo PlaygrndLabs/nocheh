@@ -2,9 +2,11 @@
 from .archive_tools import request
 
 
-def prepare(value):
+def prepare(value,read=None):
+    """`read`, for a tool result, names what it read (note_sources.gate_read): storage keeps it for the turn before the
+    model sees the result, so a command later in the turn asks first (ADR-0293)."""
     from .timing import measure
-    with measure('context_prepare'):return request('/v1/context/prepare', value)
+    with measure('context_prepare'):return request('/v1/context/prepare'+('' if read is None else '?read='+read), value)
 
 
 def install():
@@ -23,7 +25,9 @@ def install():
         return original_write(path,prepare(entries))
 
     def tool(agent,name,result):
-        return prepare(original_tool(agent,name,result))
+        from .note_sources import gate_read
+        content=original_tool(agent,name,result)
+        return prepare(content,gate_read(name,content))
 
     MemoryStore._read_raw_checked=staticmethod(read)
     MemoryStore._write_file=staticmethod(write)
