@@ -112,7 +112,7 @@ remain supported alongside these conveniences:
 Secret settings take a hidden prompt or piped stdin, never a value in argv.
 The dashboard owner session is separate from the archive service credential and
 model provider keys. Ports bind only to localhost. Native HTTP requests are
-checked by Nocheh before proxying; every WebSocket upgrade is refused ([ADR-0288](adr/0288-chat-page-off-and-hermes-reads-passes-without-the-master-key.md)). Internal
+checked by Nocheh before proxying; every WebSocket upgrade is refused ([ADR-0289](adr/0289-chat-page-off-and-hermes-reads-passes-without-the-master-key.md)). Internal
 backend credentials are not injected into native pages. Existing CLI headers
 remain compatible; download-only cookies cannot administer settings.
 
@@ -165,7 +165,7 @@ the dashboard is refused, and Nocheh's browser input routes (`/v1/browser/*`) an
 other pages (sessions, profiles, files, models, skills, cron) still open from Assistant
 console, where Hermes's own Chat tab is hidden too. Inbox › History lists the latest
 50 assistant runs (scheduled and background jobs, and browser runs recorded earlier). See
-[ADR-0288](adr/0288-chat-page-off-and-hermes-reads-passes-without-the-master-key.md).
+[ADR-0289](adr/0289-chat-page-off-and-hermes-reads-passes-without-the-master-key.md).
 
 A turn gets Hermes's own native notes, scoped native session search and skills, plus
 Nocheh's 18 data tools over MCP (`mcp__nocheh__*`): archive retrieval, long-term memory

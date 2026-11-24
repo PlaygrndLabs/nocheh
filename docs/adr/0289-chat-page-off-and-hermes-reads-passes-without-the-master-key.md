@@ -1,4 +1,4 @@
-# ADR-0288: The chat page is off, and Hermes reads passes without the master key
+# ADR-0289: The chat page is off, and Hermes reads passes without the master key
 
 <status>
 Accepted on 2026-11-24. The owner approved the key design ("Approve, start step 1") and

@@ -111,7 +111,7 @@ class ManagedAsync:
             request=self.directory/(run+'.request')
             if not request.exists():continue
             body=json.loads(request.read_bytes())
-            # Nocheh refuses the browser channel for good (ADR-0288): retire its receipt instead of retrying it forever.
+            # Nocheh refuses the browser channel for good (ADR-0289): retire its receipt instead of retrying it forever.
             if body.get('channel')=='browser':immutable_file(self.directory,run+'.published',b'{}');continue
             # One receipt Nocheh refuses must not hold back the others.
             try:self.publish(body,json.loads(path.read_bytes()))

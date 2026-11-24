@@ -21,6 +21,8 @@ from .async_runs import CLOSED,identity
 from .agent_turns import AgentTurns
 from services.durable import canonical,digest,immutable_file
 from .scopes import Scope,Scopes
+from . import daily_session
+from datetime import timezone
 from .subscription import ProviderNotConfigured
 
 SECRET='synthetic-service-token-123456789'
@@ -377,8 +379,34 @@ class AgentTurnTests(unittest.TestCase):
         self.assertEqual(state['timings'],{'total':{'ms':9,'calls':1}})
         logical=digest('-20:main');profile=self.root/'profiles'/Scopes.profile('-20')
         self.assertEqual(run.await_args.args[5],'nocheh-'+logical)
-        self.assertEqual(json.loads((profile/('active-'+logical+'.json')).read_text()),{'session_id':'nocheh-native-session'})
+        saved=json.loads((profile/('active-'+logical+'.json')).read_text())
+        self.assertEqual((saved['session_id'],saved['day']),('nocheh-native-session',daily_session.day_of(saved['last_active'],timezone.utc)))
         title.assert_called_once()
+
+    def test_a_new_day_moves_the_chat_to_a_new_session_that_starts_from_the_last(self):
+        from .assistant_gateway import native_turn
+        logical=digest('-20:main');profile=self.root/'profiles'/Scopes.profile('-20');profile.mkdir(parents=True)
+        cursor=profile/('active-'+logical+'.json')
+        cursor.write_text(json.dumps({'session_id':'nocheh-yesterday','day':'2000-01-01','last_active':946684800}))
+        child={'state':'done','text':'Synthetic native answer','session_id':'','timings':{}}
+        async def run(profile,scope,body,model,credentials,session_id,*rest):return {**child,'session_id':session_id}
+        with patch('services.hermes.assistant_gateway.prepare_profile',return_value=profile),\
+             patch('services.hermes.turn_process._run_process',side_effect=run) as process,\
+             patch('services.hermes.assistant_gateway.check_delivery_policy',return_value=True),\
+             patch('services.hermes.assistant_gateway.title_session'),\
+             patch('services.hermes.daily_session.start') as start,\
+             patch('services.hermes.retired_history.withhold_retired'),\
+             patch('services.hermes.profile_config.preferences',return_value={'nocheh.carry_messages':20}):
+            agent=self.agent(native_turn);body=turn_body(42,day_zone='Asia/Dubai');agent.start(body);self.wait(agent,body)
+            # A follow-up after an approval stays in the session that asked, whatever the day.
+            cursor.write_text(json.dumps({'session_id':'nocheh-yesterday','day':'2000-01-01','last_active':946684800}))
+            body=turn_body(43,attempt='c1-'+'e'*40,continuation='e'*64);agent.start(body);self.wait(agent,body)
+        today=daily_session.day_of(time.time(),daily_session.zone('Asia/Dubai'))
+        fresh='nocheh-'+logical+'-'+today.replace('-','')
+        self.assertEqual(process.await_args_list[0].args[5],fresh)
+        self.assertEqual(start.call_args.args[1:4],(fresh,'nocheh-yesterday',20))
+        self.assertEqual(process.await_args_list[1].args[5],'nocheh-yesterday')
+        self.assertEqual(start.call_count,1)
 
     def test_turns_run_with_telegram_unavailable(self):
         # A first turn loads what the loop imports lazily, so only the blocked turn runs under the patch.

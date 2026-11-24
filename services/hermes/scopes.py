@@ -24,7 +24,7 @@ def topic_id(message):
 
 def check_claims(credential,scope,event_id):
     """A turn pass's claims, checked against the turn they must bind. Hermes does not check the signature, so the master key
-    can leave it (ADR-0288): Nocheh's own services check it on every call the pass makes, and a forged pass reaches nothing there. Here
+    can leave it (ADR-0289): Nocheh's own services check it on every call the pass makes, and a forged pass reaches nothing there. Here
     the claims choose only this turn's local profile, lane and tools, so every one must match its binding exactly."""
     try:
         prefix,body,signature=credential.split('.')

@@ -109,7 +109,7 @@ test('browser execution separates originals, prepared inputs, receipts and same-
     native.delete(running.event_id);assert.equal((await run(running.event_id)).state,'ambiguous');assert.equal(calls.filter(c=>c.body.event_id===running.event_id&&c.op==='run.start').length,1);
     const late={event_id:running.event_id,actor:contexts.get(running.event_id).actor,state:'done',text:'Late evidence',session:running.conversation};
     assert.equal((await s.browser.finish(late)).state,'interrupted');assert.equal((await s.browser.observe(running)).visible,false);
-    // ADR-0288: once the agent no longer runs the browser channel, runs left open close without asking the agent.
+    // ADR-0289: once the agent no longer runs the browser channel, runs left open close without asking the agent.
     const open=await capture();await s.browser.admit(owner,open);await prepare(open.event_id);mode='running';assert.equal((await run(open.event_id)).state,'running');
     const waiting=await capture();await s.browser.admit(owner,waiting);
     const agent=(s.browser as any).agent;(s.browser as any).agent={...agent,channels:agent.channels.filter((c:string)=>c!=='browser')};

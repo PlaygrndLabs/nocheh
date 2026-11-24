@@ -8,7 +8,7 @@ the General greeting, same-topic recall attempt, and populated backup/inactive
 restore have new October 2 evidence. Carried observations are not newly repeated tests. [TASK.md](../TASK.md)
 tracks release blockers; [the procedure](release-acceptance.md) defines the gates.
 The native browser turn evidence below is retired: the dashboard chat page is off
-([ADR-0288](adr/0288-chat-page-off-and-hermes-reads-passes-without-the-master-key.md)), so it is not rerun.
+([ADR-0289](adr/0289-chat-page-off-and-hermes-reads-passes-without-the-master-key.md)), so it is not rerun.
 The private index at `data/acceptance/results/mvp-live-test-register.json` maps
 these rows to the original ignored reports. Exact timestamps, receipt IDs, source data, and
 installation details belong in those private reports; this file is a

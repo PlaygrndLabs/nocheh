@@ -217,7 +217,7 @@ export abstract class ManagedExecutionRepository {
       let row=await this.row(id);if(!row)return observation('skipped','admission');
       if(row.input_reference&&!row.result_reference&&await this.recover(row))row=await this.row(id);
       if(closed.has(row.state))return this.status(row);
-      // The agent no longer runs this channel (the browser one since ADR-0288): close what is left instead of polling it.
+      // The agent no longer runs this channel (the browser one since ADR-0289): close what is left instead of polling it.
       if(!(this.agent.channels as readonly string[]).includes(this.channel)){
         if(row.state==='captured')await this.cancelRow(id);else await this.interrupt(id,'runtime_channel_unavailable');
         return this.status(await this.row(id));

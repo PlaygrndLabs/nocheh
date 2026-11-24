@@ -203,7 +203,7 @@ class ManagedAsyncTests(unittest.TestCase):
             self.runtime.runs.start(self.body);self.assertEqual(self.settle()['state'],'ambiguous')
         self.assertEqual(self.finished['state'],'interrupted')
     def test_flush_retires_browser_receipts_and_one_refused_receipt_holds_back_no_other(self):
-        # ADR-0288: Nocheh refuses the browser channel for good, so its leftover receipt is retired without a call.
+        # ADR-0289: Nocheh refuses the browser channel for good, so its leftover receipt is retired without a call.
         def write(body):
             run=identity(body);(self.runtime.directory/(run+'.request')).write_text(json.dumps(body));(self.runtime.directory/(run+'.receipt')).write_text(json.dumps({'state':'done'}));return run
         browser=write({'channel':'browser','event_id':'b'*64,'attempt':1})
