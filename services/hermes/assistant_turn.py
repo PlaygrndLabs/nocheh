@@ -309,6 +309,19 @@ def job_result(result, session_id):
     return {'state':'done','text':text,'session_id':session_id}
 
 
+def turn_image(image,credential):
+    """A picture the turn's own message carries, by its hash. Sealed or not, the turn reads it from nocheh-security with
+    its own pass, which serves only its own event's files: Hermes has no mount of the stored files."""
+    import hashlib
+    from urllib.request import Request,urlopen
+    if not isinstance(image,str) or not re.fullmatch(r'[a-f0-9]{64}',image): raise ValueError('invalid_image_identity')
+    if not isinstance(credential,str) or not credential: raise ValueError('turn_pass_required')
+    request=Request(os.environ.get('GUARD_URL','http://nocheh-security:8786')+'/v1/turn-files/'+image,headers={'Authorization':'Bearer '+credential})
+    with urlopen(request,timeout=30) as response:data=response.read(26*1024*1024)
+    if hashlib.sha256(data).hexdigest()!=image: raise ValueError('image_hash_mismatch')
+    return data
+
+
 def run(body, emit=None, relay=None):
     machine=machine_step(body);box=box_step(body)
     if body.get('review') is not True and exact_predecessor_question(body.get('source_text',body.get('text',''))):
@@ -440,16 +453,10 @@ def run(body, emit=None, relay=None):
         if body.get('channel') in ('browser','scheduler','background'): options['persist_user_message'] = body.get('source_text',body['text'])
         message=body['text']
         if body.get('images'):
-            import base64,hashlib,re
+            import base64
             message=[{'type':'text','text':message}]
             for image in body['images']:
-                if not re.fullmatch(r'[a-f0-9]{64}',image): raise ValueError('invalid_image_identity')
-                if os.environ.get('NOCHEH_ISOLATED_TURN')=='1':
-                    from urllib.request import Request,urlopen
-                    req=Request('http://nocheh-security:8786/v1/turn-files/'+image,headers={'Authorization':'Bearer '+body['archive_credential']})
-                    with urlopen(req,timeout=30) as response:data=response.read(26*1024*1024)
-                else:data=(Path('/data/files')/image).read_bytes()
-                if hashlib.sha256(data).hexdigest()!=image: raise ValueError('image_hash_mismatch')
+                data=turn_image(image,body.get('archive_credential'))
                 # Explicitly trusted routes may receive originals. Required
                 # guarding rejects this opaque context at the existing boundary.
                 from PIL import Image

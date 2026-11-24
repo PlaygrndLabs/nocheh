@@ -1,6 +1,7 @@
 """Pinned TUI changes: capture before interpretation, stable IDs, no external processes, no history rewind.
 
-The managed gateway entry lives in services/hermes/browser_bridge.py (the TUI attaches over WebSocket)."""
+The dashboard chat page that ran this TUI is off until Nocheh has its own chat page, and its managed gateway entry
+is removed; nothing launches the TUI until then."""
 from pathlib import Path
 import sys
 root = Path(sys.argv[1])

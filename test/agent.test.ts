@@ -1,6 +1,6 @@
 import {test} from 'node:test';
 import assert from 'node:assert/strict';
-import {agentErrors,agentOperation,agentSummary,turnChannel,turnChannels,type Agent} from '../src/agent/agent.js';
+import {agentErrors,agentOperation,agentSummary,turnChannel,type Agent} from '../src/agent/agent.js';
 import {hermesAgent} from '../src/agent/hermes.js';
 import {activeAgent,agent} from '../src/agent/agents.js';
 import {defaultAgent} from '../src/access.js';
@@ -20,7 +20,8 @@ const id='a'.repeat(64);
 
 test('Hermes runs every other channel on its run routes with one identity per turn',async()=>{
   const {plugged,seen}=hermes(({path})=>Response.json(path.endsWith('/events')?{events:[{sequence:4,state:'running',stage:'assistant',at:1}]}:{state:'running'}));
-  for(const channel of turnChannels.filter(channel=>channel!=='telegram')) {
+  assert.deepEqual(plugged.channels,['telegram','scheduler','background'],'no browser while the dashboard chat page is off');
+  for(const channel of plugged.channels.filter(channel=>channel!=='telegram')) {
     seen.length=0;const ref={channel,event_id:id,attempt:7};
     await plugged.startTurn(ref,{scope:'-20',text:'original 😃\r\n  ',channel:'other',attempt:1});
     await plugged.observeTurn(ref);await plugged.turnEvents(ref,3);await plugged.cancelTurn(ref);
@@ -44,7 +45,7 @@ test('Telegram turns run on the turn routes and must return their reply, which N
     answer=invalid;await assert.rejects(plugged.observeTurn(ref),{code:agentErrors.invalid,status:502});
   }
   // Other channels still run on the run routes.
-  seen.length=0;answer={state:'queued'};await plugged.startTurn({channel:'browser',event_id:id,attempt:1},{owner_epoch:2});
+  seen.length=0;answer={state:'queued'};await plugged.startTurn({channel:'scheduler',event_id:id,attempt:1},{owner_epoch:2});
   assert.equal(seen[0]?.path,'/internal/run/start');
 });
 
@@ -95,7 +96,9 @@ test('a replacement agent offers only what it has, and Nocheh refuses the rest w
   assert.equal(turnChannel(minimal,'browser'),'browser');
   for(const channel of ['telegram','sms',undefined])assert.throws(()=>turnChannel(minimal,channel),{code:agentErrors.unsupported});
   const full=hermes(()=>Response.json({state:'done'})).plugged;
-  assert.ok(Object.values(agentSummary(full).capabilities).every(Boolean),'Hermes offers every channel and operation');
+  // Every channel and operation but the browser: the dashboard chat page is off until Nocheh has its own chat page.
+  assert.deepEqual(Object.entries(agentSummary(full).capabilities).filter(([,offered])=>!offered).map(([name])=>name),['browser']);
+  assert.throws(()=>turnChannel(full,'browser'),{code:agentErrors.unsupported,status:409});
   assert.equal(typeof agentOperation(full,'readNotes'),'function');
 });
 

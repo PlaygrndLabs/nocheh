@@ -39,7 +39,8 @@ export function hermesAgent(options:Options):Agent {
   };
   const manage=(action:string,settings=false)=>async(input:Readonly<Record<string,unknown>>)=>send('/internal/manage',{...input,action},120000,settings);
   return {
-    id:'hermes',name:'Hermes',channels:['telegram','browser','scheduler','background'],
+    // No browser: the dashboard chat page is off until Nocheh has its own chat page.
+    id:'hermes',name:'Hermes',channels:['telegram','scheduler','background'],
     async startTurn(ref,input) {
       // The run routes take `asynchronous`, which their requests have always carried; it is not part of a turn's identity.
       return receipt(ref,await send(route(ref,'start'),{...input,...identity(ref),...(returns(ref)?{}:{asynchronous:true})},10000));

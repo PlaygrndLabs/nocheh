@@ -173,3 +173,12 @@ replace('''          Selected skills are loaded before the prompt runs — the c
           sets when, the skill sets how.''', '''          Scheduled runs use the managed archive, native memory and proposal tools for this profile.
           Custom skill execution is not enabled.''')
 path.write_text(source)
+path = root / 'web/src/lib/dashboard-flags.ts'
+source = path.read_text()
+# ADR-0289: the chat page is off, so Hermes's own Chat tab, /chat route and "resume in chat" go away too.
+replace('''export function isDashboardEmbeddedChatEnabled(): boolean {
+  return true;
+}''', '''export function isDashboardEmbeddedChatEnabled(): boolean {
+  return false;
+}''')
+path.write_text(source)

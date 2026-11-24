@@ -110,7 +110,7 @@ export function History() {
           <Card>
             <CardHeader
               title="Assistant runs"
-              description="Scheduled jobs and conversations in the browser, latest 50."
+              description="Scheduled jobs and other assistant runs, latest 50."
               className="pb-3"
               action={
                 <a className="text-[13px] text-accent-text hover:underline" href="/hermes/cron">
@@ -127,7 +127,7 @@ export function History() {
               )
             ) : runs.length === 0 ? (
               <Empty icon={Bot} title="No runs yet">
-                Scheduled jobs and browser conversations with the assistant show here.
+                Scheduled jobs and other runs of the assistant show here.
               </Empty>
             ) : (
               <HistoryTable

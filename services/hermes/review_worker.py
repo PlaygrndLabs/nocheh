@@ -8,7 +8,7 @@ import time
 import threading
 from contextlib import ExitStack
 from pathlib import Path
-from .scopes import Scopes, Scope,verify_capability
+from .scopes import Scopes, Scope,check_claims
 from .assistant_gateway import prepare_profile
 
 
@@ -61,8 +61,7 @@ def review_profile(root,policy,model,body):
     if not re.fullmatch(r'[a-f0-9]{64}',body.get('id','')) or not isinstance(body.get('content'),str) or len(body['content'])>12000:
         raise ValueError('invalid_review_request')
     scope=Scope(owner,served.owner_user() or '',True,Scopes.profile(owner),owner)
-    from .environment import secret
-    claims=verify_capability(body['archive_credential'],secret('SERVICE_TOKEN'),scope,body['event_id'])
+    claims=check_claims(body['archive_credential'],scope,body['event_id'])
     if claims.get('generation') and claims.get('purpose')!='memory-review':raise ValueError('review_capability_required')
     scope=Scopes.apply_revision(scope,claims)
     return prepare_profile(root,scope,model)

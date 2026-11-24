@@ -17,8 +17,7 @@ Today's AI assistants are rented brains: what they learn lives inside one app an
 flowchart LR
   subgraph doors["Front doors"]
     TG["Telegram"]
-    WEB["Dashboard chat"]
-    NEXT["Slack and more, later"]
+    NEXT["Nocheh's own chat page,<br/>Slack and more, later"]
   end
   doors --> CORE["<b>Nocheh</b><br/>archive, sharing rules,<br/>approvals, secret check"]
   CORE --- ARCH[("Your archive")]
@@ -33,7 +32,7 @@ flowchart LR
 | Nocheh | Keeps the archive, files, tasks, sharing rules and approvals. Runs the dashboard | Permanent |
 | Agent | Reasons and writes each reply. Reads your data only through Nocheh's tools | Hermes |
 | Memory engine | Learns people and projects, finds things by meaning | Honcho |
-| Front doors | Where you talk to Nocheh | Telegram, dashboard chat |
+| Front doors | Where you talk to Nocheh | Telegram |
 
 ## What it does
 

@@ -68,7 +68,7 @@ class RuntimeProfileTests(unittest.TestCase):
         self.env.start(); self.control = ControlFixture()
         self.policy = Scopes({'enabled': True}, Served.of('42', groups=['-10'], topics=[['-10/topic/7', '-10', '7']]))
         self.catalog = ProfileCatalog(self.root, self.policy, 'fixture', self.control.request)
-        self.app = create_app(self.root, 'gpt-5.6-sol', self.policy, 'fixture', True, profile_catalog=self.catalog)
+        self.app = create_app(self.root, 'gpt-5.6-sol', self.policy, 'fixture', profile_catalog=self.catalog)
         self.client = TestClient(self.app, base_url='http://127.0.0.1')
         self.headers = {'X-Hermes-Session-Token': 'fixture'}
 
@@ -153,18 +153,6 @@ class RuntimeProfileTests(unittest.TestCase):
             with self.assertRaisesRegex(ValueError, 'profile_scope_denied'): self.catalog.validate(forged)
         link = self.catalog.path(self.control.entry()['native_profile']); link.symlink_to(home)
         with self.assertRaisesRegex(ValueError, 'profile_scope_denied'): self.catalog.resolve('default')
-
-    def test_launch_propagates_generation_and_logical_identity_without_credentials(self):
-        from .browser_launch import launch
-        entry = self.create()
-        argv, cwd, env = launch(self.app, profile='research')
-        self.assertEqual(env['NOCHEH_STORAGE_LAYOUT'], 'original-only-v1')
-        self.assertEqual(env['NOCHEH_BROWSER_LOGICAL_PROFILE'], entry['logical_profile'])
-        self.assertEqual(env['NOCHEH_BROWSER_PROFILE'], entry['native_profile'])
-        self.assertEqual(env['NOCHEH_BROWSER_GENERATION'], self.control.generation)
-        self.assertEqual(env['NOCHEH_BROWSER_GUARD_EPOCH'], str(self.control.epoch))
-        self.assertFalse((Path(env['HERMES_HOME']) / 'auth.json').exists())
-        self.assertNotIn('POSTGRES_PASSWORD', env)
 
     def test_scheduler_uses_stable_profile_for_definitions_and_fires(self):
         from .native_cron import manage, inspect, workflow_cursor
