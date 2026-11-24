@@ -328,6 +328,26 @@ class MemberLaneTests(unittest.TestCase):
         gates.setdefault('2', threading.Event()).set();self.assertEqual(self.wait(agent, group)['reply']['text'], 'Reply to 2')
         self.assertEqual(agent.lanes, {}, 'idle chats and members leave no lane behind')
 
+    def test_a_members_group_turn_with_a_free_lane_keeps_its_place_in_the_group(self):
+        # The owner's group turn reads its scope slowly; the member's later turn there, whose own lane is free, still runs second.
+        gate, started = threading.Event(), []
+        async def turn(root, scope, body, model, credentials, cancelled=None):
+            started.append(body['text'])
+            return {'state': 'done', 'text': 'Reply to ' + body['text'], 'session_id': 'nocheh-' + body['text']}
+        agent = self.agent(turn)
+        def resolve(body, claims):
+            if body['text'] == '1':gate.wait(5)
+            chat = body['scope']
+            return Scope(chat, '4567', claims.get('scope') is None, Scopes.profile(chat), chat, member=claims.get('member') or '')
+        agent.scopes = SimpleNamespace(enabled=True, resolve=resolve)
+        owner, member = turn_body(1, '-20', {}), turn_body(2, '-20', {'lane': MEMBER})
+        agent.start(owner);agent.start(member);time.sleep(.05)
+        self.assertEqual(started, [], "the member's turn waits for the owner's earlier one")
+        gate.set()
+        for body in (owner, member):self.assertEqual(self.wait(agent, body)['state'], 'done')
+        self.assertEqual(started, ['1', '2'])
+        self.assertEqual((agent.lanes, agent.order.lines), ({}, {}), 'idle chats and members leave no lane or place behind')
+
     def test_crossed_member_and_group_turns_all_finish(self):
         # Two members each in two groups and their own chats, the owner in both groups, in an order that crosses every lane
         # and space, with fewer slots than turns: all finish, nothing waits on itself.
