@@ -53,4 +53,7 @@ Accepted on 2026-11-24, from the attack test audit. Amends
 - A note that paraphrases the long-term memory context, with no run of its text
   and no distinctive token, still escapes, as a paraphrase of an earlier read
   does.
+- A Telegram Desktop export's sender ids stay trusted, as before: the owner
+  imports only files they trust. A file that names the owner's account is read
+  as the owner's words.
 </consequences>
