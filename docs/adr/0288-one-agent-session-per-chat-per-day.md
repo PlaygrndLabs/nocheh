@@ -35,7 +35,7 @@ message by message, not at a session's end.
    delivered answers (no tool work, reasoning or summaries), then the earlier session is
    closed with Hermes's end reason `daily`. That reason is one of Hermes's boundaries, so
    session search still finds the earlier day.
-4. **The count is a setting.** `nocheh.carry_messages` (0–200, default 20) is a per-chat
+4. **The count is a setting.** `nocheh.carry_messages` (0–200, default 50) is a per-chat
    agent setting with the others ("Messages carried into a new day"), inherited from the
    defaults like them.
 5. **A follow-up never moves.** A turn that continues an approved action runs in the session

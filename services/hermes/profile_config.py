@@ -14,7 +14,7 @@ PREFERENCES = {
     'memory.memory_char_limit': {'default': 2200, 'min': 100, 'max': 20000},
     'memory.user_char_limit': {'default': 1375, 'min': 100, 'max': 20000},
     # How many of the day before's last messages a chat's new daily session starts with (ADR-0288).
-    'nocheh.carry_messages': {'default': 20, 'min': 0, 'max': 200},
+    'nocheh.carry_messages': {'default': 50, 'min': 0, 'max': 200},
 }
 
 
