@@ -44,6 +44,7 @@ CREATE TABLE IF NOT EXISTS dispatches (
  created_at timestamptz NOT NULL DEFAULT now(),updated_at timestamptz NOT NULL DEFAULT now()
 );
 ALTER TABLE dispatches ADD COLUMN IF NOT EXISTS reconciliation_checked_at timestamptz;
+ALTER TABLE dispatches ADD COLUMN IF NOT EXISTS launched_attempt integer;
 `;
 const protocol='telegram-dispatch-v2';
 const conversationOrderWaitMs=120000;
@@ -229,6 +230,15 @@ export class TelegramDispatchRepository {
       [row.event_id,['admission','assistant','delivery'].includes(String(result.stage))?result.stage:row.runtime_stage,delay]);
     return this.observation(await this.row(row.event_id));
   }
+  /**
+   * Whether the agent holds this attempt, as its receipt says: once it does, a later message in the chat may start
+   * (heldByEarlier). An attempt the agent lost, as in a restart, has to start again first.
+   */
+  private async launched(row:any,receipt:TurnReceipt):Promise<void> {
+    const held=!['not_found','queued'].includes(String(receipt.state));
+    await this.control.query(`UPDATE dispatches SET launched_attempt=CASE WHEN $3 THEN $2 END WHERE event_id=$1 AND attempts=$2
+      AND launched_attempt IS DISTINCT FROM CASE WHEN $3 THEN $2 END`,[row.event_id,row.attempts,held]);
+  }
   /** A pass for the turn under the current binding, after the turn's own binding and source are checked. */
   private async credential(input:Input):Promise<string> {
     if(this.token.length<24)throw new HttpError(503,'service_credential_required');
@@ -336,8 +346,9 @@ export class TelegramDispatchRepository {
    * poll can be captured in any order, so local capture order is not used.
    * Native execution serializes started turns in each chat; only an earlier update that has
    * not started can reorder replies, for example when its preparation finishes
-   * later. The bound keeps a slow prerequisite such as transcription from
-   * holding later messages.
+   * later. Started means the agent took this attempt (launched_attempt): a turn marked
+   * running whose start failed, or that the agent lost in a restart, has not started.
+   * The bound keeps a slow prerequisite such as transcription from holding later messages.
    */
   private async heldByEarlier(source:SourceReference,space:string):Promise<boolean> {
     const current=(await this.control.query('SELECT created_at FROM dispatches WHERE event_id=$1',[source.id])).rows[0];
@@ -350,7 +361,7 @@ export class TelegramDispatchRepository {
       [this.scopes(space,own.scope),source.id,own.update_id])).rows.map(row=>row.id as string);
     if(!earlier.length)return false;
     const started=new Set((await this.control.query(`SELECT event_id FROM dispatches WHERE event_id=ANY($1::text[])
-      AND state NOT IN ('pending','failed')`,[earlier])).rows.map(row=>row.event_id as string));
+      AND (state NOT IN ('pending','failed','running') OR state='running' AND launched_attempt=attempts)`,[earlier])).rows.map(row=>row.event_id as string));
     const live=new Set((await this.control.query(`SELECT event_id FROM source_intakes WHERE event_id=ANY($1::text[])
       AND transport='capture' AND state='ready'`,[earlier])).rows.map(row=>row.event_id as string));
     for(const id of earlier)
@@ -791,6 +802,7 @@ export class TelegramDispatchRepository {
         let observed:TurnReceipt;
         try{observed=await this.agent.observeTurn({channel:'telegram',event_id:id,attempt:row.attempts});}
         catch{return await this.receive(row,{state:'running'});}
+        await this.launched(row,observed);
         if(closed.has(String(observed.state)))return await this.settle(row,input,observed);
         try{credential=await this.credential(input);}catch(error){
           if(!(error instanceof HttpError)||!withdrawnCodes.includes(error.code))throw error;
@@ -814,6 +826,9 @@ export class TelegramDispatchRepository {
         }
         // Only explicit absence or a never-started native request may launch the
         // same identity, after current binding checks. Running work is observed.
+        // Its start failed or the agent lost it: an earlier message in the chat that is not with the agent goes first.
+        const space=input.principal.space;
+        if(space&&await this.heldByEarlier(captured.reference,space))return await this.receive(row,{state:'running'},2000);
       } else {
         if(!this.access.policy().enabled)return observation('waiting','admission',0,Date.now()+60000,'owner_paused');
         // An Approve or Reject press decides its action here; it is never a turn.
@@ -864,7 +879,8 @@ export class TelegramDispatchRepository {
       await showPresence(this.call,replyTarget(input,row.attempts,credential));
       let result:TurnReceipt;
       try{result=await this.agent.startTurn({channel:'telegram',event_id:id,attempt:row.attempts},{...input.body,archive_credential:credential});}
-      catch{result={state:'running'};}
+      catch{return await this.receive(row,{state:'running'});}
+      await this.launched(row,result);
       if(closed.has(String(result.state)))return await this.settle(row,input,result);
       return await this.receive(row,result);
     } finally {await releaseOperation(db,async()=>{if(locked)await db.query('SELECT pg_advisory_unlock(hashtextextended($1,803364))',[id]);if(held)await leaveFamily(db,'telegram');});}
