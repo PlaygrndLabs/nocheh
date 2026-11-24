@@ -9,6 +9,7 @@ import {
   actionPlace,
   actionStateLabel,
   actionSummary,
+  becauseText,
   fromNow,
   fullTime,
   problemText,
@@ -225,6 +226,7 @@ export function ActionReview({action, review, onClose}: {action: Action; review:
           <Facts>
             <Fact label="To">{chat(actionPlace(action))}</Fact>
             <Fact label="Asked in">{chat(action.scope)}</Fact>
+            {becauseFacts(action, chat)}
           </Facts>
           <Exact label="Message">{exact || 'The message text couldn’t be read.'}</Exact>
         </>
@@ -247,6 +249,7 @@ export function ActionReview({action, review, onClose}: {action: Action; review:
           <Facts>
             <Fact label="Asked in">{chat(action.scope)}</Fact>
             <Fact label="When">{fullTime(action.created_at)}</Fact>
+            {becauseFacts(action, chat)}
           </Facts>
         </>
       )}
@@ -313,5 +316,17 @@ function ResultBlock({result}: {result: unknown}) {
       {text ? <Exact label="Result">{text}</Exact> : <p className="text-xs font-medium text-muted">Result</p>}
       <Technical value={result} summary="Full result" />
     </div>
+  );
+}
+
+/** Why it ran, and who or what asked when that says more (ADR-0294). */
+function becauseFacts(action: Action, chat: (id: string) => string) {
+  const because = becauseText(action.because, chat);
+  const asked = becauseText(action.asked, chat);
+  return (
+    <>
+      {because && <Fact label="Because">{because}</Fact>}
+      {asked && asked !== because && <Fact label="Asked by">{asked}</Fact>}
+    </>
   );
 }

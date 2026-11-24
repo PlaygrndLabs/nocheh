@@ -420,7 +420,10 @@ export function storageServer(s:StorageServices,config:Settings,call:RuntimeCall
     }
     if(path==='/v1/tools/actions'&&req.method==='GET') {
       if(!principal.admin)return result({telegram:await s.telegramActions.recent(principal),actions:await s.controlledActions.recent(principal)},true);
-      admin(principal);return json(res,200,{...await s.controlledActions.list(principal),telegram:await s.telegramActions.list(principal)});
+      admin(principal);const listed=await s.controlledActions.list(principal),telegram=await s.telegramActions.list(principal);
+      // Each decided action says why it ran and who asked (ADR-0294).
+      const why=(table:'controlled'|'telegram')=>async(action:any)=>action.state==='proposed'?action:{...action,...await s.actionBecause.describe(table,action.id)};
+      return json(res,200,{...listed,actions:await Promise.all(listed.actions.map(why('controlled'))),telegram:await Promise.all(telegram.map(why('telegram')))});
     }
     if(path==='/v1/tools/telegram-decision'&&req.method==='POST') {
       admin(principal);const outcome=await s.telegramActions.decide(principal,await readJson(req));

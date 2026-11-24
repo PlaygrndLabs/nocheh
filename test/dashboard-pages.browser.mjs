@@ -2809,7 +2809,14 @@ test('Usage, Messages and Inbox › History are tables of ten rows a page', asyn
 
   // Inbox › History: each kind is one table on its own sub-tab, and a row keeps its sub-tab when it opens.
   await page.goto(origin + '/#inbox?view=history');
-  await page.getByRole('table', {name: 'Actions'}).getByRole('link', {name: 'Send a Telegram message'}).waitFor();
+  const decided = page.getByRole('table', {name: 'Actions'});
+  await decided.getByRole('link', {name: 'Send a Telegram message'}).waitFor();
+  // Each says why it ran (ADR-0294): the owner's words, a chat rule, a setting or their card.
+  await decided.getByRole('columnheader', {name: 'Because'}).waitFor();
+  await decided.getByText('You said “What do the prices on example.test/prices say?”').waitFor();
+  await decided.getByText(/^Your rule: weather\.example\.test in /).waitFor();
+  await decided.getByText('Your Gmail setting').waitFor();
+  await decided.getByText('You approved its card').first().waitFor();
   await page.getByRole('tab', {name: 'Assistant runs'}).click();
   await page.getByRole('table', {name: 'Assistant runs'}).getByRole('link', {name: 'Morning aurora check'}).click();
   await page.getByRole('dialog').waitFor();

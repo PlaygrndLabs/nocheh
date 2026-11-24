@@ -105,14 +105,16 @@ export const learningPrompt=(
 /** Approval cards in Telegram. A line whose value is missing, such as where it
  * was asked, is left out. The exact message or arguments are always shown. A
  * group's or topic's name links to it in Telegram where Telegram has a link.
- * An operation's {kind} says what it does, such as “Notion · create pages”, its
+ * {asked} quotes the words of the message that asked, by whom (the asked_ lines,
+ * ADR-0294), on a card in the owner's private chat; it gives way first when a card
+ * runs long. An operation's {kind} says what it does, such as “Notion · create pages”, its
  * {summary} is the assistant's own short line about it, which always starts with the
  * ai_says label, and its {arguments} show every field in words, long text in a quote
  * that opens on a tap; with a summary, the fields fold into one quote that opens on a
  * tap, unless they are a command. A web address shows open while it is short, and
  * another server's tool says how much it sends and to which site (ADR-0250). */
-export const approvalCard='📨 Send to {destination}\n💬 Asked in {origin}\n\n{text}';
-export const approvalAction='⚙️ {kind}\n📝 {summary}\n💬 Asked in {origin}\n\n{arguments}';
+export const approvalCard='📨 Send to {destination}\n💬 Asked in {origin}\n🗣 {asked}\n\n{text}';
+export const approvalAction='⚙️ {kind}\n📝 {summary}\n💬 Asked in {origin}\n🗣 {asked}\n\n{arguments}';
 /** The card for a change asked in the owner's private chat that a project's chats would see: {change} says what changes
  * in which project's list, {chats} names every group and topic of that project, since each of them sees the whole list
  * whatever group a task is labelled with, {private} what stays private, and {fields} shows exactly what those chats
@@ -155,6 +157,7 @@ export const approvalTexts=[
   'reason_changed: something it used changed after it was asked. Ask again if you still want it.','reason_cancelled: it was cancelled.',
   'reason_stopped: the job was stopped.','reason_sandbox: the tool sandbox is not installed on this computer. Run ./bin/nocheh up, or start make dev again, to install it.','reason_other: see the dashboard Inbox.',
   'from_job: the job “{title}”','from_schedule: a scheduled task','from_schedule_in: a scheduled task in {chat}',
+  'asked_you: You said: {words}','asked_member: {name} said: {words}','unnamed_member: A member',
   'kind_shell: Run a command','kind_browser: Open a web page','kind_tools: list its tools','details: Exact details','ai_says: AI says:',
   'long_address: ⚠️ The address also carries {count} more characters, which can hold data.','sends: 📤 Sends {count} characters of input to {site}',
   'list: 📋 The job “{title}” asks to make these changes ({count}).','list_part: Card {part} of {parts}.','list_note: Approve or Reject covers exactly the changes on this card.',
@@ -180,7 +183,7 @@ export const actionContinued=['[Operations ended] Operations you asked for while
 export type ApprovalText='approve'|'reject'|'allow_once'|'allow_here'|'allow_always'|'allow_command'|'allow_document'|'allow_tool'|'site_note'|'document_note'|'tool_note'|'rule_note'|'allowed_here'|'allowed_always'|'private_chat'|'unnamed_group'|'topic'|'unnamed_topic'|'general_topic'|'sent'|'sending'|'done'|'approved'|'failed'|'rejected'|'rejected_action'|'cancelled'|
   'kind_shell'|'kind_browser'|'kind_tools'|'details'|'ai_says'|'long_address'|'sends'|
   'failed_action'|'unsure'|'not_run'|'read_closed'|'marked_ran'|'marked_not_run'|'marked_sent'|'marked_not_sent'|'reason_sign_in'|'reason_unreachable'|'reason_turned_off'|'reason_refused'|'reason_changed'|'reason_cancelled'|'reason_stopped'|'reason_sandbox'|'reason_other'|
-  'from_job'|'from_schedule'|'from_schedule_in'|'list'|'list_part'|'list_note'|'list_long'|'list_inbox'|'list_done'|'list_some'|'list_partly'|'list_partly_rejected'|'only_owner'|'only_requester'|'changed'|'decided'|'stop'|'stopping_job'|'job_ended'|'only_stop'|
+  'from_job'|'from_schedule'|'from_schedule_in'|'asked_you'|'asked_member'|'unnamed_member'|'list'|'list_part'|'list_note'|'list_long'|'list_inbox'|'list_done'|'list_some'|'list_partly'|'list_partly_rejected'|'only_owner'|'only_requester'|'changed'|'decided'|'stop'|'stopping_job'|'job_ended'|'only_stop'|
   'task_add'|'task_move'|'task_move_family'|'task_change'|'task_comment'|'task_no_chats'|'task_later'|'task_private_move'|'task_private_family'|'task_private_parts'|'task_done'|'task_rejected'|'task_changed'|
   'group_chat'|'topic_name'|'person_chat'|'person_chat_more'|'person_chat_other'|'unnamed_person'|'unknown_chat'|'not_served'|'name_project'|'name_id'|
   'not_sent'|'reason_not_served'|'reason_settings_changed'|'reason_member_changed'|'schedule_not_sent'|'schedule_not_run'|'job_report_not_sent';

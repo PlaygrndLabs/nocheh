@@ -347,9 +347,9 @@ function said(text:string|null):string|null {
  * arguments put in after the template is filled, so filling never changes them. A template without a place
  * for the summary, or whose summary line is left out for another missing value, gets it on the line after
  * the name, so folded arguments never come without it. */
-export function operationCard(template:string,operation:OperationText,origin:string|null):string {
+export function operationCard(template:string,operation:OperationText,origin:string|null,asked:string|null=null):string {
   const slot='\u0001\u0003',own=template.replace(controls,'');
-  const values={kind:heading(operation.title),summary:operation.summary,origin,arguments:operation.body?slot:''};
+  const values={kind:heading(operation.title),summary:operation.summary,origin,asked,arguments:operation.body?slot:''};
   const shows=own.split('\n').some(line=>line.includes('{summary}')&&lineKept(line,values));
   const placed=!operation.summary||shows?own:/\{kind\}/.test(own)?own.replace(/^(.*\{kind\}.*)$/m,'$1\n📝 {summary}'):'📝 {summary}\n'+own;
   return fillTemplate(placed,values).replaceAll(slot,()=>operation.body);

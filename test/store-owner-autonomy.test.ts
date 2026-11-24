@@ -64,6 +64,13 @@ test('owner freedom lets only the owner\'s live private requests approve themsel
     assert.equal(tool.state,'approved');assert.match(tool.message,/answer will follow here as a reply/);
     const groupTool=await s.controlledActions.propose(await actor((await capture(group,123,'Group tool')).id,group,group),{kind:'shell',arguments:{command:'printf group'}});
     assert.equal(groupTool.state,'proposed');
+    // Each says why it ran, quoting the owner's own words; one still waiting says only who asked (ADR-0294).
+    const said=(words:string)=>({kind:'said',who:'owner',name:null,words});
+    assert.deepEqual(await s.actionBecause.describe('telegram',direct.id),{because:said('Send it now'),asked:said('Send it now')});
+    assert.deepEqual((await s.actionBecause.describe('telegram',sameGroup.id)).because,said('Owner posts here'));
+    assert.deepEqual((await s.actionBecause.describe('controlled',tool.id)).because,said('Run a tool'));
+    assert.deepEqual(await s.actionBecause.describe('telegram',asked.id),{because:null,asked:said('Send a note')});
+    assert.deepEqual(await s.actionBecause.describe('controlled',groupTool.id),{because:null,asked:said('Group tool')});
 
     const security=(await stores.control.query('SELECT revision FROM security_policy WHERE singleton')).rows[0].revision;
     await savePolicy(stores.control,owner,{expected_revision:Number(security),policy:{version:1,rules:[{id:key+':deny',kind:'telegram.send',outcome:'deny'}]}});

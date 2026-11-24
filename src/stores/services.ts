@@ -56,6 +56,7 @@ import {BrowserRunRepository} from './browser-runs.js';
 import {BrowserDeliveryRepository} from './browser-delivery.js';
 import {ScheduledRunRepository} from './scheduled-runs.js';
 import {ScheduleRepository,scheduleKey} from './schedules.js';
+import {ActionBecause} from './action-because.js';
 import {RuntimeProfileRepository} from './runtime-profiles.js';
 import {EntityRepository} from './entities.js';
 import {MemoryAccessRepository} from './memory-access.js';
@@ -128,6 +129,11 @@ export function storageServices(stores:StorePools,options:{dataDir:string;detect
     const saved=version?await derived.checkpoint('schedule-prompt:'+version):undefined;
     return saved?saved.content.toString():null;
   });
+  // Why each action ran, for its card and Inbox › History (ADR-0294).
+  const actionBecause=new ActionBecause(stores.control,stores.archive,async version=>{
+    const saved=await derived.checkpoint('schedule-definition:'+version);if(!saved)return null;
+    const name=JSON.parse(saved.content.toString()).name;return {name:typeof name==='string'&&name.trim()?name:null};
+  },async event=>jobs.runJob(event));
   const telegramActions=new TelegramActionRepository(stores,access,derived,guards,prepared,turns,options.runtime,detect);
   const memoryAccess=new MemoryAccessRepository(stores,access,derived,guards,prepared,entities,projects,telegramActions,detect);
   const memoryMap=new MemoryMapRepository(stores,memoryAccess);
@@ -228,7 +234,7 @@ export function storageServices(stores:StorePools,options:{dataDir:string;detect
     return {source,project:project.id,group:space,reach,...await sender(source.reference.id,space)};
   },{call:options.runtime,owner:()=>ownerChat(options.policy()),policy:options.policy,record:send=>chatSends.recordLocal(send)});
   const jobs=new BackgroundJobRepository(access,derived,prepared,turns,sources,telegramActions,options.runtime,options.agent,detect,options.serviceToken??'');
-  const actionCommands=new ActionCommandRepository(access,telegramActions,controlledActions,options.runtime,jobs,tasks,privateAnswers,chatAdds,scheduleNotices),machines=new MachineRepository(access,jobs);
+  const actionCommands=new ActionCommandRepository(access,telegramActions,controlledActions,options.runtime,jobs,tasks,privateAnswers,chatAdds,scheduleNotices,actionBecause),machines=new MachineRepository(access,jobs);
   const controlledExecution=new ControlledExecutionRepository(controlledActions);
   // A card edit is best effort: a job or an operation never fails because its card could not be updated.
   jobs.settled=id=>actionCommands.settle('background',id).then(()=>{},()=>{});
@@ -239,7 +245,7 @@ export function storageServices(stores:StorePools,options:{dataDir:string;detect
   const voices={transcribe:()=>preparation.transcribeArchived(async()=>(await options.runtime('voice.transcribe',{check:true},10000)).configured===true)};
   // The owner's Members routes (step 3, src/stores/member-api.ts).
   const members:MemberRepository=new Members(stores.control,options.policy);
-  return {agent:options.agent,chats,chatAdds,scheduleNotices,members,jobs,machines,ownerAutonomy,notion,chatTools,tasks,prompts,telegramChats,telegramTopics,stores,archive,operations,derived,guards,selections,attachments,reprocessing,preparation,voices,prepared,turns,access,retirements,reactions,sources,projects,entities,sharing,learned,contexts,provenance,
+  return {agent:options.agent,actionBecause,chats,chatAdds,scheduleNotices,members,jobs,machines,ownerAutonomy,notion,chatTools,tasks,prompts,telegramChats,telegramTopics,stores,archive,operations,derived,guards,selections,attachments,reprocessing,preparation,voices,prepared,turns,access,retirements,reactions,sources,projects,entities,sharing,learned,contexts,provenance,
     configuration:new RuntimeConfigurationRepository(stores.control),
     browserCapture:new BrowserCaptureRepository(options.dataDir,options.policy),
     browserDelivery,

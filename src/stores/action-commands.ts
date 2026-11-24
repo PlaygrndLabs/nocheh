@@ -27,6 +27,7 @@ import type {PrivateAnswerRepository} from './private-answers.js';
 import {currentChats} from './chats.js';
 import {chatAddButton,type ChatAddChoice,type ChatAdds} from './chat-adds.js';
 import {scheduleButton,type ScheduleChoice,type ScheduleNotices} from './schedule-notices.js';
+import type {ActionBecause} from './action-because.js';
 
 type ActionKind='telegram'|'controlled'|'background'|'list'|'task';
 /** One card of a job's waiting changes, as frozen when it was sent. */
@@ -133,7 +134,18 @@ const listed=(action:{kind:string;arguments:Record<string,any>;summary?:string|n
 export class ActionCommandRepository {
   constructor(readonly access:SourceAccessRepository,readonly telegram:TelegramActionRepository,readonly tools:ControlledActionRepository,
     readonly call?:RuntimeCall,readonly jobs?:BackgroundJobRepository,readonly tasks?:TaskRepository,readonly answers?:PrivateAnswerRepository,
-    readonly adds?:ChatAdds,readonly schedules?:ScheduleNotices){}
+    readonly adds?:ChatAdds,readonly schedules?:ScheduleNotices,readonly because?:ActionBecause){}
+  /** Whose words asked for an action, quoted, for its card in the owner's private chat (ADR-0294); null for a run Nocheh
+   *  started itself, such as a schedule's or a job's, whose card names it as where it was asked. */
+  private async askedLine(kind:'telegram'|'controlled',id:string,line:Record<ApprovalText,string>):Promise<string|null> {
+    try {
+      const asked=this.because?(await this.because.describe(kind,id)).asked:null;
+      const words=asked?.kind==='said'?labelName(asked.words,120):null;
+      if(asked?.kind!=='said'||!words)return null;
+      const name=asked.who==='member'?labelName(asked.name):null;
+      return fillLine(asked.who==='owner'?line.asked_you:line.asked_member,{words:quotedName(words),name:name?quotedName(name):line.unnamed_member});
+    }catch{return null;}
+  }
   private async approval(input:Record<string,unknown>,timeout=15000) {
     if(!this.call)return null;
     try{return await this.call('telegram.approval',input,timeout);}catch{return null;}
@@ -347,6 +359,9 @@ export class ActionCommandRepository {
     const origin=(asked&&asked.chat!==owner?await this.where(asked.space,line,mark,{message:asked.message,showTopic:shared}):
       source?.store==='control'?await this.work(source,line,shared?()=>this.where(space,line,mark,{showTopic:true}):undefined):null)??
       (shared?await this.where(space,line,mark,{showTopic:true}):null);
+    // The words that asked, on a card in the owner's private chat for a request made elsewhere, so not the reply to them
+    // (ADR-0294); they give way first on a long card.
+    let quote=reviewed||!origin||kind!=='telegram'&&kind!=='controlled'?null:await this.askedLine(kind,id,line);
     if(kind==='telegram') {
       const action=await this.telegram.inspect(admin,id),before=urls.length,cache={};
       // The message shows its hidden characters written out, so the owner approves what will be sent (ADR-0254).
@@ -355,10 +370,11 @@ export class ActionCommandRepository {
         // Each try starts after the origin's links, so a shorter try leaves none of the longer one's behind.
         urls.length=before;
         const destination=await this.sendPlace(String(action.arguments.destination),line,mark,{ownerCard:!reviewed,compact},cache);
-        return linked(fillTemplate(texts.card.replace(controls,''),{destination,origin,text}),urls);
+        return linked(fillTemplate(texts.card.replace(controls,''),{destination,origin,text,asked:quote}),urls);
       };
       // A card too long with a person's full line names the person without the groups they are allowed in (keeping the short id when their name reads like another's); one still too long waits in the Inbox.
       let card=await render(false);
+      if(card.text.length>cardLimit-outcomeRoom&&quote){quote=null;card=await render(false);}
       if(card.text.length>cardLimit-outcomeRoom)card=await render(true);
       if(card.text.length>cardLimit-outcomeRoom&&!decided)return null;
       return {...card,fingerprint:action.fingerprint,state:action.state,code:action.error_code??null,started:true,resolution:action.resolution,line,rules:false};
@@ -369,10 +385,11 @@ export class ActionCommandRepository {
     // a card from Telegram: one that does not fit with it goes without it, before the note does.
     const warning=ruled&&ruleWarnings[ruleKind(row!)]?line[ruleWarnings[ruleKind(row!)]!]:'';
     const room=cardLimit-outcomeRoom,note=[warning,shared?line.rule_note:''].filter(Boolean).map(text=>'\n\n'+text).join('');
-    let card=linked(operationCard(texts.action,shown,origin),urls);
+    let card=linked(operationCard(texts.action,shown,origin,quote),urls);
+    if(card.text.length+note.length>room&&quote){quote=null;card=linked(operationCard(texts.action,shown,origin),urls);}
     if(card.text.length+note.length>room&&shown.summary) {
       const bare=operation({...action,summary:null},line);if(!bare)return null;
-      const plain=linked(operationCard(texts.action,bare,origin),urls);
+      const plain=linked(operationCard(texts.action,bare,origin,quote),urls);
       // The summary gives way to the note only when that makes room for it; a card the note cannot fit either way keeps its summary.
       if(card.text.length>room||plain.text.length+note.length<=room)card=plain;
     }
