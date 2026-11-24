@@ -9,7 +9,7 @@ import tempfile
 import unittest
 
 from tools.paths import ROOT
-from tools.development import check_all
+from tools.development import check_all, upstream_tests
 from tools.acceptance import full_test
 
 
@@ -28,9 +28,50 @@ class CompareTests(unittest.TestCase):
 
     def test_the_known_failures_list_names_a_reason_for_each_entry(self):
         listed = json.loads(check_all.KNOWN.read_text())
-        for section in check_all.SECTIONS:
+        for section in check_all.SECTIONS + check_all.ON_REQUEST:
             for name, entry in listed[section].items():
                 self.assertTrue(entry.get('reason') and entry.get('since'), name)
+
+
+class UpstreamTests(unittest.TestCase):
+    def test_imports_name_the_module_and_each_imported_member(self):
+        names = upstream_tests.imported('import os\nfrom agent.store import (\n    Store, open_store as opened)\n'
+                                         'from tools.base import thing\n    import gateway.run\n')
+        self.assertTrue({'os', 'agent.store', 'agent.store.Store', 'agent.store.open_store', 'tools.base.thing',
+                         'gateway.run'} <= names)
+
+    def test_hermes_failures_name_the_test_and_files_failing_whole(self):
+        text = ('[ 50.0% | 3/6 | ✓3 | ✗ 1] ✗ tests/a/test_one.py (2✓ 1✗, 1.0s)\n'
+                '  ║ FAILED tests/a/test_one.py::test_bad - AssertionError: 1 != 2\n'
+                '=== Summary: 3 files, 5 tests passed, 1 failed, 2 skipped; FAILED: 2 of 3 files (1 at import/collection) '
+                '(100% complete) in 9.5s (4 workers) ===\n\n=== Failure output ===\n\n--- tests/a/test_one.py ---\n'
+                'FAILED tests/a/test_one.py::test_bad - AssertionError: 1 != 2\n\n'
+                '=== 1 file that FAILED AT IMPORT/COLLECTION (0 tests ran) ===\n  tests/b/test_two.py  ModuleNotFoundError\n'
+                '=== 1 file with test failures ===\n  tests/a/test_one.py  (1 test failed)\n')
+        ran, skipped, failed = upstream_tests.hermes_report(text)
+        self.assertEqual((ran, skipped), (7, 2))
+        self.assertEqual([(item['test'], item['error']) for item in failed],
+                         [('hermes :: tests/a/test_one.py::test_bad', 'AssertionError: 1 != 2'),
+                          ('hermes :: tests/b/test_two.py::(whole file)', 'that FAILED AT IMPORT/COLLECTION (0 tests ran)')])
+
+    def test_a_hermes_run_that_did_not_finish_or_ran_nothing_fails(self):
+        for text in ('Traceback\n', '=== Summary: 0 files, 0 tests passed, 0 failed (0% complete) in 0.1s (4 workers) ===\n'):
+            self.assertEqual(upstream_tests.hermes_report(text)[2][0]['test'], 'hermes :: (whole suite)')
+
+    def test_honcho_report_counts_skips_and_names_failures(self):
+        with tempfile.TemporaryDirectory() as folder:
+            report = Path(folder) / 'honcho.xml'
+            self.assertEqual(upstream_tests.honcho_report(report)[2][0]['test'], 'honcho :: (whole suite)')
+            report.write_text('<testsuites><testsuite><testcase classname="tests.x.test_a" name="test_ok"/>'
+                              '<testcase classname="tests.x.test_a" name="test_skip"><skipped message="s"/></testcase>'
+                              '<testcase classname="tests.x.test_a" name="test_bad"><failure message="boom&#10;more"/>'
+                              '</testcase></testsuite></testsuites>')
+            self.assertEqual(upstream_tests.honcho_report(report),
+                             (2, 1, [{'test': 'honcho :: tests/x/test_a.py::test_bad', 'error': 'boom'}]))
+
+    def test_upstream_runs_only_when_asked_for(self):
+        self.assertNotIn('upstream', check_all.SECTIONS)
+        self.assertIn('upstream', check_all.ON_REQUEST)
 
 
 @unittest.skipUnless(shutil.which('node'), 'needs Node')
