@@ -8,7 +8,8 @@ import {GuardRepository} from '../src/stores/guards.js';
 import {MemoryProvenanceRepository} from '../src/stores/memory-provenance.js';
 import {honchoEngine} from '../src/memory/honcho.js';
 import type {Reader} from '../src/access.js';
-import {readSet,readSetParam,readSetSql} from '../src/spaces.js';
+import {readSet,readSetIds,readSetParam,readSetSql} from '../src/spaces.js';
+import {memoryWallName} from '../src/stores/memory-walls.js';
 import {NativeMemoryRepository} from '../src/stores/native-memory.js';
 import {installChatsForTest} from '../src/chats.js';
 import {GP1,GP1_TOPIC,GP2,GP4,GP_GROUP_IDS,NG1,NG1_TOPIC,OWNER,P1,fixtureChats,groupsPolicy,legacyChats} from './fixture-groups.js';
@@ -119,21 +120,27 @@ test('a private answer searches Honcho only through the sessions and receipts of
     assert.deepEqual((await provenance.readSetSessions(workspace,readSet({home:NG1_TOPIC,whole:[NG1]}))).sort(),[NG1,NG1_TOPIC].map(session).sort(),
       'a digest group reads its topic rows');
 
-    // The search itself: Honcho is asked within those sessions, and a hit counts only with a done, current receipt of the set.
-    const asked:any[]=[];
+    // The search itself: Honcho is asked through the memory wall of those sessions (ADR-0286), and a hit counts only with a
+    // done, current receipt of the set.
+    const asked:any[]=[],walled:any[]=[];
     const hits=[...places,pending,retired].map(place=>({id:remote(place),metadata:{nocheh_receipt:receipt(place)}}));
     const contexts={access:{stores,policy:()=>policy,recall:()=>null,reads:(principal:Reader)=>principal.reads},guards};
     const prepared={audience:{assert:async()=>binding},prepare:async(_actor:unknown,query:string)=>query,allow:async()=>{}};
-    const memory=new NativeMemoryRepository(contexts as any,{} as any,prepared as any,provenance,honchoEngine(async(_path:string,body:any)=>{asked.push(body);return hits;}),async()=>[]);
+    const memory=new NativeMemoryRepository(contexts as any,{} as any,prepared as any,provenance,honchoEngine(async(path:string,body:any)=>{
+      if(/\/scopes\/[^/]+\/status$/.test(path))return {backfill_status:{}};
+      if(/\/scopes(\/[^/]+\/sessions)?$/.test(path)){walled.push(body);return null;}
+      asked.push(body);return hits;}),async()=>[]);
     Object.assign(memory as any,{workspace:async()=>({id:workspace}),current:async()=>({row:{id:workspace,state:'ready'},binding,principal:{}})});
     const answer:Reader={admin:false,scope:OWNER,space:OWNER,turnEvent:digest(key+':start'),answer:'a'.repeat(32),reads:frozen};
     const found=await memory.search(answer,'kestrelpine',20);
-    assert.deepEqual(asked[0].filters.session_id.in.sort(),readable.map(session).sort());
+    assert.equal(asked[0].scope,memoryWallName(workspace,readSetIds(frozen)));assert.equal(asked[0].filters,undefined);
+    assert.deepEqual([...walled[1].session_ids].sort(),readable.map(session).sort(),'the wall holds exactly the sessions of the frozen groups');
     assert.deepEqual(found.ids.sort(),readable.map(place=>source(place).id).sort(),'never the evidence of GP4, the owner, a private chat or an import');
     assert.deepEqual((await memory.search({...answer,reads:readSet({home:GP4,whole:[GP4],project:null})},'kestrelpine',20)).ids.sort(),
       [source(GP4).id,source(GP4+'/topic/9').id].sort(),'whatever Honcho returns, a set keeps only its own groups\' evidence');
   } finally {
     await stores.control.query('DELETE FROM memory_ingestion_receipts WHERE generation=$1',[workspace]);
+    await stores.control.query('DELETE FROM memory_walls WHERE workspace=$1',[workspace]);
     await stores.control.query('DELETE FROM memory_sessions WHERE workspace=$1',[workspace]);
     await stores.control.query('DELETE FROM memory_generations WHERE id=$1',[workspace]);
     restore();await stores.close();

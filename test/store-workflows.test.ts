@@ -160,6 +160,8 @@ test('workflow engine prepares originals, learns silently, reconciles effects an
       throw Error('unexpected runtime operation');
     },transcription:{name:'fixture-asr',version:'2',outputKind:'transcript',async run(bytes){engines++;assert.deepEqual(bytes,Buffer.from([79,103,103,0,255]));return 'Improved synthetic reading';}},memoryEngine:honchoEngine(async(path,body:any,method)=>{
       if(method==='DELETE')return {deleted:true};
+      // Group learning goes through the group's memory wall (ADR-0286); a new wall has nothing left to backfill.
+      if(/\/scopes\/[^/]+\/status$/.test(path))return {backfill_status:{}};
       if(path.endsWith('/messages/list'))return {items:(remote.get(path.replace('/list',''))??[]).filter(record=>record.metadata.nocheh_receipt===body.filters.metadata.nocheh_receipt)};
       if(path.endsWith('/messages')){sends++;const record={...body.messages[0],id:String(++sequence).padStart(21,'r')};remote.set(path,[...(remote.get(path)??[]),record]);if(loseReply){loseReply=false;throw Error('lost response');}return [record];}
       if(path.includes('/queue/status?'))return {pending_work_units:0,in_progress_work_units:0};

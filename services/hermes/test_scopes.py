@@ -397,10 +397,12 @@ class ScopeTests(unittest.TestCase):
             finally:reset_hermes_home_override(token)
 
     def test_turn_tools_are_exact_and_job_turns_have_no_job_tool(self):
-        self.assertEqual(turn_tools(False,False),(OWNER_SET_TOOLS,REPLY_TOOLS))
-        self.assertEqual(turn_tools(True,False),(OWNER_SET_TOOLS|{'mcp__nocheh__background_job'},JOB_TOOLS))
-        self.assertEqual(turn_tools(True,True),(OWNER_SET_TOOLS|{'mcp__nocheh__background_job','mcp__nocheh__shell','mcp__nocheh__browser'},JOB_BOX_TOOLS))
-        self.assertEqual(turn_tools(True,False,True),(OWNER_SET_TOOLS|{'mcp__nocheh__my_time_zone'}|(ALLOWED_TOOLS-JOB_MACHINE_TOOLS),JOB_MACHINE_TOOLS))
+        # The time zone tool stays only in schedule and member turns (ADR-0282): every other turn drops it.
+        dropped=OWNER_SET_TOOLS|{'mcp__nocheh__my_time_zone'}
+        self.assertEqual(turn_tools(False,False),(dropped,REPLY_TOOLS))
+        self.assertEqual(turn_tools(True,False),(dropped|{'mcp__nocheh__background_job'},JOB_TOOLS))
+        self.assertEqual(turn_tools(True,True),(dropped|{'mcp__nocheh__background_job','mcp__nocheh__shell','mcp__nocheh__browser'},JOB_BOX_TOOLS))
+        self.assertEqual(turn_tools(True,False,True),(dropped|(ALLOWED_TOOLS-JOB_MACHINE_TOOLS),JOB_MACHINE_TOOLS))
         self.assertIn('mcp__nocheh__background_job',REPLY_TOOLS)
         for tools in (JOB_TOOLS,JOB_BOX_TOOLS,JOB_MACHINE_TOOLS):self.assertNotIn('mcp__nocheh__background_job',tools)
         # A private answer only reads (ADR-0249): no native memory, no tool that sends, changes, starts or asks.
