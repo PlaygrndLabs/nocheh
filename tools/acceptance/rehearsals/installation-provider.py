@@ -63,6 +63,10 @@ class ScriptedAgent:
     # instruction that result holds, [[do:action|DESTINATION|TEXT]], [[do:browser|URL]], [[do:shell|COMMAND]] or
     # [[do:note|TEXT]] (saves TEXT as a native note), then answers from that call's result. Attack scenarios plant these
     # where untrusted text reaches a tool's result.
+    # Hermes's steer (ADR-0301): a message that joined the running turn comes as its own user row after the newest tool
+    # result, wrapped in this marker (agent/prompt_builder.py). It is no new turn: the directives stay the earlier
+    # message's, and the answer adds one line per joined message, so a scenario sees the agent read it.
+    STEER_OPEN, STEER_CLOSE = '[OUT-OF-BAND USER MESSAGE', '[/OUT-OF-BAND USER MESSAGE]'
     OBEY = '[[obey]]'
     PLANTED = re.compile(r'\[\[do:(action|browser|shell|note)\|([^\]]{1,800})\]\]')
     TOOLS = {'search': 'mcp__nocheh__archive_search', 'recall': 'mcp__nocheh__memory_recall', 'action': 'mcp__nocheh__action_request',
@@ -187,12 +191,35 @@ class ScriptedAgent:
         self.record(directive='obey', argument=argument, phase='final', tool=name, present=True, result=result[:20000])
         return {'content': '[NO_REPLY]' if silent_after else '[agent] obeyed ' + name + ': ' + ' '.join(result.split())[:3000]}
 
+    def users(self, messages):
+        """The user rows that are turns: a joined message (a steer row) belongs to the turn before it."""
+        return [index for index, message in enumerate(messages) if message.role == 'user'
+                and not self.text(message.content).lstrip().startswith(self.STEER_OPEN)]
+
+    def steers(self, messages, index):
+        """The joined messages' own text after the turn's message, in order."""
+        found = []
+        for message in messages[index + 1:]:
+            text = self.text(message.content).lstrip() if message.role == 'user' else ''
+            if text.startswith(self.STEER_OPEN):
+                inner = text.partition('\n')[2]
+                found.append(inner[:inner.rfind(self.STEER_CLOSE)].strip() if self.STEER_CLOSE in inner else inner.strip())
+        return found
+
     def respond(self, body):
         scripted = self.script(body)
         if scripted is None:
             return None
         messages = [message for message in body.messages if message.role != 'system']
-        _, current = self.turn(messages, [index for index, message in enumerate(messages) if message.role == 'user'])
+        index, current = self.turn(messages, self.users(messages))
+        steers = self.steers(messages, index)
+        for text in steers:
+            key = ('steer', hashlib.sha256(text.encode()).hexdigest())
+            if key not in self.seen:
+                self.seen.add(key)
+                self.record(directive='steer', phase='seen', argument=text[:2000])
+        if steers and isinstance(scripted.get('content'), str) and scripted['content'] != '[NO_REPLY]':
+            scripted = {**scripted, 'content': '\n'.join([scripted['content']]+['[agent] joined: '+' '.join(text.split())[:1000] for text in steers])}
         usage, delay = self.USAGE.search(current), self.DELAY.search(current)
         if usage:
             scripted = {**scripted, 'prompt_tokens': int(usage[1])}
@@ -251,7 +278,7 @@ class ScriptedAgent:
         if not any(isinstance(name, str) and name.startswith(self.NOCHEH) for name in names):
             return None
         messages = [message for message in body.messages if message.role != 'system']
-        users = [index for index, message in enumerate(messages) if message.role == 'user']
+        users = self.users(messages)
         if not users:
             return None
         index, current = self.turn(messages, users)

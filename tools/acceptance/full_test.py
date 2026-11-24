@@ -67,6 +67,7 @@ TITLES = {
     'ordinary_private': 'Private chat reply', 'edit_is_silent': 'Edited message gets no new reply',
     'reaction_is_silent': 'A reaction gets no reply', 'general_after_topics': 'General topic reply',
     'burst_in_order': 'Quick group messages answered in order', 'private_burst_in_order': 'Quick private messages answered in order',
+    'message_joins_running_turn': 'A message sent while Nocheh works joins its reply',
     'long_reply_chunks': 'Long answers split into Telegram-sized parts', 'intentional_silence': 'Nocheh can choose not to answer',
     'empty_answer_is_not_silence': 'A blank model answer is retried', 'private_fact_and_search': 'Search finds a private fact',
     'owner_private_context': 'Private chat remembers what you said', 'group_cannot_see_private': 'Groups never see private facts',
