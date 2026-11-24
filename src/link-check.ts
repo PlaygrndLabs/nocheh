@@ -102,6 +102,15 @@ export function shortInput(input:unknown):boolean {
   };
   return walk(input,0)&&canonical(input).length<=2000;
 }
+/** Whether a web read or another server's tool, whose site a model may choose, sends nothing beyond a short address
+ *  (ADR-0291): its address carries no data, a tool call's input is short enough for a tool rule, and all a model chose,
+ *  its site name, path and query and a tool call's name and input, is at most dataLimit characters. */
+export function sendsNoData(args:{url?:unknown;tool?:unknown;input?:unknown;operation?:unknown}):boolean {
+  if(typeof args.url!=='string'||carriesData(args.url))return false;
+  const url=new URL(args.url),call=args.tool!==undefined;
+  if(call&&(typeof args.tool!=='string'||!shortInput(args.input)))return false;
+  return Array.from(url.hostname+decoded(after(url))+(call?args.tool+canonical(args.input):'')).length<=dataLimit;
+}
 /** The rule key of another server's tool call: its exact server address and tool, only for short input from an address
  *  that carries no data. A list of its tools and a connected service have none. */
 export function toolRuleKey(args:{url?:unknown;tool?:unknown;input?:unknown;operation?:unknown;connection?:unknown}):string|null {

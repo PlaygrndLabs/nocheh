@@ -15,9 +15,10 @@ import {BackgroundJobLimits} from '../system/jobs';
 import {useSubTab} from '../../lib/navigation';
 import {SubPanel, SubTabs} from '../../ui/page';
 
-/** The one thing in a group that never waits, whichever is chosen: a group's web pages and outside tools (step 3). */
+/** The one thing in a group that skips the card, whichever is chosen: a group's web pages and outside tools (step 3), unless
+ *  they could carry data (ADR-0291). */
 const groupTools =
-  'In a group, web pages and outside tools run without a card when you ask, or a member with “Web pages and outside tools” on asks; commands still wait, and Notion is never used in a group.';
+  'In a group, web pages and outside tools run without a card when you ask, or a member with “Web pages and outside tools” on asks, unless the model built an address or input that could carry data; commands still wait, and Notion is never used in a group.';
 
 const freedom = [
   {
@@ -31,7 +32,7 @@ const freedom = [
     value: 'owner_requests_execute',
     title: 'Do what I ask',
     text:
-      'When you ask in your private chat, it acts without a separate yes: commands run, and it opens links you send, links on pages it opened for you and a site you name. A web address it builds itself, such as a search with your words in it, asks once, with a button to always allow that site; another server’s tool asks once, with a button to always allow that tool. Messages to groups always show you a card first. Other requests from groups, schedules and background work still wait. ' +
+      'When you ask in your private chat, it acts without a separate yes: commands run, and it opens links you send, links on pages it opened for you and a site you name. A command still asks first when something you did not type yourself reached the conversation, such as a forward, a file, a voice note, a quoted reply, a web page or a search of your chats. A web address it builds itself, such as a search with your words in it, asks once, with a button to always allow that site; another server’s tool asks once, with a button to always allow that tool. Messages to groups always show you a card first. Other requests from groups, schedules and background work still wait. ' +
       groupTools,
   },
 ];

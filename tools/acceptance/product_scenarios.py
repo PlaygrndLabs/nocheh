@@ -30,7 +30,7 @@ from tools.acceptance.telegram_mock import ANONYMOUS_ADMIN
 from tools.acceptance.telegram_rehearsal import add_card, group_chat, person, sent_buttons
 from tools.acceptance.telegram_scenarios import (GROUP, MENTION, NEW_GROUP, NEW_TOPIC, NOT_ALLOWED, OTHER_GROUP, OWNER, PARTICIPANT, THIRD_GROUP,
                                                 UNSELECTED_GROUP, REFRESHED_GROUP, REFRESHED_SUPERGROUP, UPGRADED_GROUP, UPGRADED_SUPERGROUP, Failed,
-                                                Scenarios, isolated_turns, synthetic_pdf)
+                                                Scenarios, isolated_turns, synthetic_pdf, synthetic_wav)
 from tools.paths import ROOT
 
 # The owner's members, added on the Members page by their Telegram user IDs (group_members): MEMBER (778) with GROUP and
@@ -2614,7 +2614,8 @@ class ProductScenarios(Scenarios):
         with zipfile.ZipFile(buffer, 'w') as archive:
             archive.writestr('ChatExport/result.json', json.dumps(document, ensure_ascii=False, indent=1))
             if voice:
-                archive.writestr('ChatExport/voice_messages/audio_1.ogg', b'OggS\x00\x02synthetic voice note\n\xff'*4+marker.encode())
+                # A real recording: the file reader decodes it before it is transcribed (ADR-0285).
+                archive.writestr('ChatExport/voice_messages/audio_1.ogg', synthetic_wav(2)+marker.encode())
         return buffer.getvalue()
 
     def tool_call(self, name, arguments, chat, topic=None, sender=OWNER):
@@ -4083,8 +4084,10 @@ class ProductScenarios(Scenarios):
                   kinds=[row['kind'] for row in rows])
         stored = json.loads(self.f.query('nocheh_control', "SELECT coalesce(json_agg(json_build_object('kind',kind,'run',run_event_id,'script',script_sha256)),'[]') "
                                          "FROM machine_commands WHERE job_id='%s'" % found['id']))
-        self.gate('every_command_belongs_to_the_run', bool(stored) and all(row['run'] == run_event and re.fullmatch(r'[a-f0-9]{64}', row['script'] or '') for row in stored),
-                  rows=len(stored))
+        # Nocheh's own checks of the machine (ADR-0284) belong to the run too, but run no script of the job's.
+        self.gate('every_command_belongs_to_the_run', bool(stored) and all(row['run'] == run_event and (row['kind'] == 'test' or re.fullmatch(r'[a-f0-9]{64}', row['script'] or ''))
+                  for row in stored), rows=[{key: row[key] for key in ('kind', 'run')} for row in stored if row['run'] != run_event or row['kind'] != 'test' and not row['script']])
+        self.gate('machine_checked_before_the_first_command', any(row['kind'] == 'test' for row in stored), kinds=[row['kind'] for row in stored])
         # Neither the run's turn nor anything the model was sent has the key or the token: the key's lines and the token are
         # looked for in each tool result and answer the model gave, the run's message and every message sent since.
         lines, token = self.machine_secrets(machine)

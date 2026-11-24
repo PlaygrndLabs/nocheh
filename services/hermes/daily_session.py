@@ -55,16 +55,21 @@ def choose(cursor,logical,now,place,follow_up=False):
     return (session,None,day) if fresh==session else (fresh,session,today)
 
 
-def start(store,session,previous,carry,source='telegram'):
+def start(store,session,previous,carry,source='telegram',profile=None):
     """Open `session` with the last `carry` messages of `previous` (the chat's setting), then close `previous` as a daily reset. Safe to repeat: a
-    session already opened keeps what it has."""
+    session already opened keeps what it has. With `profile`, what the carried messages read in `previous` is kept for
+    `session` first (ADR-0293)."""
     from persistence.conversation.messages import NewMessage
     from persistence.conversation.sessions import NewSession, SessionLineageKind
     from .native_store import messages, session_row
     from .profile_history import _conversation as conversation
     if store.sessions.get(session) is None:
         old=session_row(store,previous)
-        tail=conversation(messages(store,previous,latest=True,limit=carry*3))[-carry:] if old and carry>0 else []
+        window=messages(store,previous,latest=True,limit=carry*3) if old and carry>0 else []
+        tail=conversation(window)[-carry:]
+        if tail and profile is not None:
+            from .note_sources import carry_reads
+            carry_reads(profile,session,profile,previous,window)
         store.sessions.create(NewSession(session_id=session,source=str(old.get('source') or source) if old else source,
             parent_session_id=previous if old else None,lineage_kind=SessionLineageKind.RESET if old else SessionLineageKind.NONE))
         if tail:store.messages.append_batch(session,[NewMessage.from_live(message) for message in tail])

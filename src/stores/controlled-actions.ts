@@ -12,8 +12,9 @@ import type pg from 'pg';
 import {admin,boundReader,boundReaderReadOnly,type Reader} from '../access.js';
 import {canonical,digest} from '../archive.js';
 import {actionArguments,ruleKey} from '../action-arguments.js';
-import {freeRead,sameAddress,type FreeRead} from '../link-check.js';
+import {freeRead,sameAddress,sendsNoData,type FreeRead} from '../link-check.js';
 import {freeReadsLeft,turnMessageLinks,turnPages} from './free-reads.js';
+import {outsideReads} from './turn-reads.js';
 import {HttpError,object,string} from '../http.js';
 import {decide,validatePolicy,type Effect} from '../security/contract.js';
 import {evaluate,policySnapshot,recordEffect} from '../security/store.js';
@@ -78,7 +79,8 @@ export function setOwnerGroupToolsForTest(on:boolean):()=>void {
  * permission of the member who asked (members().may 'tools', checked again at the claim), or the owner's own request
  * while ownerGroupTools allows it. Only a live request in a group: never a job's run, a scheduled task or a follow-up
  * (the caller passes no asker for those), never a command or a Notion call. Deny rules and the owner's tool switches for
- * the chat still come first: the switch is checked before, and the caller evaluates with this authority.
+ * the chat still come first: the switch is checked before, and the caller evaluates with this authority. The caller
+ * also holds it to what sends no data a model chose, within the message's reads without a card (ADR-0291).
  */
 export function groupToolsGrant(asker:GroupAsker|null,kind:unknown,args:object,space:string):ControlledAuthority|null {
   if(!asker||!groupToolKind(kind,args))return null;
@@ -223,7 +225,13 @@ export class ControlledActionRepository {
       // tools, runs only when no model built its address: a link the owner gave, one on a page opened for this message, or
       // a site the owner named with nothing after it but their words. Everything else asks, and a tool call always does
       // unless a rule covers it (ADR-0263).
-      const own=row.state==='proposed'&&decision.outcome==='ask'&&!connected&&live?await ownerAutonomyGrant(db,principal,turn):null;
+      const freedom=row.state==='proposed'&&decision.outcome==='ask'&&!connected&&live?await ownerAutonomyGrant(db,principal,turn):null;
+      // A command runs under it only when nothing but the owner's typed words reached the turn: no forward, file, quoted
+      // reply or voice note in the message, nothing outside earlier in the agent's conversation, and nothing read in the
+      // turn before it was asked for. Otherwise it gets its card, which says why (ADR-0293).
+      const outside=freedom&&body.kind==='shell'?await outsideReads(db,this.access.stores.archive,source.id,this.access.policy().owner_id):[];
+      if(outside.length)await db.query("UPDATE controlled_actions SET outside_reads=$2 WHERE id=$1 AND state='proposed'",[id,outside]);
+      const own=outside.length?null:freedom;
       const free=own&&outward&&left&&left.all>0?await this.freeRead(body.kind as string,args,source.id,left.pages>0):null;
       const autonomy=row.state==='proposed'&&decision.outcome==='ask'?connected?notion:own&&(!outward||free)?own:null:null;
       if(autonomy)decision=await evaluate(db,this.effect(row),autonomy);
@@ -232,12 +240,16 @@ export class ControlledActionRepository {
       if(memberRead&&row.state==='proposed'&&!(autonomy===notion&&decision.outcome==='allow'))throw new HttpError(403,boundReaderReadOnly.member);
       if(autonomy&&decision.outcome==='allow')
         await db.query("UPDATE controlled_actions SET state='approved',decision_reference=$2,free_read=$3,revision=revision+1,updated_at=now() WHERE id=$1 AND state='proposed'",[id,source,free]);
-      // A group's permission for web pages and outside tools lets a live group request run without a card (step 3); deny
-      // rules come first, and the row keeps why, which its claim evaluates with.
-      const tools=!autonomy&&live&&row.state==='proposed'&&decision.outcome==='ask'?groupToolsGrant(asker,row.kind,args,principal.space!):null;
+      // A group's permission for web pages and outside tools lets a live group request run without a card (step 3), but
+      // only one that sends no data a model chose, within the message's reads without a card: a link no model built, as
+      // under "Do what I ask", or an address and input that carry no data. Anything else asks (ADR-0291). Deny rules
+      // come first, and the row keeps why, which its claim evaluates with.
+      const permitted=!autonomy&&live&&row.state==='proposed'&&decision.outcome==='ask'?groupToolsGrant(asker,row.kind,args,principal.space!):null;
+      const linked=permitted&&left&&left.all>0?await this.freeRead(body.kind as string,args,source.id,left.pages>0):null;
+      const tools=permitted&&left&&left.all>0&&(linked||sendsNoData(args))?permitted:null;
       if(tools)decision=await evaluate(db,this.effect(row),tools);
       if(tools&&decision.outcome==='allow')
-        await db.query("UPDATE controlled_actions SET state='approved',authority=$3,decision_reference=$2,revision=revision+1,updated_at=now() WHERE id=$1 AND state='proposed'",[id,source,tools]);
+        await db.query("UPDATE controlled_actions SET state='approved',authority=$3,decision_reference=$2,free_read=$4,revision=revision+1,updated_at=now() WHERE id=$1 AND state='proposed'",[id,source,tools,linked]);
       await recordEffect(db,this.effect(row),'proposed',decision,source);
       await recordEffect(db,this.effect(row),decision.outcome==='deny'?'blocked':decision.outcome==='allow'?'allowed':'awaiting_approval',decision,source,grant?.id);
       await requestWorkflow(db,'tools',id);await db.query('COMMIT');
