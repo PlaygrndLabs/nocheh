@@ -53,6 +53,7 @@ import {assertMachineRunRoute} from './machine-reads.js';
 import {lookupTurn} from './scheduled-lookups.js';
 import {ownerRecallAllowed,withRecallPlaces} from './recall-places.js';
 import {memberAssistant,memberPrivate,readSetGroups} from '../spaces.js';
+import {ownerTimeZone} from './task-settings.js';
 import {noticeAuthorizeRequest,type NoticeAuthorizeResponse} from '../notice-authorize.js';
 import {authorizeNotice} from './task-reminder-delivery.js';
 import type {hostTransport} from '../workflows/host-transport.js';
@@ -84,6 +85,17 @@ export function storageServer(s:StorageServices,config:Settings,call:RuntimeCall
       // A member's schedule message into their own chat (members' schedules) takes its one ask the same way.
       const allowed=await authorizeNotice(s.stores.control,request,await currentChats())||await authorizeScheduleNotice(s.stores.control,request);
       return json(res,200,{allowed} satisfies NoticeAuthorizeResponse);
+    }
+    if(req.method==='GET'&&path==='/internal/quiet-hours') {
+      // nocheh-telegram asks whose private chat keeps which time zone, for quiet hours: the owner's task time zone,
+      // and each active member's own, else the owner's. Groups have none, so nothing there is ever held quiet.
+      authorize(req,config.token);
+      const owner=s.access.policy().owner_id,zone=await ownerTimeZone(s.stores.control),zones:Record<string,string>={};
+      const members=(await s.stores.control.query<{external_id:string;time_zone:string|null}>(`SELECT a.external_id,m.time_zone FROM members m
+        JOIN chat_accounts a ON a.member_id=m.id WHERE m.state='active' AND m.private_chat AND a.kind='human' ORDER BY a.external_id LIMIT 10000`)).rows;
+      for(const row of members)zones[row.external_id]=row.time_zone??zone;
+      if(owner)zones[owner]=zone;
+      return json(res,200,{zones});
     }
     if(req.method==='GET'&&path==='/internal/chats') {
       // What the Python services may act for (ADR-0252): the served chats with their topics, and the owner's private
