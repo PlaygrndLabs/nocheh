@@ -20,6 +20,9 @@ export type EngineWrite={id:unknown;content:unknown;receipt:unknown};
 export type EngineWriteInput={author:string;content:string;occurredAt?:string|undefined;receipt:string;sourceRevision:unknown;guardedRevision:unknown};
 /** One bounded step of a deletion. `done` means the session or space itself is gone. */
 export type ForgetStep={done:boolean;removed:number};
+/** A fact the engine retired and keeps hidden: `reason` is `replaced` (a newer fact took its place) or `unused`; `wall`
+ *  when it is a memory wall's copy (`copyOf` names the person's own fact). */
+export type HiddenFact={id:string;content:string;participant:string;wall:boolean;copyOf:string|null;reason:'replaced'|'unused';hiddenAt:string|null;createdAt:string};
 /** `exactCitations` per fact: true when it cites the writes it came from, false when only its whole learning batch
  * is known, null when it brings no writes. */
 export type EngineTrace={facts:{id:string;parents:string[];deleted:boolean;exactCitations:boolean|null}[];writes:{id:string;receipt:string}[];limitations:string[]};
@@ -89,6 +92,12 @@ export type MemoryEngine={
   openWall?(space:string,wall:string,sessions:readonly string[]):Promise<void>;
   /** Whether everything already learned in the wall's sessions has reached it. */
   wallReady?(space:string,wall:string):Promise<boolean>;
+
+  // Hidden facts (ADR-0298): a fact the engine retired is kept hidden, never removed, and can be brought back.
+  /** Hidden facts, newest hidden first, `size` at a time; `after` is a page's `next`. */
+  hiddenFacts?(space:string,options:{after:string|null;size:number}):Promise<{facts:HiddenFact[];next:string|null}>;
+  /** Bring hidden facts back, with their wall copies; answers the ids that came back. */
+  restoreFacts?(space:string,ids:readonly string[]):Promise<string[]>;
 
   // Corrections and deletions, one bounded step per call.
   /** Delete facts learned from a session, then the session itself. */

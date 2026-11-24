@@ -31,8 +31,10 @@ import {
 } from '../../ui/core';
 import {Dialog, useFeedback} from '../../ui/overlay';
 import {SubPanel, SubTabs} from '../../ui/page';
+import {HiddenFacts} from './hidden-facts';
 import {LongTermFacts} from './longterm-facts';
 import {Rebuild} from './rebuild';
+import {RetireOldFactsCard} from './retire-old-facts';
 import {CONFLICT_TEXT, Meter, errorWords, useCommand} from './shared';
 
 type MemoryStatus = {
@@ -113,7 +115,10 @@ export function LongTerm() {
       <SubPanel id="status" current={tab}>
         <div className="grid items-start gap-5 lg:grid-cols-[3fr_2fr]">
           <StatusCard memory={memory} service={service} />
-          <BudgetCard editable={budgetEditable} />
+          <div className="grid gap-5">
+            <BudgetCard editable={budgetEditable} />
+            <RetireOldFactsCard />
+          </div>
         </div>
       </SubPanel>
       <SubPanel id="actions" current={tab}>
@@ -125,7 +130,12 @@ export function LongTerm() {
         </div>
       </SubPanel>
       <SubPanel id="facts" current={tab}>
-        {memory.data && <LongTermFacts />}
+        {memory.data && (
+          <div className="grid gap-5">
+            <LongTermFacts />
+            <HiddenFacts />
+          </div>
+        )}
       </SubPanel>
     </>
   );

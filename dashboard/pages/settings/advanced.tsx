@@ -4,6 +4,7 @@ import {Card, CardHeader, Input, SettingRow, Switch} from '../../ui/core';
 import {Unsaved, telegramKeys} from './telegram';
 import {speedKeys} from './speed';
 import {privacyKeys} from './privacy';
+import {retireKey} from '../memory/retire-old-facts';
 
 const modelKey = (key: string) =>
   /^NOCHEH_(PROVIDER|MODEL|PROVIDERS|PROVIDER_KEYS|(REPLY|MEMORY|GUARD|EMBEDDING)_(PROVIDER|MODEL))$/.test(key) ||
@@ -13,7 +14,10 @@ const modelKey = (key: string) =>
 /** Editable settings that have no section of their own. */
 export function advancedKeys(data: SettingsView | null): string[] {
   return (data?.fields ?? [])
-    .filter(f => f.editable && !modelKey(f.key) && ![...telegramKeys, ...speedKeys, ...privacyKeys].includes(f.key))
+    .filter(
+      f =>
+        f.editable && !modelKey(f.key) && ![...telegramKeys, ...speedKeys, ...privacyKeys, retireKey].includes(f.key),
+    )
     .map(f => f.key);
 }
 
