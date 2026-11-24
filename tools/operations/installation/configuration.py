@@ -31,7 +31,7 @@ DEFAULTS = {
     'NOCHEH_OFFSITE_ACCESS_KEY_ID': '', 'NOCHEH_OFFSITE_SECRET_ACCESS_KEY': '', 'NOCHEH_OFFSITE_PASSPHRASE': '', 'NOCHEH_OFFSITE_KEEP': '14',
     'NOCHEH_LOG_MAX_SIZE': '10m', 'NOCHEH_LOG_MAX_FILES': '3',
     'NOCHEH_PARALLEL_REPLIES': '3', 'NOCHEH_PARALLEL_RUNS': '4', 'NOCHEH_PARALLEL_GUARD_CHECKS': '3',
-    'NOCHEH_HONCHO_ENABLED': 'true',
+    'NOCHEH_HONCHO_ENABLED': 'true', 'NOCHEH_MEMORY_RETIRE_OLD_FACTS': 'false',
     'NOCHEH_MINI_APP_URL': '', 'CLOUDFLARE_TUNNEL_TOKEN': '',
     'INNGEST_EVENT_KEY': '', 'INNGEST_SIGNING_KEY': '', 'INNGEST_POSTGRES_PASSWORD': '',
     **EMBEDDING_DEFAULTS,
@@ -199,6 +199,7 @@ def validate(values):
     if any(value and not re.fullmatch('[a-f0-9]{64}',value) for value in storage):raise ValueError('Invalid storage credential')
     if layout=='original-only-v1' and (not all(storage) or len(set(storage+[values.get('POSTGRES_PASSWORD'),values.get('INNGEST_POSTGRES_PASSWORD')]))!=5):raise ValueError('Separate storage credentials required')
     if values.get('NOCHEH_HONCHO_ENABLED','false') not in ('true','false'):raise ValueError('Invalid NOCHEH_HONCHO_ENABLED')
+    if values.get('NOCHEH_MEMORY_RETIRE_OLD_FACTS','false') not in ('true','false'):raise ValueError('NOCHEH_MEMORY_RETIRE_OLD_FACTS must be true or false')
     if not str(values.get('NOCHEH_WORKFLOW_UI_PORT','8288')).isdigit() or not 1024<=int(values.get('NOCHEH_WORKFLOW_UI_PORT','8288'))<=65535:raise ValueError('Invalid NOCHEH_WORKFLOW_UI_PORT')
     retention=str(values.get('NOCHEH_WORKFLOW_HISTORY_RETENTION_DAYS','0'))
     if not re.fullmatch(r'\d{1,4}',retention) or int(retention)>3650:raise ValueError('NOCHEH_WORKFLOW_HISTORY_RETENTION_DAYS must be 0 (off) or 1-3650 days')

@@ -92,9 +92,12 @@ def initialize(provider_state=PROVIDER_STATE):
          'DERIVER_REPRESENTATION_BATCH_MAX_AGE_SECONDS':'1',
          'DERIVER_POLLING_STARTUP_JITTER_SECONDS':'0','DERIVER_POLLING_BACKOFF_ENABLED':'false',
          # A peer card is one summary of a person across every session, and a session-filtered chat still reads it, so Honcho
-         # neither writes nor uses one; dreams, which would write them, stay off too (ADR-0225). Rewritten on every setup.
+         # neither writes nor uses one (ADR-0225). Rewritten on every setup.
          'PEER_CARD_ENABLED':'false',
-         'DREAM_ENABLED':'false','SUMMARY_ENABLED':'true','EMBED_MESSAGES':'true','LOG_LEVEL':'WARNING',
+         # Dreams retire old facts only when the owner turns "Retire old facts" on; off by default (ADR-0298).
+         'DREAM_ENABLED':'true' if settings.get('NOCHEH_MEMORY_RETIRE_OLD_FACTS')=='true' else 'false',
+         # A retired fact is kept hidden instead (ADR-0298); Honcho's own 30-day copies of removed text are not kept.
+         'DREAM_HISTORY_ENABLED':'false','SUMMARY_ENABLED':'true','EMBED_MESSAGES':'true','LOG_LEVEL':'WARNING',
          'DIALECTIC_MAX_QUERY_LENGTH':str(QUERY_CHARACTERS),'DIALECTIC_MAX_INPUT_TOKENS':str(INPUT_TOKENS),
          'SUMMARY_MAX_INPUT_TOKENS':str(INPUT_TOKENS),
          'EMBEDDING_VECTOR_DIMENSIONS':str(embedding.dimensions),'EMBEDDING_MODEL_CONFIG__TRANSPORT':embedding.provider,

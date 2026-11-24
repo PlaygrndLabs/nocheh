@@ -25,7 +25,7 @@ Nocheh is in development mode and not yet released. Everything below is built an
 - Workspaces: several installs run side by side on one machine ([ADR-0245](docs/adr/0245-several-workspaces-on-one-machine.md)).
 - Memory: fact sources and People pages ([ADR-0261](docs/adr/0261-recalled-facts-and-search-hits-name-their-source.md)); memory search stays on
   `text-embedding-3-small` until the owner picks another model ([ADR-0181](docs/adr/0181-memory-search-model-change-rebuilds-memory.md)); a group's recall, search and learning read
-  through a memory wall that only holds its own chats ([ADR-0286](docs/adr/0286-memory-walls.md)); each project ticks which of its groups share memory ([ADR-0287](docs/adr/0287-projects-tick-the-groups-that-share-memory.md)).
+  through a memory wall that only holds its own chats ([ADR-0286](docs/adr/0286-memory-walls.md)); "Retire old facts" (Honcho dreams) is an owner setting, off by default, and keeps retired facts hidden with "Bring back" ([ADR-0298](docs/adr/0298-retire-old-facts.md)); each project ticks which of its groups share memory ([ADR-0287](docs/adr/0287-projects-tick-the-groups-that-share-memory.md)).
 - People: the name the owner sets in Memory › People is the person's name everywhere, and each
   person has a private note only the owner reads
   ([ADR-0274](docs/adr/0274-people-names-everywhere-and-private-notes.md)). Honcho 3.6.2 reads
@@ -81,6 +81,7 @@ Owner steps:
 - Machine jobs: the owner's own Stop test on the connected VM.
 
 Checks and follow-ups:
+- Retire old facts ([ADR-0298](docs/adr/0298-retire-old-facts.md)): untried live. Once the owner turns it on, check the first dreams' cost on Usage, that the learning queue keeps up, and that a retired fact shows under Hidden facts and comes back. Next: an owner rule, off by default, that hides facts no reply read and no chat said again for a set number of days (e.g. 180).
 - Security fixes part 2 ([ADR-0251](docs/adr/0251-fixes-that-lose-nothing.md)): about a week after install, check `./bin/nocheh diagnose`
   for `hermes_page_script_reports` (none) and a passing tester run, then switch the Hermes page
   script policy from Report-Only to enforced in one commit. Later: one shared name cleaner for
