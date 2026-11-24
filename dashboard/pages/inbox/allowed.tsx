@@ -41,9 +41,10 @@ export function Allowed() {
           ) : active.length === 0 ? (
             <Empty icon={ShieldCheck} title="Every action asks you first">
               Except web pages and outside tools other than Notion asked for in a group, by you or by a member with “Web
-              pages and outside tools” on: they run without a card. To skip asking for one exact action, turn on “Allow
-              this exact action again” when you approve it. On a Telegram card, “Allow where asked” and “Always allow”
-              do the same for a site or command in that chat or topic, for you and every member there.
+              pages and outside tools” on: they run without a card, unless the model built an address or input that
+              could carry data. To skip asking for one exact action, turn on “Allow this exact action again” when you
+              approve it. On a Telegram card, “Allow where asked” and “Always allow” do the same for a site or command
+              in that chat or topic, for you and every member there.
             </Empty>
           ) : (
             <ul className="divide-y divide-line border-t border-line">

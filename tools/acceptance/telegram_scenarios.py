@@ -980,7 +980,8 @@ class Scenarios:
     def voice_is_transcribed(self):
         # A voice note keeps its original bytes, is transcribed by Hermes's
         # transcriber through the Voice notes route, and its reply waits for it.
-        _, event_id = self.voice(b'OggS\x00\x02synthetic voice note\n\xff'*4)
+        # A real recording: the file reader decodes it before it is transcribed (ADR-0285).
+        _, event_id = self.voice(synthetic_wav(2))
         row = self.finished(event_id, seconds=300)
         self.gate('voice_dispatch_closed', row['state'] in ('done', 'suppressed'), state=row['state'], error=row['error'])
         transcript = self.f.query('nocheh_derived', "SELECT count(*) FROM derived_artifacts WHERE kind='transcript' AND event_id='"+event_id+"'"
@@ -1244,7 +1245,24 @@ listed:listed.entries.filter(entry=>entry.name===name).map(entry=>entry.size),le
         self.gate('one_reply_after_recovery', len(self.replies(before, OWNER)) >= 1 and
                   len({json.loads(r['parameters'].get('reply_parameters', '{}')).get('message_id') for r in self.replies(before, OWNER)}) == 1)
 
+    def sends_quiet(self, seconds=15, limit=240):
+        """Wait until Nocheh has sent nothing for `seconds`, so a late notice of an earlier scenario (an import's
+        "ready" message) is not counted as the next turn's reply."""
+        state = {'count': len(self.f.sent()), 'since': time.monotonic()}
+
+        def quiet():
+            count = len(self.f.sent())
+            if count != state['count']:
+                state.update(count=count, since=time.monotonic())
+            return time.monotonic()-state['since'] >= seconds
+        self.wait('sends_quiet', quiet, limit, interval=3)
+
     def restart_preserves_receipts(self):
+        # A mark said in the private chat and in a group topic before the restart, which each chat's next turn must
+        # still have in its own history, not only in memory.
+        self.sends_quiet()
+        self.turn(self.f.message(OWNER, 'یادت باشد: HISTMARK-PRIVATE-31'), OWNER)
+        self.turn(self.f.message(GROUP, 'یادت باشد: HISTMARK-GROUP-31', topic=11), GROUP, 11)
         sent = len(self.f.sent())
         self.wait('updates_acknowledged', lambda: not self.f.telegram()['updates'], 120)
         # The whole runtime restarts: the Telegram service with its delivery receipts, and the agent.
@@ -1253,7 +1271,19 @@ listed:listed.entries.filter(entry=>entry.name===name).map(entry=>entry.size),le
         wait_telegram_connected(self.wait, self.f.command, 'polling_reconnected')
         time.sleep(10)
         self.gate('restart_sends_nothing', len(self.f.sent()) == sent)
-        self.turn(self.f.message(OWNER, 'بعد از راه‌اندازی دوباره'), OWNER)
+        self.history_kept('after_restart')
+
+    def upgraded_copy_keeps_history(self):
+        # full_test --upgrade: every container was made again on the new images.
+        wait_telegram_connected(self.wait, self.f.command, 'polling_after_upgrade', 300)
+        self.history_kept('after_upgrade')
+
+    def history_kept(self, when):
+        """The private chat and the group topic each still have their mark in the agent's session history."""
+        _, text = self.turn(self.f.message(OWNER, 'قبلا چه گفتم؟ [[history:HISTMARK-PRIVATE-31]]'), OWNER)
+        self.gate('private_history_kept_'+when, 'present' in text, answer=text)
+        _, text = self.turn(self.f.message(GROUP, 'قبلا چه گفتم؟ [[history:HISTMARK-GROUP-31]]', topic=11), GROUP, 11)
+        self.gate('group_history_kept_'+when, 'present' in text, answer=text)
 
     def granted_participant(self):
         # The owner makes someone a member by their Telegram user ID, with only OTHER_GROUP ticked, through the dashboard's
