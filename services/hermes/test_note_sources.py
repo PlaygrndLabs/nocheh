@@ -1,4 +1,5 @@
 import json
+import re
 import sqlite3
 import tempfile
 import unittest
@@ -535,6 +536,19 @@ class GateTests(unittest.TestCase):
             with self.subTest(name=name):self.assertEqual(sources.gate_read(name,'result'),expected)
         # In the owner's chat a task list holds what members and groups wrote, so it counts whoever's it is.
         self.assertEqual(sources.gate_read('mcp__nocheh__tasks','{"other_groups": true}'),'archive')
+
+    def test_every_token_is_one_storage_takes(self):
+        # Storage refuses a turn read it does not know with 400, which stops the turn (src/stores/turn-reads.ts). A recall
+        # that holds memory's reasoning labels notes 'memory', but is no turn read.
+        text=(Path(__file__).resolve().parents[2]/'src'/'stores'/'turn-reads.ts').read_text()
+        known=set(re.findall(r"'([a-z]+)'",re.search(r'turnReadTokens=\[([^\]]*)\]',text).group(1)))
+        recall='{"sources":[{"kind":"memory_inference","text":"likes tea"}]}'
+        self.assertEqual(sources.recall_read(recall),'memory')
+        self.assertIsNone(sources.gate_read('mcp__nocheh__memory_recall',recall))
+        for name in [*sources.TOOL_READS,*sources.NOT_READS,*sources.GATE_IGNORED,'mcp__nocheh__tasks','mcp__nocheh__memory_recall','some_new_tool']:
+            for content in ('result',recall,'{"others_wrote": true}','{"other_groups": true}'):
+                token=sources.gate_read(name,content)
+                with self.subTest(name=name,content=content):self.assertTrue(token is None or token in known,token)
 
     def test_the_owners_typed_words_in_a_clean_conversation_report_nothing(self):
         with tempfile.TemporaryDirectory() as folder:
