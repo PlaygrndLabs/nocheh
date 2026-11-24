@@ -53,7 +53,7 @@ export const settingLabels: Record<string, string> = {
   NOCHEH_LOG_MAX_SIZE: 'Log file size',
   NOCHEH_LOG_MAX_FILES: 'Log files kept',
   NOCHEH_HONCHO_ENABLED: 'Long-term memory',
-  NOCHEH_MEMORY_RETIRE_OLD_FACTS: 'Retire old facts',
+  NOCHEH_MEMORY_RETIRE_OLD_FACTS: 'Hide replaced facts',
   NOCHEH_MEMORY_CONTEXT: 'Memory context',
   NOCHEH_SECURITY_RUNTIME: 'Isolated runs',
   NOCHEH_PORT: 'Archive port',

@@ -23,8 +23,11 @@ clean-ups, each off by default. Builds on [ADR-0298](0298-retire-old-facts.md) (
 ## Decision
 
 1. **One owner setting, off by default.** `memory_clean_up.hide_unused_days` in Nocheh's control
-   database is either off (`NULL`) or 30 to 3650 days. It is changed in its own dialog on Memory ›
-   Long-term › Status and limits ("Hide unused facts"), and the change applies at once.
+   database is either off (`NULL`) or 30 to 3650 days. It is changed in its own dialog
+   ("Hide unused facts"), and the change applies at once. The owner asked for Honcho's clean-up to
+   sit on Honcho's page: Memory › Long-term memory gets a **Clean up** tab holding both switches
+   and the Hidden facts list. ADR-0298's switch moves there from Status and limits and reads "Hide
+   replaced facts", built into Honcho; this rule reads as Nocheh's own.
 2. **Use is tracked all the time.** Each reply marks the facts it read, in the background, through
    the plugin route `POST /nocheh/used`. The route writes `internal_metadata.nocheh_used_at`, at most
    once a day per fact. A failure is logged and never slows a reply.
