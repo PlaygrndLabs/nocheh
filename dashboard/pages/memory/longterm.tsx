@@ -86,7 +86,7 @@ const usd = (value: number) =>
     maximumFractionDigits: value > 0 && value < 0.01 ? 4 : 2,
   }).format(value);
 
-const subTabs = ['status', 'actions', 'facts'] as const;
+const subTabs = ['status', 'actions', 'facts', 'cleanup'] as const;
 
 export function LongTerm() {
   const memory = useResource<MemoryStatus>('/memory/longterm', 10000);
@@ -110,6 +110,7 @@ export function LongTerm() {
           {id: 'status', label: 'Status and limits'},
           {id: 'actions', label: 'Re-run and look'},
           {id: 'facts', label: 'Facts it learned'},
+          {id: 'cleanup', label: 'Clean up'},
         ]}
       />
       <SubPanel id="status" current={tab}>
@@ -117,7 +118,6 @@ export function LongTerm() {
           <StatusCard memory={memory} service={service} />
           <div className="grid gap-5">
             <BudgetCard editable={budgetEditable} />
-            <RetireOldFactsCard />
           </div>
         </div>
       </SubPanel>
@@ -130,12 +130,14 @@ export function LongTerm() {
         </div>
       </SubPanel>
       <SubPanel id="facts" current={tab}>
-        {memory.data && (
-          <div className="grid gap-5">
-            <LongTermFacts />
-            <HiddenFacts />
-          </div>
-        )}
+        {memory.data && <LongTermFacts />}
+      </SubPanel>
+      {/* Honcho's clean-up on top, the hidden facts from either clean-up below it at full width (ADR-0298, ADR-0299). */}
+      <SubPanel id="cleanup" current={tab}>
+        <div className="grid gap-5">
+          <RetireOldFactsCard />
+          {memory.data && <HiddenFacts />}
+        </div>
       </SubPanel>
     </>
   );

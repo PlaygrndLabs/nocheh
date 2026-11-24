@@ -49,11 +49,11 @@ test('scheduled execution uses guarded operation roots and stages exact delivery
     const context:any=await s.scheduled.context(body);contexts.set(id,context);assert.ok(!('prompt' in context.definition));
     const claim=await s.scheduled.claim(context);claims.set(id,claim);assert.equal(claim.claimed,true);assert.ok(!claim.text!.includes('fixture-secret'));
     const principal=reader({headers:{authorization:'Bearer '+claim.archive_credential}} as any,token);
-    // The run is made for the schedule's creator and the agent plugged in now, and its key names both (ADR-0301).
+    // The run is made for the schedule's creator and the agent plugged in now, and its key names both (ADR-0305).
     assert.deepEqual((await stores.control.query('SELECT person,agent FROM managed_runs WHERE event_id=$1',[id])).rows[0],{person:'owner',agent:'hermes'});
     assert.deepEqual([principal.person,principal.keyKind],['owner','scheduled']);
     const binding=await s.turns.binding(principal);assert.equal(binding.reference!.store,'control');assert.equal(binding.job,context.job_id);
-    // A run whose person or agent no longer fits its key is refused (ADR-0301).
+    // A run whose person or agent no longer fits its key is refused (ADR-0305).
     for(const [column,value] of [['person','a'.repeat(64)],['agent','other-agent']] as const) {
       const before=(await stores.control.query(`SELECT ${column} AS value FROM managed_runs WHERE event_id=$1`,[id])).rows[0].value;
       await stores.control.query(`UPDATE managed_runs SET ${column}=$2 WHERE event_id=$1`,[id,value]);
@@ -76,7 +76,7 @@ test('scheduled execution uses guarded operation roots and stages exact delivery
         refusals.push(await githubRunRefusal(stores.control,row,'123',github),
           await notionRunRefusal(stores.control,{...(await stores.control.query('SELECT * FROM controlled_actions WHERE id=$1',[lookups[1]!.id])).rows[0]},'123',{}),
           await gmailRunRefusal(stores.control,(await stores.control.query('SELECT * FROM controlled_actions WHERE id=$1',[lookups[3]!.id])).rows[0],'123'));
-        // Each operation keeps the person and agent of the key that asked (ADR-0301); the owner's own connectors refuse a
+        // Each operation keeps the person and agent of the key that asked (ADR-0305); the owner's own connectors refuse a
         // row made for anyone else.
         assert.deepEqual([row.person,row.agent],['owner','hermes']);
         const member='a'.repeat(64),mail=(await stores.control.query('SELECT * FROM controlled_actions WHERE id=$1',[lookups[3]!.id])).rows[0];
@@ -125,7 +125,7 @@ test('scheduled execution uses guarded operation roots and stages exact delivery
     assert.equal(await gmailRunRefusal(stores.control,(await stores.control.query('SELECT * FROM controlled_actions WHERE id=$1',[lookups[3]!.id])).rows[0],'123'),'gmail_not_here');
     assert.equal((await s.scheduled.delivery(local)).state,'local');
     assert.equal(calls.filter(call=>call.op==='run.start'&&call.body.event_id===local.event_id).length,1);
-    // The run ended: its one-time key closed with it, so its pass reaches nothing (ADR-0301).
+    // The run ended: its one-time key closed with it, so its pass reaches nothing (ADR-0305).
     const ended=reader({headers:{authorization:'Bearer '+claims.get(local.event_id).archive_credential}} as any,token);
     assert.deepEqual([ended.person,ended.keyKind,ended.agent],['owner','scheduled','hermes'],'the run\'s key names the schedule\'s creator');
     assert.deepEqual((await stores.control.query('SELECT kind,person,closed_reason FROM one_time_keys WHERE jti=$1',[ended.jti])).rows,

@@ -117,12 +117,12 @@ ALTER TABLE background_jobs ADD COLUMN IF NOT EXISTS held boolean NOT NULL DEFAU
 -- the archive's last capture sequence when it was approved, so nothing captured after Approve reaches it.
 ALTER TABLE background_jobs ADD COLUMN IF NOT EXISTS notion_pages jsonb;
 ALTER TABLE background_jobs ADD COLUMN IF NOT EXISTS reads_until bigint;
--- Who asked for the job and through which agent, from the asking turn's one-time key (ADR-0301): each run is made for both.
+-- Who asked for the job and through which agent, from the asking turn's one-time key (ADR-0305): each run is made for both.
 ALTER TABLE background_jobs ADD COLUMN IF NOT EXISTS person text CHECK(person IS NULL OR person='owner' OR person ~ '^[a-f0-9]{64}$');
 ALTER TABLE background_jobs ADD COLUMN IF NOT EXISTS agent text CHECK(agent IS NULL OR agent ~ '^[a-z][a-z0-9-]{0,31}$');
 ${memberJobSchema}`;
 
-/** Who a job is for when its row names nobody (ADR-0301): the owner for the owner's own job, else its requester's member
+/** Who a job is for when its row names nobody (ADR-0305): the owner for the owner's own job, else its requester's member
  * while they are one; null once nobody can be named. */
 const requesterPerson=(requester:string|null):string|null=>requester===null?'owner':members().memberOf(telegramAccount(requester))?.id??null;
 
@@ -471,7 +471,7 @@ export class BackgroundJobRepository {
     // A direction override or a tag character can make a card read in another order than the job runs (ADR-0250).
     if(reordering(title)||reordering(instruction))throw new HttpError(400,'job_hidden_characters');
     const {turn,binding,source,requester}=await this.liveTurn(principal),{from,to}=this.period(body);
-    // The asking key's person is the requester's (ADR-0301); a key for anyone else asks for nothing.
+    // The asking key's person is the requester's (ADR-0305); a key for anyone else asks for nothing.
     const person=requesterPerson(requester);
     if(!person)throw new HttpError(409,'one_time_key_person_required');
     if(principal.person!==undefined&&principal.person!==person)throw new HttpError(409,'one_time_key_person_mismatch');
@@ -849,7 +849,7 @@ export class BackgroundJobRepository {
       await db.query('BEGIN');
       const job=(await db.query('SELECT state,cancel_requested,person,agent,requester FROM background_jobs WHERE id=$1 FOR UPDATE',[row.id])).rows[0];
       if(!job||job.cancel_requested||!['approved','running'].includes(job.state)){await db.query('ROLLBACK');return;}
-      // The run is for the job's person and agent (ADR-0301); its claim refuses a run nobody can be named for.
+      // The run is for the job's person and agent (ADR-0305); its claim refuses a run nobody can be named for.
       const person=job.person??requesterPerson(job.requester),agent=job.agent??activeAgent;
       const owner=(await db.query("SELECT epoch FROM workflow_owners WHERE family='background'")).rows[0];
       await db.query('INSERT INTO background_runs(event_id,job_id,attempt) VALUES($1,$2,$3) ON CONFLICT DO NOTHING',[operation.id,row.id,attempt]);

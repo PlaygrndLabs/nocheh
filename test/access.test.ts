@@ -12,11 +12,11 @@ installChatsForTest(fixtureDirectory());
 
 const secret='synthetic-service-token-only-for-tests',event='e'.repeat(64),answer='a'.repeat(32),later=()=>Date.now()+60000;
 const request=(token:string)=>({headers:{authorization:'Bearer '+token}}) as unknown as IncomingMessage;
-/** A reader without its one-time key's fields, which every pass carries (ADR-0301) and the key test checks itself. */
+/** A reader without its one-time key's fields, which every pass carries (ADR-0305) and the key test checks itself. */
 const bare=(value:Reader)=>{const {person:_person,jti:_jti,keyKind:_kind,...rest}=value;return rest;};
 /** A pass signed with the service token whatever its claims, as a bug in a signer would make it. */
 const signed=(prefix:'turn'|'scope',claims:Record<string,unknown>)=>{
-  // A one-time key's claims (ADR-0301) unless the test names others, so each refusal below is for the claim it is about.
+  // A one-time key's claims (ADR-0305) unless the test names others, so each refusal below is for the claim it is about.
   const key=prefix==='turn'?{agent:'hermes',person:'owner',jti:keyClaims().jti,key_kind:'turn'}:{};
   const body=Buffer.from(JSON.stringify({expires:later(),audience:prefix==='turn'?'nocheh-assistant':'nocheh-archive',...key,...claims})).toString('base64url');
   return `${prefix}.${body}.${createHmac('sha256',secret).update(body).digest('base64url')}`;
@@ -52,7 +52,7 @@ test('a read set never comes from a pass, and passes without an answer read as b
   for(const [scope,space] of [[NG2,NG1_TOPIC],[GP1,NG1_TOPIC],[NG1,GP1_TOPIC]])
     assert.throws(()=>reader(request(signed('turn',{scope,event_id:event,space,revision:2})),secret),{code:'invalid_scope_token'},scope+' '+space);
   assert.deepEqual(bare(reader(request(keyPass(secret,null,later(),event,{space:OWNER,revision:1})),secret)),{scope:null,admin:false,turnEvent:event,space:OWNER,revision:1,agent:'hermes'});
-  // The archive-wide scope pass is gone: every pass is a one-time key (ADR-0301).
+  // The archive-wide scope pass is gone: every pass is a one-time key (ADR-0305).
   assert.throws(()=>reader(request(signed('scope',{scope:GP1})),secret),{code:'invalid_scope_token'});
   assert.deepEqual(reader(request(secret),secret),{scope:null,admin:true});
 });
@@ -140,7 +140,7 @@ test('the agent login is no reader and signs no pass; only the few calls the age
   assert.equal(isAgentLogin({scope:null,admin:true}),false);
 });
 
-test('every pass is a one-time key naming its person, its own id, its kind and the agent plugged in now (ADR-0301)',()=>{
+test('every pass is a one-time key naming its person, its own id, its kind and the agent plugged in now (ADR-0305)',()=>{
   const member='b'.repeat(64),read='c'.repeat(32);
   const owner=reader(request(keyPass(secret,null,later(),event,{space:OWNER,revision:1})),secret);
   assert.equal(owner.person,'owner');assert.equal(owner.keyKind,'turn');assert.equal(owner.agent,'hermes');assert.ok(keyIdPattern.test(owner.jti!));

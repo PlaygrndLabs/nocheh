@@ -15,7 +15,7 @@ import {honchoEngine} from '../src/memory/honcho.js';
 import {fixtureServices,type FakeCall} from './fixture-agent.js';
 import {keyPass,passClaims} from './one-time-key-pass.js';
 
-// Every pass is a one-time key (ADR-0301): minted with its row, checked open on every request by storage, reaching only
+// Every pass is a one-time key (ADR-0305): minted with its row, checked open on every request by storage, reaching only
 // its kind's routes, and never opened again once it closes. Synthetic owner, chats and events only.
 test('a one-time key is minted with its row, reused for the same reply, checked on every request and closed for good',
  {skip:process.env.NOCHEH_STORES_FIXTURE!=='1',timeout:180000},async()=>{

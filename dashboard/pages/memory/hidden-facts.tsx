@@ -1,5 +1,5 @@
 /**
- * Memory › Long-term › Facts › Hidden: facts a clean-up retired (ADR-0298). They are kept, never deleted, and Bring back
+ * Memory › Long-term memory › Clean up › Hidden facts: facts a clean-up hid (ADR-0298, ADR-0299). They are kept, never deleted, and Bring back
  * makes one visible again, with its group copies.
  */
 import {useState} from 'react';
@@ -22,7 +22,7 @@ export type HiddenFact = {
 };
 type HiddenPage = {facts: HiddenFact[]; next: string | null; reason?: FactsReason};
 
-const why = {replaced: 'A newer fact replaced it', unused: 'Not used for the set days'};
+const why = {replaced: 'A newer fact replaced it', unused: 'Not used for the days you set'};
 
 export function HiddenFacts() {
   const cursor = useCursorPages('hidden');
@@ -46,7 +46,7 @@ export function HiddenFacts() {
     <Card>
       <CardHeader
         title="Hidden facts"
-        description="Facts a clean-up retired. They are kept, not deleted; replies don’t use them until you bring one back."
+        description="Facts hidden by a clean-up. They are kept, not deleted. Replies don’t use them until you bring one back."
       />
       {page.error && !page.data ? (
         <CardBody>

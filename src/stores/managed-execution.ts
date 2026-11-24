@@ -32,14 +32,14 @@ ALTER TABLE managed_runs ADD COLUMN IF NOT EXISTS launch_requested_at timestampt
 -- Background job runs joined browser and scheduled runs after the first table.
 ALTER TABLE managed_runs DROP CONSTRAINT IF EXISTS managed_runs_channel_check;
 ALTER TABLE managed_runs ADD CONSTRAINT managed_runs_channel_check CHECK(channel IN ('browser','scheduler','background'));
--- Who a run is for and which agent it was made for (ADR-0301): its one-time key names both, and a key for anyone else
+-- Who a run is for and which agent it was made for (ADR-0305): its one-time key names both, and a key for anyone else
 -- never drives it. Null only on a row Nocheh made without a person, which is never claimed.
 ALTER TABLE managed_runs ADD COLUMN IF NOT EXISTS person text CHECK(person IS NULL OR person='owner' OR person ~ '^[a-f0-9]{64}$');
 ALTER TABLE managed_runs ADD COLUMN IF NOT EXISTS agent text CHECK(agent IS NULL OR agent ~ '^[a-z][a-z0-9-]{0,31}$');
 `;
 const closed=new Set(['done','failed','cancelled','interrupted']);
 /**
- * The kinds of one-time key a managed run's pass is (ADR-0301). A browser run is the owner's own chat turn, so its key is
+ * The kinds of one-time key a managed run's pass is (ADR-0305). A browser run is the owner's own chat turn, so its key is
  * a turn's; its event is the run's own operation id, never a Telegram message's.
  */
 const runKeys=(channel:string):readonly KeyKind[]=>channel==='browser'?['turn']:['scheduled','background'];
@@ -129,7 +129,7 @@ export abstract class ManagedExecutionRepository {
     const body=object(input);await this.context(body);const row=await this.scoped(body);
     if(body.actor!=='run_'+row.event_id)throw new HttpError(403,'run_actor_mismatch');
     if(row.state!=='captured')return {claimed:false,event_id:row.event_id,state:row.state};
-    // The run's one-time key (ADR-0301), for the person and agent its row was made for, checked before the run is claimed
+    // The run's one-time key (ADR-0305), for the person and agent its row was made for, checked before the run is claimed
     // so a run nobody can be named for never starts. A browser run is the owner's.
     const person=this.channel==='browser'?'owner':row.person;
     if(!person)throw new HttpError(409,'one_time_key_person_required');
@@ -181,7 +181,7 @@ export abstract class ManagedExecutionRepository {
       await db.query(`UPDATE managed_runs SET state=$2,result_reference=$3,error_code=$4,lease_until=NULL,revision=revision+1,updated_at=now() WHERE event_id=$1`,
         [row.event_id,state,reference,interrupted?'execution_interrupted':result.error_code]);
       await db.query("UPDATE runtime_turns SET state='closed',closed_at=now() WHERE id=$1 AND state='open'",[row.event_id]);
-      // The run ended: its one-time key closes with it (ADR-0301).
+      // The run ended: its one-time key closes with it (ADR-0305).
       await closeEvent(db,row.event_id,runKeys(this.channel),state==='done'||state==='failed'?'run_finished':state==='cancelled'?'run_cancelled':'run_interrupted');
       await db.query(`UPDATE workflow_receipts SET state=$2,receipt_id=$3,updated_at=now() WHERE step=$4 AND workflow_id IN
         (SELECT id FROM workflow_registry WHERE family=$5 AND job_id=$1) AND state IN ('started','ambiguous')`,[this.workflowJob(row.event_id),state==='done'?'done':state==='interrupted'?'ambiguous':'failed',reference.id,this.channel,this.family]);

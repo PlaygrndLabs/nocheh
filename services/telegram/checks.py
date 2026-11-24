@@ -197,7 +197,7 @@ def answer_button(button, chat_id, event_id, served):
     return InlineKeyboardMarkup([[InlineKeyboardButton(label, callback_data=data)]])
 
 
-# The one-time keys a reply is sent with (ADR-0301); a run's, a review's or a filter's key never reaches Telegram.
+# The one-time keys a reply is sent with (ADR-0305); a run's, a review's or a filter's key never reaches Telegram.
 REPLY_KEYS=('turn','follow_up','member_ask')
 
 
@@ -217,7 +217,7 @@ def verify_turn_credential(credential, event_id, chat_id, topic, policy):
     of these. A lane (a member id, so the agent runs one turn at a time per member) grants nothing; it is taken only on a
     member's own pass, for that member, and on a group pass.
 
-    Every pass is a one-time key for one reply (ADR-0301): its own id, the person it is for and the agent it was made for.
+    Every pass is a one-time key for one reply (ADR-0305): its own id, the person it is for and the agent it was made for.
     Only a reply's key reaches Telegram: a message's turn, a follow-up after actions, or the owner's ask about a member
     (and an ask's key is never anything else). The person fits the pass: a member's pass and a lane are that member's, the
     owner's own turn, an answer and an ask the owner's. Core closes the key once the reply is delivered, after this service

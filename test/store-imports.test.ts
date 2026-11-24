@@ -128,7 +128,7 @@ test('an import shows how far its messages are prepared, becomes ready once all 
     const id=randomUUID();
     await stores.control.query("INSERT INTO workflow_imports(id,configuration_hash,review_approved,total,completed,state,label,scopes) VALUES($1,$2,false,2,2,'completed','Garden club',ARRAY['-1001'])",[id,digest(id)]);
     const binding=await s.guards.state();
-    // A group's turn key (ADR-0301), open, for its group's imports.
+    // A group's turn key (ADR-0305), open, for its group's imports.
     const pending=async(scope:string|null)=>(await (await fetch(base+'/v1/imports/pending',{headers:{authorization:'Bearer '+(scope===null?token:
       await openKey(stores.control,keyPass(token,scope,Date.now()+60000,undefined,{generation:binding.generation,guard_epoch:binding.epoch})))}})).json() as any).imports;
     const events:string[]=[];

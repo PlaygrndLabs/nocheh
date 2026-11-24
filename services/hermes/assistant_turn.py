@@ -328,7 +328,7 @@ def turn_image(image,credential):
     return data
 
 
-def run(body, emit=None, relay=None):
+def run(body, emit=None, relay=None, feed=None):
     machine=machine_step(body);box=box_step(body)
     if body.get('review') is not True and exact_predecessor_question(body.get('source_text',body.get('text',''))):
         return {'state':'done','text':PREDECESSOR_UNVERIFIED,'session_id':body['session_id']}
@@ -474,12 +474,22 @@ def run(body, emit=None, relay=None):
                 if not mime: raise ValueError('unsupported_image')
                 message.append({'type':'image_url','image_url':{'url':'data:'+mime+';base64,'+base64.b64encode(data).decode()}})
         from .timing import measure
-        with measure('conversation'):result=agent.run_conversation(message,**options)
+        # Later messages in this chat that join the turn reach the agent as Hermes steers while it works (ADR-0301).
+        steers=None
+        if body.get('steer') is True and feed is not None and body.get('channel','telegram')=='telegram' and not (background or answer or member_read):
+            from .steering import Steers
+            steers=Steers(feed);steers.start(agent)
+        try:
+            with measure('conversation'):result=agent.run_conversation(message,**options)
+        finally:
+            joined=steers.finish() if steers else []
         RUNS.append(result)
         if background:
             job_progress.finish(result)
             return job_result(result,agent.session_id)
-        return conversation_result(result,agent.session_id)
+        result=conversation_result(result,agent.session_id)
+        if joined and result.get('state')=='done':result['joined']=joined
+        return result
     finally:
         agent.close()
         if review:
@@ -498,7 +508,9 @@ def main():
     from time import perf_counter
     reset();started=perf_counter()
     try:
-        body=json.loads(sys.stdin.buffer.read(2*1024*1024))
+        # The request is the first line; messages that join the turn may follow it (steering.py).
+        from .steering import Feed
+        feed=Feed();body=json.loads(feed.line(2*1024*1024))
         if os.environ.get('NOCHEH_ISOLATED_TURN')=='1':
             profile=Path(os.environ['HERMES_HOME'])
             (profile/'plugins').mkdir(exist_ok=True)
@@ -532,7 +544,7 @@ def main():
                     # A job run sends a line now and then, even during a long model call, so the bridge does not take silence for a lost turn.
                     while not finished.wait(20):emit({'event':'heartbeat'})
                 if body.get('heartbeat') is True:threading.Thread(target=heartbeat,daemon=True).start()
-                try:result=run(body, emit if body.get('stream') else None, emit if body.get('channel')=='background' else None)
+                try:result=run(body, emit if body.get('stream') else None, emit if body.get('channel')=='background' else None, feed)
                 finally:finished.set()
     except Exception as error:
         import traceback

@@ -1106,6 +1106,13 @@ export class NativeMemoryRepository {
   private sourcesFacts(read:FactRead|null):read is FactRead {
     return !!read&&!!this.engine.facts&&!!this.tags&&!(read.profile&&!this.engine.mostDerived);
   }
+  /** The facts a reply reads, from its context or a recall, are marked used, so the unused-facts rule (ADR-0299) keeps
+   *  them. In the background: a reply never waits for it, and a failure only means a fact may look unused for longer. */
+  private used(workspace:string,ids:readonly string[]) {
+    if(!this.engine.markUsed||!ids.length)return;
+    this.engine.markUsed(workspace,ids).catch(error=>console.warn(JSON.stringify({event:'memory_fact_use_failed',engine:this.engine.id,
+      code:error instanceof HttpError?error.code:'memory_fact_use_error'})));
+  }
   /** The block's facts, started early; a failure is the block's to handle, when it reads them. */
   private listFacts(workspace:string,read:FactRead|null):Promise<FactList>|null {
     if(!this.sourcesFacts(read))return null;
@@ -1160,6 +1167,7 @@ export class NativeMemoryRepository {
     });
     const plan=planFactBlock({title:input.title,summaryTitle:input.summaryTitle,summary:input.summary,
       through:summaryReference?tags.get(summaryReference.id)?.day??null:null,facts});
+    this.used(workspace,plan.facts.map(fact=>fact.conclusion));
     const behind=new Map(sourced.map(item=>[item.fact.id,item]));
     // Honcho's summary cites nothing, so a block that shows one is not exact either.
     const summarized=!!plan.summary.trim(),batch=plan.facts.some(fact=>!fact.exact);
@@ -1398,6 +1406,7 @@ export class NativeMemoryRepository {
       const limitations=[...new Set([...read.flatMap(page=>page.limitations),...over,
         ...ordered.some(({item})=>!item.exact)?['some_facts_cite_only_their_batch']:[]])].sort();
       if(!ordered.length)return {record:null,listed:[],count:0,limitations};
+      this.used(id,ordered.map(({item})=>item.fact.id));
       const stored:StoredFact[]=ordered.map(({n,peer,item})=>({n,conclusion:item.fact.id,peer,exact:item.exact,by:item.by,sources:item.sources,more:item.more,
         complete:item.complete,session:item.fact.session,...item.place?{place:true}:{},...wall?{wall}:{}}));
       // The facts with every source go on a record the guard never reads; only the text lines are guarded (factRecords).

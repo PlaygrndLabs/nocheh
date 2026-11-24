@@ -159,7 +159,7 @@ export class SharingContentRepository {
             await this.prepared.allow(actor,input.candidates);
             // The model sees only the words searched for, never the asker's sentence; the saved input keeps the raw query (ADR-0251).
             const payload=await this.prepared.prepare(actor,{query:await this.searchWords(input.query),instructions:input.rule.instructions,candidates:input.candidates},this.detect) as Record<string,unknown>;
-            // The filter's own one-time key, the owner's (ADR-0301): one per call, closed as soon as the call returns.
+            // The filter's own one-time key, the owner's (ADR-0305): one per call, closed as soon as the call returns.
             const credential=await this.prepared.audience.turn(this.serviceToken,actor,actor.turnEvent!,Date.now()+180000,
               {kind:'filter',subject:id,attempt:randomBytes(8).toString('hex'),person:'owner'});
             let response:Record<string,unknown>;

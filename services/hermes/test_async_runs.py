@@ -116,7 +116,7 @@ class AsyncRunTests(unittest.TestCase):
             self.assertEqual(runs.resume({**observed,'attempt':1})['state'],'not_found','the message turn is another run')
 
     def test_a_request_is_kept_without_its_pass_and_a_resume_launches_only_with_a_fresh_one(self):
-        # A pass is a one-time key for one reply (ADR-0301): it stays in memory with its run, never in the request on disk.
+        # A pass is a one-time key for one reply (ADR-0305): it stays in memory with its run, never in the request on disk.
         with tempfile.TemporaryDirectory() as folder:
             calls=[];body=self.body();run=identity(body)
             runs=AsyncRuns(folder,lambda body,*rest:calls.append(body.get('archive_credential')) or {'state':'done'},lambda body:None,credential=True)

@@ -4,7 +4,7 @@ import {keyKinds,type KeyKind,type Reader} from '../src/access.js';
 import {assertKeyRoute,keyRoute,keyRoutes} from '../src/stores/key-routes.js';
 import {relayRoutes} from '../src/security/relay-routes.js';
 
-// Each kind of one-time key reaches only its own routes (ADR-0301). Synthetic paths only.
+// Each kind of one-time key reaches only its own routes (ADR-0305). Synthetic paths only.
 const hex=(n:number)=>'a'.repeat(n);
 const reader=(keyKind?:KeyKind):Reader=>({admin:false,scope:null,space:'123',turnEvent:hex(64),...(keyKind?{keyKind,person:'owner',jti:hex(32)}:{})});
 const denied={status:403,code:'one_time_key_route_denied'};

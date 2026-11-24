@@ -74,7 +74,7 @@ export class OwnerMemberAskTurns {
   /** The observation of an ask that just closed. An ask about a member removed meanwhile (its member_id cleared) is
    * removed now: it closed and the owner was told, and a removed member's asks are not kept. */
   private async closedNow(id:string):Promise<Observation> {
-    // Answered or not, the ask's one-time key closes (ADR-0301).
+    // Answered or not, the ask's one-time key closes (ADR-0305).
     const answered=(await this.control.query("SELECT 1 FROM owner_member_asks WHERE id=$1 AND state='answered'",[id])).rowCount;
     await closeSubject(this.control,'member_ask',id,answered?'delivered':'not_delivered');
     const observed=await this.observed(id);
@@ -124,7 +124,7 @@ export class OwnerMemberAskTurns {
   }
   /** A pass for the turn under the current binding, after the ask is bound again and the turn's source is checked. The
    * pass must name this very ask; one that does not is never used (fail closed). It is the owner's one-time key for this
-   * attempt (ADR-0301). */
+   * attempt (ADR-0305). */
   private async credential(input:TurnInput,attempts:number):Promise<string> {
     if(this.token.length<24)throw new HttpError(503,'service_credential_required');
     const bound=await this.bound(input.principal),ask=input.principal.memberRead!;
@@ -146,7 +146,7 @@ export class OwnerMemberAskTurns {
     if(row.attempts>=maxAttempts)return this.fail(row,code,'failed');
     await this.control.query(`UPDATE owner_member_asks SET state='queued',error_code=NULL,next_attempt=now()+interval '5 seconds',updated_at=now()
       WHERE id=$1 AND state='running'`,[row.id]);
-    // This attempt's key closes; the next one gets its own (ADR-0301).
+    // This attempt's key closes; the next one gets its own (ADR-0305).
     await closeSubject(this.control,'member_ask',row.id,'not_delivered');
     return this.observed(row.id);
   }

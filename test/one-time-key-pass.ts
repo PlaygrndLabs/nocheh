@@ -2,7 +2,7 @@ import {randomBytes} from 'node:crypto';
 import type pg from 'pg';
 import {turnToken,type KeyKind} from '../src/access.js';
 
-/** A one-time key's claims for a synthetic pass (ADR-0301): its person, a fresh jti and its kind. */
+/** A one-time key's claims for a synthetic pass (ADR-0305): its person, a fresh jti and its kind. */
 export const keyClaims=(person='owner',kind:KeyKind='turn')=>({person,jti:randomBytes(16).toString('hex'),kind});
 /** A synthetic event id for a pass that answers no real message. */
 export const syntheticEvent='e'.repeat(63)+'1';

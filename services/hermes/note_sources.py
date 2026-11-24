@@ -398,10 +398,13 @@ CARRIED_SESSIONS=200
 
 def gate_read(name,content):
     """The read token a tool result counts as for "Do what I ask" (ADR-0293), or None: tool_read's, except for a
-    command's own output and the tools in GATE_IGNORED. A task list counts whoever's chat it is: in the owner's chat it
-    holds what members and groups wrote too."""
+    command's own output, a long-term memory recall and the tools in GATE_IGNORED. A task list counts whoever's chat it
+    is: in the owner's chat it holds what members and groups wrote too."""
     if name in GATE_IGNORED:return None
     if name==TASKS:return 'archive'
+    # A long-term memory recall labels a note it fed (recall_read), but storage's turn reads take no 'memory' token, so
+    # it is not one here: sending it would refuse the tool result and stop the turn.
+    if name==RECALL:return None
     token=tool_read({'tool_name':name,'content':content})
     return None if token=='commands' else token
 

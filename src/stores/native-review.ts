@@ -465,7 +465,7 @@ export class NativeReviewRepository {
         if(this.token.length<24)throw new HttpError(503,'service_credential_required');
         await this.prepared.allow(actor,{text:document.text});
       }
-      // The review's own one-time key, the owner's (ADR-0301): one per claim, closed once the review leaves running.
+      // The review's own one-time key, the owner's (ADR-0305): one per claim, closed once the review leaves running.
       const credential=uncertain?null:await this.prepared.audience.turn(this.token,{scope:null,space:actor.space!,purpose:'memory-review'},job.source_reference.id,Date.now()+600000,
         {kind:'review',subject:id,attempt:(job.attempts+1)+'-'+randomBytes(4).toString('hex'),person:'owner'});
       if(!uncertain){
@@ -516,7 +516,7 @@ export class NativeReviewRepository {
       await db.query(`UPDATE native_review_jobs SET state='running',error_code=NULL,updated_at=now(),next_attempt=now()+CASE WHEN $2
         THEN least(interval '60 seconds',greatest(interval '5 seconds',(next_attempt-updated_at)*2)) ELSE interval '5 seconds' END WHERE id=$1`,[id,uncertain]);return 'running';
     } finally {
-      // A review that is not running any more has no open key (ADR-0301): done, failed or waiting again. An unconfirmed
+      // A review that is not running any more has no open key (ADR-0305): done, failed or waiting again. An unconfirmed
       // (ambiguous) review may still run in the agent, so its key stays open until it settles or expires.
       try {
         if(locked)await db.query(`UPDATE one_time_keys SET closed_at=now(),closed_reason='review_finished' WHERE kind='review' AND subject=$1 AND closed_at IS NULL

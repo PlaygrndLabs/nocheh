@@ -28,7 +28,7 @@ import {otherPrivate,readSet,readSetGroups} from '../spaces.js';
 import {memberChatClosed,memberReads,recheckMemberGroups} from './member-reads.js';
 import {reloadMembers} from './members.js';
 import {privateAnswerId,type PrivateAnswer,type PrivateAnswerOutcome,type PrivateAnswerRepository} from './private-answers.js';
-import {closedTurnStates as closed,currentTurn,dispatchPayload,terminalTurnStates as terminal,turnFence,turnResultCodes as codes,type TurnInput as Input} from './telegram-turn.js';
+import {closedTurnStates as closed,currentTurn,dispatchPayload,joinedTurn,terminalTurnStates as terminal,turnFence,turnResultCodes as codes,type TurnInput as Input} from './telegram-turn.js';
 import {forwardLine,forwardOrigin} from '../forwarded.js';
 import {ownerTimeZone} from './task-settings.js';
 import type {Tag,TagBy} from '../source-tags.js';
@@ -56,7 +56,7 @@ const renewedCodes=['guard_context_changed','audience_context_changed','guard_tr
 /** A private answer whose record closed (expired, refused or its groups changed) is withdrawn like a retired source (ADR-0249);
  * so is a member's private turn whose chat closed or that may no longer read a group it was given (step 4). */
 const withdrawnCodes=[...renewedCodes,'conversation_not_selected','source_retired','private_answer_closed',memberChatClosed,
-  // A sender nobody can name now (they stopped being a member since the turn was built) gets no key: withdrawn (ADR-0301).
+  // A sender nobody can name now (they stopped being a member since the turn was built) gets no key: withdrawn (ADR-0305).
   'one_time_key_person_required'];
 /**
  * Who sent a group message and when, as one line for the model. Names come
@@ -195,10 +195,11 @@ export class TelegramDispatchRepository {
       next_attempt=CASE WHEN $2='failed' THEN now()+least(300,5*power(2,least(attempts,6)))*interval '1 second' ELSE next_attempt END,
       revision=revision+1,updated_at=now() WHERE event_id=$1`,[row.event_id,result.state,reference,result.error_code??null,result.state==='done'?'delivery':'assistant']);
     // The reply went out, its delivery check, presence and final reaction done, or the attempt ended without it: its
-    // one-time key closes, every copy at once (ADR-0301). A retry gets a key of its own.
+    // one-time key closes, every copy at once (ADR-0305). A retry gets a key of its own.
     await closeSubject(this.control,'turn',row.event_id,result.state==='done'?'delivered':'not_delivered');
     if(row.input_reference&&['done','cancelled','suppressed'].includes(result.state))try {const input=await this.input(row.input_reference);
-      if(result.state!=='done')await this.unanswered(input);
+      // A message that joined the running turn is answered by that turn's reply (ADR-0301).
+      if(result.state!=='done'&&!joinedTurn(result))await this.unanswered(input);
       // A private answer that went out is recorded once, with the send of its /start; nothing else is suggested from it.
       else if(input.principal.answer!==undefined)await this.answers?.answered(input.principal.answer,String(input.body.source_key));
       // Never from a member's private chat or an ask about a member: nothing there is learned or suggested (step 4).
@@ -246,7 +247,7 @@ export class TelegramDispatchRepository {
       AND launched_attempt IS DISTINCT FROM CASE WHEN $3 THEN $2 END`,[row.event_id,row.attempts,held]);
   }
   /** A pass for the turn under the current binding, after the turn's own binding and source are checked: the one-time key
-   * of this attempt (ADR-0301), the same at every check of it. */
+   * of this attempt (ADR-0305), the same at every check of it. */
   private async credential(input:Input,attempt:number):Promise<string> {
     if(this.token.length<24)throw new HttpError(503,'service_credential_required');
     const lane=this.lane(input),event=input.principal.turnEvent!;
@@ -269,7 +270,7 @@ export class TelegramDispatchRepository {
     return members().memberOf(telegramAccount(String(from)))?.id;
   }
   /**
-   * Whose one-time key the turn's pass is (ADR-0301): the member of their own private chat; the owner for the owner's
+   * Whose one-time key the turn's pass is (ADR-0305): the member of their own private chat; the owner for the owner's
    * chat, an answer and an ask; in a group, whoever sent the message, the owner or a member while they are one. Null
    * when nobody can be named, which gives no pass.
    */
@@ -295,8 +296,9 @@ export class TelegramDispatchRepository {
       withdrawn=error.code;
     }
     if(state!=='done') {
-      // Without a current pass the bot cannot be asked; an unrenewed presence lapses on its own.
-      if(credential)await finishPresence(this.call,replyTarget(input,attempt,credential),unansweredFinish(state));
+      // Without a current pass the bot cannot be asked; an unrenewed presence lapses on its own. A message that joined the
+      // running turn in its chat is answered by that turn's reply, so it gets 👍 too (ADR-0301).
+      if(credential)await finishPresence(this.call,replyTarget(input,attempt,credential),joinedTurn(receipt)?'answered':unansweredFinish(state));
       // The agent never sends anything, so a turn it lost to a restart runs again under a new attempt.
       return await this.storeResult(row,state==='ambiguous'?{...receipt,state:'failed',error_code:'assistant_runtime_unavailable'}:receipt);
     }

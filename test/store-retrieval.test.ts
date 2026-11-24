@@ -115,7 +115,7 @@ test('source-only retrieval keeps derivative links, independent relationship loo
     const token=await sources.audience.turn('synthetic-secret',current,target.id,Date.now()+60000,{kind:'turn',subject:target.id,attempt:1,person:'owner'});
     const parsed=reader({headers:{authorization:'Bearer '+token}} as IncomingMessage,'synthetic-secret');
     assert.equal(parsed.generation,current.generation);assert.equal((await sources.read(parsed,target.id)).id,target.id);
-    // A pass that is no one-time key (no person, id or kind) is no pass at all (ADR-0301).
+    // A pass that is no one-time key (no person, id or kind) is no pass at all (ADR-0305).
     assert.throws(()=>reader({headers:{authorization:'Bearer '+turnToken('synthetic-secret','-321',Date.now()+60000,target.id,{space:'-321',revision:1})}} as IncomingMessage,'synthetic-secret'),
       {code:'invalid_scope_token'});
     await guards.setMode('off');

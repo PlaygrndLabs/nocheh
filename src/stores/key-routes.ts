@@ -5,7 +5,7 @@ import {assertPrivateAnswerRoute,memberReadRoutes} from './private-answers.js';
 import {assertMachineRunRoute} from './machine-reads.js';
 
 /**
- * The routes a reply's or run's key reaches (ADR-0301): every data route the broker relays for a turn, and the turn's own
+ * The routes a reply's or run's key reaches (ADR-0305): every data route the broker relays for a turn, and the turn's own
  * binding, files, box copy, data tools, guard preparation, model calls and conversation report. Everything else storage
  * serves is the owner's dashboard API, which only the owner's admin bearer reaches.
  */
@@ -33,7 +33,7 @@ export const keyRoutes:Readonly<Record<KeyKind,readonly [string,RegExp][]>>={tur
 /** Whether a key of `kind` may call a route. */
 export function keyRoute(kind:KeyKind,method:string,path:string):boolean {return keyRoutes[kind].some(([verb,route])=>verb===method&&route.test(path));}
 /**
- * Refuses a pass anything its key does not reach (ADR-0301): a bound reader keeps its read-only codes (ADR-0249, step 4),
+ * Refuses a pass anything its key does not reach (ADR-0305): a bound reader keeps its read-only codes (ADR-0249, step 4),
  * a machine job's run its card-only code, and then every key is held to its kind's routes (403 one_time_key_route_denied).
  * The owner's admin bearer has no key and is not held here.
  */

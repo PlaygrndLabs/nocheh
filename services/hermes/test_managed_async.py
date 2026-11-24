@@ -17,7 +17,7 @@ class ManagedAsyncTests(unittest.TestCase):
         self.scope=Scope('42','42',True,'owner','42',1)
         self.admin=SimpleNamespace(root=self.root,model='model',agent_key='fixture-agent-key-not-a-real-credential',
             profile=lambda name:(name,self.root),binding=lambda name:self.scope,policy=Scopes({'enabled':True},Served.of('42',groups=['-123'],topics=[['-123/topic/7','-123','7']])))
-        # A background job's run: the browser channel is off (ADR-0289) and its runs never take a key (ADR-0301).
+        # A background job's run: the browser channel is off (ADR-0289) and its runs never take a key (ADR-0305).
         self.body={'channel':'background','event_id':'a'*64,'attempt':1,'owner_epoch':2};self.kind='background';self.key={}
         self.context={'event_id':'a'*64,'actor':'run_'+'a'*64,'scope':'42','profile':'owner','conversation':'native-session','owner_epoch':2,
             'background':{'job_id':'c'*64,'attempt':1,'max_iterations':300,'box':False,'soft_deadline':1793796300,'hard_deadline':1793796480,
@@ -31,7 +31,7 @@ class ManagedAsyncTests(unittest.TestCase):
         if route=='workflow-context':return self.context
         if route=='claim':
             self.state='running'
-            # The run's one-time key names the profile it runs in (ADR-0301).
+            # The run's one-time key names the profile it runs in (ADR-0305).
             claims={'scope':None,'event_id':body['event_id'],'audience':'nocheh-assistant','space':'42','revision':1,'expires':(time.time()+600)*1000,
                     'generation':'12345678-1234-1234-1234-123456789abc','guard_epoch':1,'logical_profile':'owner'}
             if self.context.get('storage_layout')=='original-only-v1':
@@ -63,7 +63,7 @@ class ManagedAsyncTests(unittest.TestCase):
         self.runtime=self.managed()
         self.assertEqual(self.runtime.runs.resume(self.body)['state'],'done');self.assertEqual(self.count,1)
     def test_a_run_takes_only_a_one_time_key_of_its_own_kind_for_this_agent(self):
-        # ADR-0301: a background run's claim brings a background key, a schedule's a scheduled key; a browser run none.
+        # ADR-0305: a background run's claim brings a background key, a schedule's a scheduled key; a browser run none.
         for number,(kind,key) in enumerate((('scheduled',{}),('turn',{}),('background',{'agent':'another-agent'}),('background',{'jti':None}),
                                              ('background',{'person':None}),('background',{'logical_profile':None}),('background',{}))):
             with self.subTest(kind=kind,key=key):

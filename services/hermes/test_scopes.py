@@ -137,7 +137,7 @@ class ScopeTests(unittest.TestCase):
         with self.assertRaises(ValueError):check(passed(claims),b,event)
 
     def test_every_pass_is_a_one_time_key_for_its_person_kind_and_this_agent(self):
-        # ADR-0301: a pass names its own id, the person it is for, its kind and the agent; the caller names the kinds it runs.
+        # ADR-0305: a pass names its own id, the person it is for, its kind and the agent; the caller names the kinds it runs.
         from dataclasses import replace
         from .scopes import Scope
         group=self.resolve(self.update(-20,456),'-20');owner=self.resolve(self.update(123,123,'private'),'123');event='a'*64

@@ -260,6 +260,32 @@ SESSION_ID = re.compile(r'^[a-f0-9]{64}$')
 HIDDEN_AT = "TIMESTAMPTZ '9999-12-31 00:00:00+00'"
 HIDDEN_FLOOR = "TIMESTAMPTZ '9999-01-01 00:00:00+00'"
 
+NOW_TEXT = "to_char(now() AT TIME ZONE 'UTC','YYYY-MM-DD\"T\"HH24:MI:SS.US\"Z\"')"
+
+# A reply read these facts (ADR-0299): their last use, written at most once a day per fact.
+USED_SQL = '''UPDATE documents SET internal_metadata=internal_metadata||jsonb_build_object('nocheh_used_at',''' + NOW_TEXT + ''')
+    WHERE workspace_name=:workspace AND id=ANY(:ids) AND deleted_at IS NULL
+    AND COALESCE(internal_metadata->>'nocheh_used_at','') < to_char((now()-interval '1 day') AT TIME ZONE 'UTC','YYYY-MM-DD"T"HH24:MI:SS.US"Z"')'''
+
+# A fact and its memory wall copies are one family. Its last activity is the newest of: when any of them was learned,
+# when a reply last read any of them, and when a chat last said it (the newest message any of them cites). A family
+# with nothing since `before` is hidden whole, as unused (ADR-0299), a bounded number of families at a time.
+HIDE_UNUSED_SQL = '''WITH family AS (
+    SELECT COALESCE(d.internal_metadata->>'copied_from', d.id) AS family, GREATEST(d.created_at,
+        CASE WHEN d.internal_metadata->>'nocheh_used_at' ~ '^[0-9]{4}-[0-9]{2}-[0-9]{2}T[0-9:.]+Z$'
+            THEN (d.internal_metadata->>'nocheh_used_at')::timestamptz END,
+        (SELECT max(m.created_at) FROM conclusion_source_messages s
+            JOIN messages m ON m.tenant_id=s.tenant_id AND m.public_id=s.message_id
+            WHERE s.tenant_id=d.tenant_id AND s.conclusion_id=d.id)) AS last
+    FROM documents d WHERE d.workspace_name=:workspace AND d.deleted_at IS NULL
+), stale AS (
+    SELECT family FROM family GROUP BY family HAVING max(last) < :before ORDER BY family LIMIT :limit
+)
+UPDATE documents SET deleted_at=''' + HIDDEN_AT + ''', internal_metadata=internal_metadata||jsonb_build_object('nocheh_hidden',
+    jsonb_build_object('reason','unused','at',''' + NOW_TEXT + '''))
+    WHERE workspace_name=:workspace AND deleted_at IS NULL
+    AND (id IN (SELECT family FROM stale) OR internal_metadata->>'copied_from' IN (SELECT family FROM stale)) RETURNING id'''
+
 # Live and hidden conclusions outside the session derived from it; hidden ones are walked through too, so a fact hidden
 # in between still leads to what was derived from it.
 DESCENDANTS_SQL = '''WITH RECURSIVE seed AS (
@@ -294,8 +320,10 @@ HIDDEN_LIST_SQL = '''SELECT id, content, level, observer, observed, created_at,
     AND (CAST(:after_at AS text) IS NULL OR (COALESCE(internal_metadata->'nocheh_hidden'->>'at',''), id) < (:after_at, :after_id))
     ORDER BY COALESCE(internal_metadata->'nocheh_hidden'->>'at','') DESC, id DESC LIMIT :limit'''
 
-# Bringing a fact back brings back its hidden wall copies too.
-RESTORE_HIDDEN_SQL = '''UPDATE documents SET deleted_at=NULL, internal_metadata=internal_metadata - 'nocheh_hidden'
+# Bringing a fact back brings back its hidden wall copies too, and counts as a use, so the unused-facts rule waits its
+# full number of days again before it hides the fact.
+RESTORE_HIDDEN_SQL = '''UPDATE documents SET deleted_at=NULL,
+    internal_metadata=(internal_metadata - 'nocheh_hidden')||jsonb_build_object('nocheh_used_at',''' + NOW_TEXT + ''')
     WHERE workspace_name=:workspace AND deleted_at>=''' + HIDDEN_FLOOR + '''
     AND (id=ANY(:ids) OR internal_metadata->>'copied_from'=ANY(:ids)) RETURNING id'''
 
@@ -341,6 +369,31 @@ def hidden_page(rows, limit):
               'copied_from': r['copied_from']} for r in rows[:limit]]
     last = rows[limit - 1] if len(rows) > limit else None
     return {'items': items, 'next': (last['hidden_at'] or '') + ' ' + last['id'] if last else None}
+
+
+def used_ids(body):
+    if not isinstance(body, dict) or set(body) != {'ids'} or not isinstance(body['ids'], list) or not 1 <= len(body['ids']) <= 200 \
+            or any(not isinstance(v, str) or not NATIVE_ID.fullmatch(v) for v in body['ids']):
+        raise ValueError('invalid_used_request')
+    return list(dict.fromkeys(body['ids']))
+
+
+UNUSED_MIN_DAYS = 30
+
+
+def hide_unused_request(body, now):
+    """`before`: facts with no activity since then are hidden; never later than 30 days ago. `limit`: families per call."""
+    from datetime import datetime, timedelta
+    if not isinstance(body, dict) or set(body) != {'before', 'limit'} or not isinstance(body['before'], str) \
+            or isinstance(body['limit'], bool) or not isinstance(body['limit'], int) or not 1 <= body['limit'] <= 500:
+        raise ValueError('invalid_hide_unused_request')
+    try: before = datetime.fromisoformat(body['before'])
+    except ValueError: raise ValueError('invalid_hide_unused_request') from None
+    if before.tzinfo is None:
+        raise ValueError('invalid_hide_unused_request')
+    if before > now - timedelta(days=UNUSED_MIN_DAYS):
+        raise ValueError('hide_unused_too_recent')
+    return before, body['limit']
 
 
 def restore_ids(body):
@@ -425,5 +478,23 @@ def install(app):
         restored = [row[0] for row in result.all()]
         await db.commit()
         return {'restored': restored}
+
+    @router.post('/used')
+    async def used(workspace_id: str, body: dict = Body(...), db: AsyncSession = write_db):
+        try: ids = used_ids(body)
+        except ValueError as error: raise HTTPException(status_code=400, detail=str(error)) from None
+        result = await db.execute(text(USED_SQL), {'workspace': workspace_id, 'ids': ids})
+        await db.commit()
+        return {'marked': int(result.rowcount)}
+
+    @router.post('/hide-unused')
+    async def hide_unused(workspace_id: str, body: dict = Body(...), db: AsyncSession = write_db):
+        from datetime import datetime, timezone
+        try: before, limit = hide_unused_request(body, datetime.now(timezone.utc))
+        except ValueError as error: raise HTTPException(status_code=400, detail=str(error)) from None
+        result = await db.execute(text(HIDE_UNUSED_SQL), {'workspace': workspace_id, 'before': before, 'limit': limit})
+        hidden = [row[0] for row in result.all()]
+        await db.commit()
+        return {'hidden': len(hidden)}
 
     app.include_router(router)

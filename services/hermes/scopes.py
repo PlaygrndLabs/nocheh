@@ -22,15 +22,15 @@ def topic_id(message):
     return raw if forum or message.get('is_topic_message') is True else None
 
 
-# The agent this Hermes is: every pass Nocheh mints names the agent plugged in now (ADR-0295, ADR-0301).
+# The agent this Hermes is: every pass Nocheh mints names the agent plugged in now (ADR-0295, ADR-0305).
 AGENT_NAME='hermes'
-# What a one-time key is for (ADR-0301): a reply to a message, a follow-up after actions, the owner's ask about a member, a
+# What a one-time key is for (ADR-0305): a reply to a message, a follow-up after actions, the owner's ask about a member, a
 # scheduled or background run, a memory review, a sharing filter.
 KEY_KINDS=('turn','follow_up','member_ask','scheduled','background','review','filter')
 
 
 def check_key(claims,kinds):
-    """A pass's one-time key (ADR-0301): its own id, the person it is for, its kind, one of `kinds` (what the caller
+    """A pass's one-time key (ADR-0305): its own id, the person it is for, its kind, one of `kinds` (what the caller
     runs), and this agent. The person fits the pass: a member's pass and a lane are that member's; the owner's own turn
     (no scope), an answer, an ask about a member, a review and a filter are the owner's. Raises ValueError otherwise.
     Nocheh checks the key's row on every call the pass makes; this only keeps a pass from running as another kind."""
@@ -51,7 +51,7 @@ def check_claims(credential,scope,event_id,kinds):
     """A turn pass's claims, checked against the turn they must bind. Hermes does not check the signature, so the master key
     can leave it (ADR-0289): Nocheh's own services check it on every call the pass makes, and a forged pass reaches nothing there. Here
     the claims choose only this turn's local profile, lane and tools, so every one must match its binding exactly. Every pass is
-    a one-time key of one of `kinds` (check_key, ADR-0301)."""
+    a one-time key of one of `kinds` (check_key, ADR-0305)."""
     try:
         prefix,body,signature=credential.split('.')
         if not body or not signature:raise ValueError()

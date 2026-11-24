@@ -90,7 +90,7 @@ test('browser execution separates originals, prepared inputs, receipts and same-
     assert.equal((await stores.archive.query("SELECT 1 FROM source_relations r JOIN source_revisions v ON v.object_id=r.target_id JOIN source_observations o ON o.revision_id=v.id WHERE r.event_id=$1 AND r.kind='reply_to' AND o.event_id=$2",[receipt.event_id,first.event_id])).rowCount,1,'delivered browser message resolves its original reply target');
     await s.browserDelivery.acknowledge(owner,delivered.delivery);await drainSourceSpool(s.capture,root,receipt.event_id);
     assert.equal((await stores.archive.query('SELECT count(*)::int AS count FROM events WHERE id=$1',[receipt.event_id])).rows[0].count,1);
-    // The run ended: its one-time key, a turn's for the owner, closed with it (ADR-0301).
+    // The run ended: its one-time key, a turn's for the owner, closed with it (ADR-0305).
     const finished=reader({headers:{authorization:'Bearer '+claims.get(first.event_id).archive_credential}} as any,token);
     assert.deepEqual([finished.person,finished.keyKind],['owner','turn']);
     assert.equal((await stores.control.query('SELECT closed_reason FROM one_time_keys WHERE jti=$1',[finished.jti])).rows[0].closed_reason,'run_finished');

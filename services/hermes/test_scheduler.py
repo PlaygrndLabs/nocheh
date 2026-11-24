@@ -74,7 +74,7 @@ class SchedulerTests(unittest.TestCase):
         if route=='input':self.inputs[body['id']]=body;return {'event_id':body['id']}
         if route=='claim':
             if body['event_id'] in self.finished:return {'claimed':False,'state':self.finished[body['event_id']]['state']}
-            # The run's one-time key names the profile it runs in (ADR-0301).
+            # The run's one-time key names the profile it runs in (ADR-0305).
             claims={'scope':None,'event_id':body['event_id'],'audience':'nocheh-assistant','space':'42','revision':1,'expires':(time.time()+600)*1000,
                     'generation':'12345678-1234-1234-1234-123456789abc','guard_epoch':1,'logical_profile':body['profile']}
             encoded=base64.urlsafe_b64encode(json.dumps(keyed(claims,'scheduled')).encode()).decode().rstrip('=')

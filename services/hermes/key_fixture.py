@@ -1,4 +1,4 @@
-"""One-time key claims for the made-up passes the Hermes tests build (ADR-0301).
+"""One-time key claims for the made-up passes the Hermes tests build (ADR-0305).
 
 Every pass Nocheh mints is a one-time key: its own id (`jti`), the person it is for, its kind and the agent it was made for.
 ``keyed(claims)`` adds the ones a test did not set, as Nocheh would sign them for those claims: the person is the member

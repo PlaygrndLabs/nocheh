@@ -64,7 +64,8 @@ test('a turn names and quotes the message it replies to, and a recent message na
   const at=(message:any)=>new Date(message.date*1000).toISOString().slice(0,16).replace('T',' ')+' UTC';
   // Whole ids only: a short id such as the owner's can appear by chance inside a digest or a time.
   const noIds=(value:unknown)=>{const text=JSON.stringify(value);for(const id of [G,String(ALICE),String(LONG),OWNER])
-    assert.ok(!new RegExp('(?<![0-9])'+id.replace('-','\\-')+'(?![0-9])').test(text),'no Telegram ID: '+id);};
+    // A whole ID only: a short one can turn up inside a random hex id, letters on either side.
+    assert.ok(!new RegExp('(?<![0-9A-Za-z])'+id.replace('-','\\-')+'(?![0-9A-Za-z])').test(text),'no Telegram ID: '+id);};
   await startChatDirectory(stores.control,()=>configured);
   try {
     await services.guards.reconcile();await services.guards.setMode('on');

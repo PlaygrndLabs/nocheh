@@ -1,4 +1,4 @@
-# ADR-0301: One-time keys per reply
+# ADR-0305: One-time keys per reply
 
 <status>
 Accepted on 2026-11-24 as step 1, part B, of the owner-approved key design (design decisions 2 and 3). Builds on

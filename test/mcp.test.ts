@@ -63,7 +63,7 @@ test('the data tools keep their names, closed schemas and engine-neutral words',
   assert.equal(relayedJobErrors,jobErrors);assert.ok(jobErrors.has('job_repo_not_allowed'));
 });
 
-test('a turn pass names its agent, and only the agent plugged in now (ADR-0301)',()=>{
+test('a turn pass names its agent, and only the agent plugged in now (ADR-0305)',()=>{
   const secret='synthetic-service-token-only-for-tests',request=(token:string)=>({headers:{authorization:'Bearer '+token}}) as unknown as IncomingMessage;
   const pass=keyPass(secret,'-1001',Date.now()+60000,ID,{space:'-1001',revision:1});
   assert.equal(defaultAgent,'hermes');assert.equal(reader(request(pass),secret).agent,'hermes');

@@ -151,7 +151,7 @@ export function storageServer(s:StorageServices,config:Settings,call:RuntimeCall
     // Every scoped reader's reads are bound for the request: a bound reader's own, and a group reader's project groups
     // while its project shares its group chats (ADR-0267).
     // A run of a job on the owner's machine reads only what its card showed, and reaches only its own routes (machine jobs' reads).
-    // Every pass is a one-time key for one reply or run (ADR-0301): its row must be open before anything is read for it, and
+    // Every pass is a one-time key for one reply or run (ADR-0305): its row must be open before anything is read for it, and
     // it reaches only its kind's routes, a bound reader its read routes and a machine job's run its own (key-routes.ts).
     const parsed=await currentReader(req,config.token);
     if(!parsed.admin)await s.turns.assertKey(parsed);
@@ -472,6 +472,8 @@ export function storageServer(s:StorageServices,config:Settings,call:RuntimeCall
     if(req.method==='GET'&&path==='/v1/memory/longterm/coverage')return json(res,200,await s.memoryDashboard.coverage(principal));
     if(req.method==='GET'&&path==='/v1/memory/facts')return json(res,200,await s.memoryDashboard.facts(principal,{chat:url.searchParams.get('chat')??'',
       person:url.searchParams.get('person')??'',after:url.searchParams.get('after')??''}));
+    if(req.method==='GET'&&path==='/v1/memory/clean-up')return json(res,200,await s.memoryDashboard.cleanUp(principal));
+    if(req.method==='POST'&&path==='/v1/memory/clean-up')return json(res,200,await s.memoryDashboard.saveCleanUp(principal,await readJson(req)));
     if(req.method==='GET'&&path==='/v1/memory/hidden')return json(res,200,await s.memoryDashboard.hidden(principal,url.searchParams.get('after')??''));
     if(req.method==='POST'&&path==='/v1/memory/hidden/restore')return json(res,200,await s.memoryDashboard.restore(principal,await readJson(req)));
     if(req.method==='GET'&&path==='/v1/memory/originals')return json(res,200,await s.originals.lookup(principal,url.searchParams.getAll('id')));

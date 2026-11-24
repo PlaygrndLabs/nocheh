@@ -393,7 +393,7 @@ class TelegramService:
         result['timings'] = {'telegram_send': {'ms': min(86400000, max(0, round((perf_counter() - sending) * 1000))), 'calls': 1}}
         result['window'] = {'delivery': started, 'finished': finished}
         # The final reaction before the receipt: core closes the reply's one-time key once it reads the closed receipt
-        # (ADR-0301), so the receipt is written last, after the delivery check, the presence and the final reaction that
+        # (ADR-0305), so the receipt is written last, after the delivery check, the presence and the final reaction that
         # still need the key. A missed reaction is cosmetic and never holds the receipt back.
         if body.get('presence'):
             outcome = 'answered' if result['state'] == 'done' else 'failed' if result['state'] in ('failed', 'suppressed') else 'clear'

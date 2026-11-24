@@ -26,9 +26,9 @@ const sourceProcessing=(principal:Reader)=>!principal.logical_profile&&['memory-
 /** Runtime authority uses original references or explicit control operations, never generated archive events. */
 export class RuntimeTurnRepository implements BrokerStorage {
   constructor(readonly access:SourceAccessRepository,readonly prepared:PreparedContextRepository){}
-  /** The keys passes are checked against (ADR-0301). */
+  /** The keys passes are checked against (ADR-0305). */
   get keys():OneTimeKeyRepository {return new OneTimeKeyRepository(this.access.stores.control);}
-  /** A pass's one-time key is open (ADR-0301): every request that brings a pass, before anything else is read for it. */
+  /** A pass's one-time key is open (ADR-0305): every request that brings a pass, before anything else is read for it. */
   async assertKey(principal:Reader):Promise<void> {
     if(principal.admin)return;
     await this.keys.assertOpen(principal);
@@ -109,7 +109,7 @@ export class RuntimeTurnRepository implements BrokerStorage {
     const managed=reference.store==='archive'&&sourceProcessing(principal)?null:
       (await this.access.stores.control.query('SELECT * FROM runtime_turns WHERE id=$1',[reference.id])).rows[0];
     if((reference.store==='control'||principal.logical_profile!==undefined)&&!managed)throw new HttpError(403,'runtime_turn_not_admitted');
-    // A run made for one person and agent is never driven by a key for another (ADR-0301).
+    // A run made for one person and agent is never driven by a key for another (ADR-0305).
     if(principal.jti!==undefined) {
       const run=(await this.access.stores.control.query<{person:string|null;agent:string|null}>('SELECT person,agent FROM managed_runs WHERE event_id=$1',[principal.turnEvent])).rows[0];
       if(run&&(run.person!==null&&run.person!==principal.person||run.agent!==null&&run.agent!==principal.agent))throw new HttpError(409,'one_time_key_person_changed');

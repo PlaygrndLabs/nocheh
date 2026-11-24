@@ -35,7 +35,7 @@ GENERATION = '11111111-1111-1111-1111-111111111111'
 
 
 def signed(claims, secret=SECRET):
-    # Every pass is a one-time key (ADR-0301): a member's is that member's.
+    # Every pass is a one-time key (ADR-0305): a member's is that member's.
     data = base64.urlsafe_b64encode(canonical(keyed(claims))).decode().rstrip('=')
     return 'turn.' + data + '.' + base64.urlsafe_b64encode(hmac.new(secret.encode(), data.encode(), hashlib.sha256).digest()).decode().rstrip('=')
 
@@ -256,7 +256,7 @@ class MemberLaneTests(unittest.TestCase):
 
     def test_a_members_turns_run_one_at_a_time_across_their_chats_and_others_do_not_wait(self):
         gates, started = {}, []
-        async def turn(root, scope, body, model, credentials, cancelled=None):
+        async def turn(root, scope, body, model, credentials, cancelled=None, steering=None):
             text = body['text'];started.append(text)
             while not gates.setdefault(text, threading.Event()).is_set():await asyncio.sleep(.005)
             return {'state': 'done', 'text': 'Reply to ' + text, 'session_id': 'nocheh-' + text}
@@ -312,7 +312,7 @@ class MemberLaneTests(unittest.TestCase):
 
     def test_a_members_queued_group_turn_does_not_hold_the_group_while_their_private_turn_runs(self):
         gates, started = {}, []
-        async def turn(root, scope, body, model, credentials, cancelled=None):
+        async def turn(root, scope, body, model, credentials, cancelled=None, steering=None):
             text = body['text'];started.append(text)
             while not gates.setdefault(text, threading.Event()).is_set():await asyncio.sleep(.005)
             return {'state': 'done', 'text': 'Reply to ' + text, 'session_id': 'nocheh-' + text}
@@ -338,7 +338,7 @@ class MemberLaneTests(unittest.TestCase):
     def test_a_members_group_turn_with_a_free_lane_keeps_its_place_in_the_group(self):
         # The owner's group turn reads its scope slowly; the member's later turn there, whose own lane is free, still runs second.
         gate, started = threading.Event(), []
-        async def turn(root, scope, body, model, credentials, cancelled=None):
+        async def turn(root, scope, body, model, credentials, cancelled=None, steering=None):
             started.append(body['text'])
             return {'state': 'done', 'text': 'Reply to ' + body['text'], 'session_id': 'nocheh-' + body['text']}
         agent = self.agent(turn)
@@ -359,7 +359,7 @@ class MemberLaneTests(unittest.TestCase):
         # Two members each in two groups and their own chats, the owner in both groups, in an order that crosses every lane
         # and space, with fewer slots than turns: all finish, nothing waits on itself.
         running, peak = [0], [0]
-        async def turn(root, scope, body, model, credentials, cancelled=None):
+        async def turn(root, scope, body, model, credentials, cancelled=None, steering=None):
             running[0] += 1;peak[0] = max(peak[0], running[0])
             await asyncio.sleep(.01)
             running[0] -= 1

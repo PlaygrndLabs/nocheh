@@ -51,7 +51,7 @@ const maxAttempts=3,chainLimit=3,askingWaitMs=600000,receiptWaitMs=120000,siblin
 const closedRows=new Set(['done','ambiguous','suppressed','cancelled','skipped']);
 const renewedCodes=['guard_context_changed','audience_context_changed','guard_transition_pending'];
 const withdrawnCodes=[...renewedCodes,'conversation_not_selected','source_retired',
-  // The asker can no longer be named (they stopped being a member): no key, so the follow-up is withdrawn (ADR-0301).
+  // The asker can no longer be named (they stopped being a member): no key, so the follow-up is withdrawn (ADR-0305).
   'one_time_key_person_required'];
 /** Names the continuation in AsyncRuns, the gateway receipt and the archived result; never an integer, so it cannot meet a message turn's. */
 export const continuationAttempt=(leader:string,attempts:number)=>'c'+attempts+'-'+leader.slice(0,40);
@@ -130,7 +130,7 @@ export class ActionContinuationRepository {
     await this.control.query(`UPDATE action_continuations SET state=$2,result_reference=$3,error_code=$4,
       next_attempt=CASE WHEN $2='failed' THEN now()+least(300,5*power(2,least(attempts,6)))*interval '1 second' ELSE next_attempt END,
       updated_at=now() WHERE action_id=$1`,[row.action_id,result.state,reference,result.error_code??null]);
-    // Delivered or not, this attempt's one-time key closes (ADR-0301); a retry gets its own.
+    // Delivered or not, this attempt's one-time key closes (ADR-0305); a retry gets its own.
     await closeSubject(this.control,'follow_up',row.action_id,result.state==='done'?'delivered':'not_delivered');
     return this.observation(await this.row(row.action_id));
   }
@@ -141,7 +141,7 @@ export class ActionContinuationRepository {
     return this.observation(await this.row(row.action_id));
   }
   /** A pass for the turn under the current binding, after the turn's own binding and source are checked: the one-time key
-   * of this attempt, for the person whose turn asked for the operations (ADR-0301). */
+   * of this attempt, for the person whose turn asked for the operations (ADR-0305). */
   private async credential(input:TurnInput,row:{action_id:string;attempts:number}):Promise<string> {
     if(this.token.length<24)throw new HttpError(503,'service_credential_required');
     const credential=await this.prepared.audience.turn(this.token,input.principal,input.principal.turnEvent!,Date.now()+600000,
@@ -150,7 +150,7 @@ export class ActionContinuationRepository {
     return credential;
   }
   /** Who asked for the leader operation: the person its key named, else its asking member's (null once they are no
-   * member), else the owner (ADR-0301). */
+   * member), else the owner (ADR-0305). */
   private async person(id:string):Promise<string|null> {
     const action=(await this.control.query<{person:string|null;asker_account:string|null}>('SELECT person,asker_account FROM controlled_actions WHERE id=$1',[id])).rows[0];
     if(!action)return null;

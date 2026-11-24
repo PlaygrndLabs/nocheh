@@ -94,7 +94,7 @@ test('three-store broker binds original and scheduled turns, isolates generation
     await services.sources.read(actor,source.reference.id);
     assert.equal((await request('/v1/chat/completions',payload)).status,200);
     const provider=calls.at(-1)!;assert.ok(!JSON.stringify(provider.body).includes('saffronpass'));
-    // The broker checks the one-time key before anything else (ADR-0301): never minted, closed, or outside its kind's routes.
+    // The broker checks the one-time key before anything else (ADR-0305): never minted, closed, or outside its kind's routes.
     const keyed=(error:string)=>async(answer:Response)=>assert.equal((await answer.json() as any).error,error);
     const unminted=keyPass(token,actor.scope,Date.now()+600000,actor.turnEvent!,{space:actor.space!,revision:actor.revision!,guard_epoch:actor.guard_epoch!,generation:actor.generation!});
     const beforeKeys=calls.length;

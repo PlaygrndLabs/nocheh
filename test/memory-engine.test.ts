@@ -428,3 +428,16 @@ test('hidden facts list and come back through the plugin, and a bad answer or re
   const odd=fake(()=>({items:[{id,content:'x',observer:'p',observed:'p',reason:'deleted',copied_from:null}],next:null})).engine;
   await assert.rejects(odd.hiddenFacts('w',{after:null,size:25}),/invalid_honcho_hidden/,'an unknown reason is a broken answer');
 });
+
+test('facts a reply read are marked used in batches, and unused facts are hidden through the plugin (ADR-0299)',async()=>{
+  const ids=Array.from({length:450},(_,i)=>String(i).padStart(21,'f'));
+  const {calls,engine}=fake(path=>path.endsWith('/nocheh/hide-unused')?{hidden:7}:{marked:0});
+  await engine.markUsed('w',[...ids,ids[0]!,'not-an-id']);
+  assert.deepEqual(calls.map(call=>[call.path,(call.body as {ids:string[]}).ids.length]),[['/v3/workspaces/w/nocheh/used',200],['/v3/workspaces/w/nocheh/used',200],
+    ['/v3/workspaces/w/nocheh/used',50]],'each fact once, 200 a call, and no malformed id');
+  const before=new Date('2026-05-28T00:00:00Z');
+  assert.equal(await engine.hideUnused('w',before,200),7);
+  assert.deepEqual(calls.at(-1)!.body,{before:'2026-05-28T00:00:00.000Z',limit:200});
+  const odd=fake(()=>({hidden:-1})).engine;
+  await assert.rejects(odd.hideUnused('w',before,200),/invalid_honcho_hide_unused/);
+});

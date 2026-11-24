@@ -60,7 +60,7 @@ export async function githubRunRefusal(db:Pick<pg.PoolClient,'query'>,row:any,ow
   if(!GITHUB_REPO.test(repo))return 'github_not_here';
   const {chat:owner}=typeof ownerIds==='string'||!ownerIds?{chat:ownerIds}:ownerIds;
   const project=await linkOf(db,repo);
-  // The owner's own repositories are only ever for the owner's key (ADR-0301).
+  // The owner's own repositories are only ever for the owner's key (ADR-0305).
   if(!!owner&&row.scope===owner&&(parentSpace(row.space_id)??row.space_id)===owner)
     return row.person&&row.person!=='owner'?'github_not_here':!project||(await db.query("SELECT 1 FROM projects WHERE id=$1 AND state='active'",[project])).rowCount?null:'github_not_here';
   if(!project||row.scope===null)return 'github_not_here';

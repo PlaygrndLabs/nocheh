@@ -6,7 +6,9 @@ assistant: "start all three + Because you said". Amends
 [ADR-0266](0266-schedules-set-by-asking.md) and [ADR-0290](0290-nocheh-grants-schedule-changes-and-fires.md)
 for schedules a reply set after reading outside content; both stay as written for everything
 else. Changes the owner's earlier rule that a schedule set by asking runs with no card, in that
-one case only.
+one case only. Amended on 2026-11-24: the owner chose that an archive search holds a schedule
+too ("Hold it for Start"), since a stranger's group message it finds could otherwise set a
+daily job.
 </status>
 
 ## Context
@@ -25,8 +27,9 @@ of why it was allowed.
 2. **Outside content holds a schedule.** A turn whose message or reads brought in outside
    content (ADR-0293's `outsideReads` for the asker, the owner or a member in their own chat:
    a forward, a file, a reply to someone else's message, earlier outside content in the
-   conversation, a web page or another server's tool, Gmail and Notion included; not the
-   asker's own archive or task lookups, and not a conversation the runtime never reported)
+   conversation, a web page or another server's tool, Gmail and Notion included, and a
+   search of the archive, whose results hold other people's messages; not a conversation
+   the runtime never reported)
    may not leave a schedule running
    unless it already ran with that very instruction. `/v1/schedules/turn/definition` answers
    409 `schedule_start_needed`; Hermes's plugin then saves the job paused, with a new

@@ -32,7 +32,7 @@ export interface BrokerStorage {
   turnFile(principal:Reader,hash:string):Promise<string>;
   /** An answer reader's read set from its record (ADR-0249); a reader without an answer comes back as it is. */
   bindReads?(principal:Reader):Promise<Reader>;
-  /** A pass's one-time key is open (ADR-0301). A broker without storage (unit tests only) checks no key. */
+  /** A pass's one-time key is open (ADR-0305). A broker without storage (unit tests only) checks no key. */
   assertKey?(principal:Reader):Promise<void>;
 }
 /** `agentKey` is the agent login (ADR-0295): the broker calls Hermes with it and takes it on POST /v1/guard alone; without it
@@ -181,12 +181,12 @@ export function brokerServer(options:BrokerOptions) {
     // call, or refused without one, and reaches its read routes only (ADR-0249, ADR-0262). A pass for a topic the app
     // recorded a moment ago is read once this service's chat directory has looked again (ADR-0252).
     const parsed=await currentReader(req,options.token),bound=boundReader(parsed);
-    // Every pass is a one-time key, open until its reply is delivered or its run ends (ADR-0301): checked before anything
+    // Every pass is a one-time key, open until its reply is delivered or its run ends (ADR-0305): checked before anything
     // else is done for it, and again with every audience check below.
     if(!parsed.admin)await options.storage?.assertKey?.(parsed);
     if(bound!==null&&!options.storage?.bindReads)throw new HttpError(409,bound==='answer'?'private_answer_closed':'member_chat_closed');
     const principal=bound!==null?await options.storage!.bindReads!(parsed):parsed,job=jobRun(principal);
-    // Each key reaches only its kind's routes; a bound reader keeps its read-only codes (ADR-0249, ADR-0301).
+    // Each key reaches only its kind's routes; a bound reader keeps its read-only codes (ADR-0249, ADR-0305).
     assertKeyRoute(principal,req.method,path);
     await afterPending(job,async()=>options.assertReady?.());
     // Nocheh's data tools: each call comes back to this broker's own routes with the turn's pass, so it meets every check below (ADR-0233).

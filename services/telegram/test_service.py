@@ -46,7 +46,7 @@ DROP = object()
 
 
 def keyed(claims):
-    """A pass's claims with the one-time key Nocheh signs for them (ADR-0301), unless the test set them: its own id, the
+    """A pass's claims with the one-time key Nocheh signs for them (ADR-0305), unless the test set them: its own id, the
     person (the member, the lane's member, else the owner), a reply's kind and the agent. A claim set to DROP is left out."""
     person = claims.get('member') or claims.get('lane') or 'owner'
     value = {'jti': 'e' * 32, 'person': person, 'key_kind': 'member_ask' if claims.get('member_read') is not None else 'turn', 'agent': 'hermes', **claims}
@@ -264,7 +264,7 @@ class ServiceTests(unittest.TestCase):
         self.assertEqual(self.sent(), [])
 
     def test_a_reply_is_sent_only_with_a_reply_key_for_its_person(self):
-        # ADR-0301: every pass is a one-time key with its own id, the person it is for and an agent's name; only a reply's key
+        # ADR-0305: every pass is a one-time key with its own id, the person it is for and an agent's name; only a reply's key
         # (a message's turn, a follow-up, an ask about a member) reaches Telegram, and the owner's own pass is the owner's.
         self.member_policy()
         body = self.turn(12, text='x')
@@ -288,7 +288,7 @@ class ServiceTests(unittest.TestCase):
         self.assertEqual(self.service.reply({**body, 'archive_credential': mine(key_kind='follow_up')})['state'], 'done')
 
     def test_the_reply_receipt_is_written_after_the_final_reaction(self):
-        # Core closes the reply's one-time key once it reads the closed receipt (ADR-0301): the final reaction, which still
+        # Core closes the reply's one-time key once it reads the closed receipt (ADR-0305): the final reaction, which still
         # needs the key, comes first, and a reaction that fails never holds the receipt back.
         original = self.service._finish
         for number, fails in ((14, False), (15, True)):

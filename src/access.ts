@@ -35,14 +35,14 @@ export interface Reader {readonly scope:string|null; readonly admin:boolean;read
    * (machine jobs' reads). Set only on the server, by bindMachine, for every request of a pass whose turn is such a run;
    * never taken from a pass: a pass that names one is refused, as reads is. */
   readonly machineReads?:MachineReads;
-  /** Who this one-time key is for (ADR-0301): 'owner' or a members.id. Signed in every pass and checked against its claims;
+  /** Who this one-time key is for (ADR-0305): 'owner' or a members.id. Signed in every pass and checked against its claims;
    * it never widens what the pass reads, which the server derives for every request as before. */
   readonly person?:string;
   /** The one-time key's own id (32 hex, a one_time_keys.jti), checked open on every request. */
   readonly jti?:string;
   /** What the one-time key is for (KeyKind): it decides which routes the pass reaches (key-routes.ts). */
   readonly keyKind?:KeyKind}
-/** What a one-time key is for (ADR-0301): a reply turn, a follow-up after actions, the owner's ask about a member, a
+/** What a one-time key is for (ADR-0305): a reply turn, a follow-up after actions, the owner's ask about a member, a
  * scheduled run, a background job's run, a memory review or a sharing filter. */
 export const keyKinds=['turn','follow_up','member_ask','scheduled','background','review','filter'] as const;
 export type KeyKind=typeof keyKinds[number];
@@ -59,7 +59,7 @@ export const answerId=/^[a-f0-9]{32}$/;
 export const memberClaimId=/^[a-f0-9]{64}$/;
 /** The id of an owner's ask about a member (owner_member_asks.id, step 4b): 32 hex. */
 export const memberReadId=/^[a-f0-9]{32}$/;
-/** A one-time key's person: the owner, or a member by their members.id (ADR-0301). */
+/** A one-time key's person: the owner, or a member by their members.id (ADR-0305). */
 export const personClaim=(value:unknown):value is string=>value==='owner'||typeof value==='string'&&memberClaimId.test(value);
 /** The bound readers: a turn that reads as someone other than the owner, its reads resolved on the server for every
  * request (bindReads) and limited to reading (ADR-0249, ADR-0262). */
@@ -96,7 +96,7 @@ const agentName=/^[a-z][a-z0-9-]{0,31}$/;
  * A turn pass. `member` (a member's own private chat), `lane` (a member's turn, in a group or their private chat: the
  * member id, for Hermes to run one turn at a time per member; storage parses it and drops it) and `memberRead` (signed
  * as the claim member_read: the owner's ask about a member) are step 4's claims; verifiedReader says where each is
- * allowed. Every pass is a one-time key (ADR-0301): `person`, `jti` and `kind` (signed as key_kind) are required by
+ * allowed. Every pass is a one-time key (ADR-0305): `person`, `jti` and `kind` (signed as key_kind) are required by
  * verifiedReader, which refuses a pass without them; they are optional here only for code that never reaches a server.
  * Only AudienceRepository.turn mints passes, each with its key row.
  */
@@ -139,7 +139,7 @@ function verifiedReader(req:IncomingMessage,secret:string,now:number,missed:()=>
   if (equal(bearer,secret)) return {scope:null,admin:true};
   try {
     const [prefix,body,signature,extra]=bearer.split('.');
-    // Every pass is a turn pass and a one-time key (ADR-0301): the archive-wide `scope.` pass is gone.
+    // Every pass is a turn pass and a one-time key (ADR-0305): the archive-wide `scope.` pass is gone.
     if (prefix!=='turn' || !body || !signature || extra || body.length>2048 || !equal(signature,createHmac('sha256',secret).update(body).digest('base64url'))) throw Error();
     const claims=object(JSON.parse(Buffer.from(body,'base64url').toString()));
     if (claims.audience!=='nocheh-assistant' || typeof claims.expires!=='number' || claims.expires<=now || claims.expires>now+3600000) throw Error();
@@ -160,9 +160,9 @@ function verifiedReader(req:IncomingMessage,secret:string,now:number,missed:()=>
     if(claims.purpose!==undefined&&!['assistant','memory-review','filter'].includes(String(claims.purpose)))throw Error();
     if(claims.logical_profile!==undefined&&(!claims.generation||typeof claims.logical_profile!=='string'||!/^[a-zA-Z0-9][a-zA-Z0-9_-]{0,63}$/.test(claims.logical_profile)))throw Error();
     if(claims.project!==undefined&&(typeof claims.project!=='string'||!/^[a-f0-9]{64}$/.test(claims.project)))throw Error();
-    // The pass is for the agent plugged in now, never another (ADR-0301); a pass for any other agent is no pass.
+    // The pass is for the agent plugged in now, never another (ADR-0305); a pass for any other agent is no pass.
     if(typeof claims.agent!=='string'||!agentName.test(claims.agent)||claims.agent!==activeAgent)throw Error();
-    // The one-time key it is (ADR-0301): its id, its person and its kind. Storage and the broker check its row is open.
+    // The one-time key it is (ADR-0305): its id, its person and its kind. Storage and the broker check its row is open.
     if(typeof claims.jti!=='string'||!keyIdPattern.test(claims.jti)||!personClaim(claims.person)||!isKeyKind(claims.key_kind))throw Error();
     const person=claims.person,kind=claims.key_kind;
     // An answer pass reads as the asker's private chat, never as the owner: its scope and space are that chat, a private
@@ -186,7 +186,7 @@ function verifiedReader(req:IncomingMessage,secret:string,now:number,missed:()=>
     if(claims.reads!==undefined||claims.member_chat!==undefined||claims.memberChat!==undefined||claims.memberRead!==undefined||
       claims.machine_reads!==undefined||claims.machineReads!==undefined)throw Error();
     // The key's person fits the pass: a member's own chat is that member's, a lane is its member's, and the owner's
-    // chat, an answer and an ask are the owner's. Its kind fits the pass's purpose (ADR-0301).
+    // chat, an answer and an ask are the owner's. Its kind fits the pass's purpose (ADR-0305).
     // The claims are checked above, so each present one is a string.
     const bound=boundReader({...('answer' in claims?{answer:String(claims.answer)}:{}),...('member' in claims?{member:String(claims.member)}:{}),
       ...('member_read' in claims?{memberRead:String(claims.member_read)}:{})});

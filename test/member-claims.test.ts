@@ -27,13 +27,13 @@ const secret='synthetic-service-token-only-for-tests',event='e'.repeat(64),later
 const member='d'.repeat(64),ask='c'.repeat(32),answer='a'.repeat(32);
 const request=(token:string)=>({headers:{authorization:'Bearer '+token}}) as unknown as IncomingMessage;
 const signed=(prefix:'turn'|'scope',claims:Record<string,unknown>)=>{
-  // The one-time key a pass is (ADR-0301): its person is the member or lane it names, else the owner, so each refusal
+  // The one-time key a pass is (ADR-0305): its person is the member or lane it names, else the owner, so each refusal
   // below is for the claim it is about.
   const key=prefix==='turn'?{agent:'hermes',person:claims.member??claims.lane??'owner',jti:keyClaims().jti,key_kind:claims.member_read!==undefined?'member_ask':'turn'}:{};
   const body=Buffer.from(JSON.stringify({expires:later(),audience:prefix==='turn'?'nocheh-assistant':'nocheh-archive',...key,...claims})).toString('base64url');
   return `${prefix}.${body}.${createHmac('sha256',secret).update(body).digest('base64url')}`;
 };
-/** A signed pass for `policy`, keyed for the person it names (ADR-0301). */
+/** A signed pass for `policy`, keyed for the person it names (ADR-0305). */
 const turnToken=(key:string,scope:string|null,expires:number,id:string,policy?:{space:string;revision:number;guard_epoch?:number;member?:string;lane?:string;memberRead?:string})=>
   keyPass(key,scope,expires,id,{...policy,person:policy?.member??policy?.lane??'owner',kind:policy?.memberRead!==undefined?'member_ask':'turn'});
 /** A reader without its key's fields, which differ for every pass. */

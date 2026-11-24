@@ -46,7 +46,7 @@ class TurnProcessTests(unittest.IsolatedAsyncioTestCase):
     def review_body(self,purpose='memory-review',key=None,**changes):
         claims={'scope':None,'space':'42','revision':1,'guard_epoch':1,'generation':'11111111-1111-1111-1111-111111111111',
                 'purpose':purpose,'event_id':'b'*64,'expires':int(time.time()*1000)+600000,'audience':'nocheh-assistant'}
-        # A review's pass is the owner's one-time review key (ADR-0301).
+        # A review's pass is the owner's one-time review key (ADR-0305).
         encoded=base64.urlsafe_b64encode(json.dumps(keyed(claims,**changes)).encode()).decode().rstrip('=')
         signature=base64.urlsafe_b64encode(hmac.new((key or self.secret).encode(),encoded.encode(),hashlib.sha256).digest()).decode().rstrip('=')
         return {'scope':'42','id':'a'*64,'event_id':'b'*64,'content':'synthetic','archive_credential':'turn.'+encoded+'.'+signature}
@@ -163,6 +163,20 @@ class TurnProcessTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(events,['hello']);self.assertEqual(result['state'],'done')
         with self.assertRaisesRegex(RuntimeError,'assistant_process_failed'):
             await self.execute('import sys; sys.stdin.read(); sys.exit(1)')
+    async def test_messages_that_join_the_turn_follow_its_request_on_stdin(self):
+        from .steering import Steering
+        steering=Steering('who');steering.offer('1'*64,'Joined message')
+        source=('import sys,json; request=json.loads(sys.stdin.buffer.readline()); joined=json.loads(sys.stdin.buffer.readline());'
+                ' print(json.dumps({"state":"done","text":"hello","steer":request.get("steer"),"seen":joined["steer"],"joined":[joined["ticket"]]}))')
+        with tempfile.TemporaryDirectory() as folder,patch('services.hermes.assistant_gateway.check_delivery_policy',return_value=True):
+            original=asyncio.create_subprocess_exec
+            async def spawn(*args,**kwargs):return await original(sys.executable,'-c',source,**kwargs)
+            with patch('services.hermes.turn_process.asyncio.create_subprocess_exec',spawn):
+                result=await _run_process(Path(folder),Scope('-10','42',False,'group'),{'event_id':'event','archive_credential':'scoped','text':'original','channel':'telegram'},
+                    'model',SimpleNamespace(runtime=lambda:{'api_key':'ephemeral','base_url':'https://gateway.example.test/v1','provider':'openai','api_mode':'chat_completions'}),
+                    'session',None,None,steering=steering)
+        self.assertEqual((result['steer'],result['seen'],result['joined']),(True,'Joined message',['1'*64]))
+        self.assertIsNone(steering.write,'nothing more goes to a turn that ended')
     async def test_a_failed_turn_counts_the_providers_exact_error_and_keeps_it_out_of_the_result(self):
         with patch('services.hermes.usage.record') as record:
             result,_=await self.execute('import sys,json; sys.stdin.read(); print(json.dumps({"state":"failed","error_code":"assistant_runtime_unavailable",'
@@ -495,7 +509,7 @@ class TurnProcessTests(unittest.IsolatedAsyncioTestCase):
         # its signature part are refused before any profile is touched.
         ordinary=self.review_body('assistant');other=self.review_body();other['event_id']='c'*64
         unsigned=self.review_body();unsigned['archive_credential']=unsigned['archive_credential'].rsplit('.',1)[0]
-        # Its pass is a review key, the owner's, for this agent (ADR-0301).
+        # Its pass is a review key, the owner's, for this agent (ADR-0305).
         keys=[self.review_body(key_kind=kind) for kind in ('turn','filter')]+[self.review_body(**change) for change in
               ({'jti':None},{'person':'d'*64},{'agent':'another-agent'},{'key_kind':None})]
         with patch('services.hermes.review_worker.prepare_profile',side_effect=AssertionError('must not touch a profile')):

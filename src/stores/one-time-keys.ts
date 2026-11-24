@@ -4,7 +4,7 @@ import {keyIdPattern,keyKinds,personClaim,type KeyKind,type Reader} from '../acc
 import {HttpError} from '../http.js';
 
 /**
- * One-time keys (ADR-0301): every pass Nocheh mints is one key for one reply or run, kept here by its id (jti). The row
+ * One-time keys (ADR-0305): every pass Nocheh mints is one key for one reply or run, kept here by its id (jti). The row
  * names the key's person, its agent, what it answers (its kind, subject and attempt) and the event its pass names; a pass
  * whose row is missing, does not match it, is closed or has expired reaches nothing. A pass signed again for the same
  * reply (a presence renewal, the delivery) carries the same jti, so closing the row ends every copy of it at once.

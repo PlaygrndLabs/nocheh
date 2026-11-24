@@ -192,7 +192,7 @@ export class ControlledActionRepository {
       const left=outward&&source.store==='archive'?await freeReadsLeft(db,source.id):null;
       // A repeat of the same request keeps the summary it was first asked with, so its card never changes.
       // A member's request keeps their account, so the claim checks them again before it runs (step 3).
-      // The asking key's person and agent are kept too (ADR-0301): its claim and its follow-up are for them.
+      // The asking key's person and agent are kept too (ADR-0305): its claim and its follow-up are for them.
       await db.query(`INSERT INTO controlled_actions(id,event_id,source_reference,proposal_reference,binding,guard_revision,scope,space_id,profile,logical_profile,kind,fingerprint,arguments_hash,job_id,match_key,summary_reference,asker_account,person,agent)
         VALUES($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16,$17,$18,$19) ON CONFLICT DO NOTHING`,
         [id,source.id,source,proposal,binding,representation.revision,turn.scope,principal.space,turn.profile,turn.logical_profile,body.kind,fingerprint,digest(canonical(args)),turn.job??null,

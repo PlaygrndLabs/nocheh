@@ -34,7 +34,7 @@ REPO=Path(__file__).resolve().parents[2]
 
 
 def credential(chat,event,topic=None,secret=SECRET,kind=None):
-    # Every pass is a one-time key (ADR-0301): its id, person, kind and agent.
+    # Every pass is a one-time key (ADR-0305): its id, person, kind and agent.
     claims=keyed({'scope':chat,'event_id':event,'expires':time.time()*1000+600000,'audience':'nocheh-assistant',
                   **({'space':chat+'/topic/'+str(topic),'revision':1} if topic else {})},kind)
     body=base64.urlsafe_b64encode(canonical(claims)).decode().rstrip('=')
@@ -76,7 +76,7 @@ class AgentTurnTests(unittest.TestCase):
         return agent
 
     def replying(self,text='Synthetic answer',session='nocheh-synthetic',**extra):
-        async def turn(root,scope,body,model,credentials,cancelled=None):
+        async def turn(root,scope,body,model,credentials,cancelled=None,steering=None):
             self.calls.append((scope,body['attempt'],model,credentials))
             return {'state':'done','text':text,'session_id':session,**extra}
         return turn
@@ -161,7 +161,7 @@ class AgentTurnTests(unittest.TestCase):
         self.assertEqual(restarted.resume(observe(body))['state'],'queued')
         time.sleep(.05);self.assertEqual(self.calls,[],'observation cannot launch a queued turn')
         resumed={key:value for key,value in observe(body).items() if key!='observe_only'}
-        # The request on disk holds no pass (ADR-0301): a resume that would launch brings a fresh one, or launches nothing.
+        # The request on disk holds no pass (ADR-0305): a resume that would launch brings a fresh one, or launches nothing.
         self.assertNotIn('archive_credential',json.loads((self.folder/(identity(body)+'.request')).read_bytes()))
         with self.assertRaisesRegex(ValueError,'archive_credential_required'):restarted.resume(resumed)
         time.sleep(.05);self.assertEqual(self.calls,[],'a resume without a fresh pass launches nothing')
@@ -170,7 +170,7 @@ class AgentTurnTests(unittest.TestCase):
 
     def test_cancel_stops_a_running_turn_withdraws_a_late_answer_and_skips_a_queued_one(self):
         entered=threading.Event();answer=['cancelled']
-        async def turn(root,scope,body,model,credentials,cancelled=None):
+        async def turn(root,scope,body,model,credentials,cancelled=None,steering=None):
             entered.set()
             while not cancelled.is_set():await asyncio.sleep(.005)
             return {'state':answer[0],'text':'Withdrawn synthetic answer','session_id':'nocheh-synthetic'}
@@ -184,7 +184,7 @@ class AgentTurnTests(unittest.TestCase):
                 self.assertEqual(agent.cancel(body)['state'],'cancelled')
         self.content_free('Withdrawn',kept=('.request',))
         gate=threading.Event();started=[]
-        async def ordered(root,scope,body,model,credentials,cancelled=None):
+        async def ordered(root,scope,body,model,credentials,cancelled=None,steering=None):
             started.append(body['text'])
             while body['text']=='first' and not gate.is_set():await asyncio.sleep(.005)
             return {'state':'done','text':'Reply to '+body['text'],'session_id':'nocheh-synthetic'}
@@ -199,7 +199,7 @@ class AgentTurnTests(unittest.TestCase):
     def test_a_shutdown_is_not_a_cancel(self):
         # Nocheh never retries a cancelled turn, so a stop leaves unfinished turns to the restart.
         gate=threading.Event();started=[]
-        async def turn(root,scope,body,model,credentials,cancelled=None):
+        async def turn(root,scope,body,model,credentials,cancelled=None,steering=None):
             started.append(body['text'])
             while not cancelled.is_set() and not (body['text']=='quick' and gate.is_set()):await asyncio.sleep(.005)
             return {'state':'cancelled' if cancelled.is_set() else 'done','text':'Reply to '+body['text'],'session_id':'nocheh-synthetic'}
@@ -224,7 +224,7 @@ class AgentTurnTests(unittest.TestCase):
 
     def test_one_conversation_keeps_its_order_and_capacity_bounds_the_rest(self):
         names=('slow','later','other','topic','held','third');gates={name:threading.Event() for name in names};started=[]
-        async def turn(root,scope,body,model,credentials,cancelled=None):
+        async def turn(root,scope,body,model,credentials,cancelled=None,steering=None):
             text=body['text'];started.append(text)
             while not gates[text].is_set():await asyncio.sleep(.005)
             return {'state':'done','text':'Reply to '+text,'session_id':'nocheh-'+text}
@@ -252,7 +252,7 @@ class AgentTurnTests(unittest.TestCase):
         self.assertEqual(agent.lanes,{},'idle chats leave no lane behind')
 
     def recording(self,started):
-        async def turn(root,scope,body,model,credentials,cancelled=None):
+        async def turn(root,scope,body,model,credentials,cancelled=None,steering=None):
             started.append(body['text'])
             return {'state':'done','text':'Reply to '+body['text'],'session_id':'nocheh-synthetic'}
         return turn
@@ -339,7 +339,7 @@ class AgentTurnTests(unittest.TestCase):
         self.assertEqual(agent.lanes,{},'idle chats leave no lane behind')
 
     def test_a_turn_runs_only_with_a_one_time_key_of_its_own_kind(self):
-        # ADR-0301: a message's turn takes a turn key, a follow-up a follow_up key, for this agent; nothing else runs.
+        # ADR-0305: a message's turn takes a turn key, a follow-up a follow_up key, for this agent; nothing else runs.
         agent=self.agent(self.replying());attempt='c1-'+LEADER[:40]
         for update,changes,kind,extra in ((51,{},'follow_up',{}),(52,{'attempt':attempt,'continuation':LEADER},'turn',{}),(53,{},'turn',{'agent':'another-agent'}),
                                           (54,{},'turn',{'jti':None}),(55,{},'turn',{'person':None}),(56,{},'turn',{})):
@@ -391,7 +391,7 @@ class AgentTurnTests(unittest.TestCase):
                ({'state':'failed'},{'state':'failed','error_code':'model_unavailable'}),
                ({'state':'failed','error_code':'space_policy_changed'},{'state':'failed','error_code':'space_policy_changed'}),
                (RuntimeError('private provider response'),{'state':'failed','error_code':'assistant_runtime_unavailable','error_type':'RuntimeError','error_stage':'turn'})]
-        async def turn(root,scope,body,model,credentials,cancelled=None):
+        async def turn(root,scope,body,model,credentials,cancelled=None,steering=None):
             value=cases[int(body['text'])][0]
             if isinstance(value,Exception):raise value
             return value
@@ -412,6 +412,67 @@ class AgentTurnTests(unittest.TestCase):
         self.assertFalse((self.folder/(state['run_id']+'.outcome')).exists())
         self.assertEqual(self.calls,[])
         self.content_free('private',kept=('.request',))
+
+    def working(self,gate,read=True,state='done'):
+        """A turn that works until its gate opens and reads every message that joined it meanwhile, unless told not to."""
+        offered=[]
+        async def turn(root,scope,body,model,credentials,cancelled=None,steering=None):
+            self.calls.append(body['text'])
+            while not gate.is_set():await asyncio.sleep(.005)
+            if steering is not None:offered.append([json.loads(line) for line in steering.waiting])
+            joined=[value['ticket'] for value in offered[-1]] if steering is not None and read else []
+            return {'state':state,'text':'Reply to '+body['text'],'session_id':'nocheh-synthetic','joined':joined}
+        return turn,offered
+
+    def joined(self,agent,body):
+        state=self.wait(agent,body)
+        self.assertEqual((state['state'],state.get('error_code')),('suppressed','joined_turn'));self.assertNotIn('reply',state)
+
+    def test_messages_sent_while_the_agent_works_join_its_turn(self):
+        gate=threading.Event();turn,offered=self.working(gate);agent=self.agent(turn)
+        first,second,third=turn_body(1,'-20','first'),turn_body(2,'-20','second'),turn_body(3,'-20','third')
+        agent.start(first);self.until(lambda:self.calls==['first'])
+        agent.start(second);agent.start(third);time.sleep(.05)
+        gate.set()
+        self.assertEqual(self.wait(agent,first)['reply']['text'],'Reply to first')
+        for body in (second,third):self.joined(agent,body)
+        self.assertEqual(self.calls,['first'],'a joined message runs no turn of its own')
+        self.assertEqual([value['ticket'] for value in offered[0]],[identity(second),identity(third)],'they join in the order they came')
+        # The agent reads a joined message as it reads a turn's message, with its archive source.
+        self.assertTrue(offered[0][0]['steer'].startswith('second'))
+        self.assertIn('[Archive source: nocheh:event:'+second['event_id']+']',offered[0][0]['steer'])
+        self.assertEqual((agent.lanes,agent.steering,agent.offers),({},{},{}),'nothing is left behind')
+
+    def test_a_message_the_agent_did_not_read_gets_its_own_turn_right_after(self):
+        gate=threading.Event();turn,offered=self.working(gate,read=False);agent=self.agent(turn)
+        first,second=turn_body(1,'-20','first'),turn_body(2,'-20','second')
+        agent.start(first);self.until(lambda:self.calls==['first']);agent.start(second);time.sleep(.05)
+        gate.set()
+        for body in (first,second):self.assertEqual(self.wait(agent,body)['reply']['text'],'Reply to '+body['text'])
+        self.assertEqual(self.calls,['first','second'])
+
+    def test_a_turn_that_fails_answers_none_of_the_messages_that_joined_it(self):
+        gate=threading.Event();turn,offered=self.working(gate,state='failed');agent=self.agent(turn)
+        first,second=turn_body(1,'-20','first'),turn_body(2,'-20','second')
+        agent.start(first);self.until(lambda:self.calls==['first']);agent.start(second);time.sleep(.05)
+        gate.set()
+        self.assertEqual(self.wait(agent,first)['state'],'failed');self.until(lambda:len(self.calls)==2)
+        self.assertEqual(self.calls,['first','second'],'the message that joined runs on its own')
+
+    def test_only_the_same_persons_plain_message_joins_and_replies_keep_their_order(self):
+        gate=threading.Event();turn,offered=self.working(gate);agent=self.agent(turn)
+        first=turn_body(1,'-20','first')
+        other=turn_body(2,'-20','other');other['payload']['message']['from']['id']=789
+        photo=turn_body(3,'-20','photo',files=[{'kind':'image','name':'photo.jpg','sha256':'f'*64}])
+        later=turn_body(4,'-20','later')
+        elsewhere=turn_body(5,'-20','elsewhere',topic=7)
+        agent.start(first);self.until(lambda:self.calls==['first'])
+        for body in (other,photo,later,elsewhere):agent.start(body)
+        self.until(lambda:'elsewhere' in self.calls);time.sleep(.05)
+        gate.set()
+        for body in (first,other,photo,later,elsewhere):self.assertEqual(self.wait(agent,body)['state'],'done')
+        self.assertEqual(offered[0],[],'another person, a photo, and anything after one of them never join')
+        self.assertEqual(self.calls,['first','elsewhere','other','photo','later'])
 
     def test_a_pass_is_read_by_its_claims_not_its_signature(self):
         # Hermes does not check the signature: Nocheh's own services check the signature on every call the pass makes. A pass

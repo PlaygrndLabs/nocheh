@@ -53,7 +53,7 @@ test('owner HTTP manages versions, provenance, corrections, project assignments 
     const value=await response.json() as any;assert.equal(response.status,status,JSON.stringify(value));return value;
   };
   try {
-    // A reply's open one-time key (ADR-0301): it reaches no owner route.
+    // A reply's open one-time key (ADR-0305): it reaches no owner route.
     const scopedPass=await openKey(stores.control,keyPass(token,'123',Date.now()+60000));
     const unauthorized=await fetch(base+'/v1/projects',{method:'POST',body:'not json',headers:{authorization:'Bearer '+scopedPass}});
     assert.equal(unauthorized.status,403,'owner authority is checked before body parsing');

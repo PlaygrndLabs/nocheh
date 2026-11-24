@@ -96,12 +96,12 @@ test('Telegram workflow dispatch uses current prepared derivatives and durable s
     await services.turns.binding(reader({headers:{authorization:'Bearer '+String(input.archive_credential)}} as any,token));
     if(mode==='absent'){mode='done';throw Error('request lost before native admission');}
     const prior=native.get(id);assert.ok(!prior||['queued','failed','ambiguous'].includes(prior.state),'only a failed or lost attempt may launch a fresh execution');
-    const state=['running','queued','suppressed','failed','ambiguous'].includes(mode)?mode:'done';native.set(id,{state});
+    const state=mode==='joined'?'suppressed':['running','queued','suppressed','failed','ambiguous'].includes(mode)?mode:'done';native.set(id,{state});
     if(mode==='lost_ack'){mode='done';throw Error('native result acknowledgement lost');}
     // The agent times its own turn; the bot adds the send.
     const now=Date.now()-50,timing=state!=='done'?{}:{timings:timingShape==='valid'?{conversation:{ms:30,calls:1}}:{conversation:{ms:30,calls:1,text:'private'}},
       window:{queued:now-100,assistant:now-90,finished:now}};
-    return {state,...(state==='failed'?{error_code:'guard_context_changed'}:{}),stage:'assistant',private_output:'not copied into workflow metadata',...timing};
+    return {state,...(state==='failed'?{error_code:'guard_context_changed'}:mode==='joined'?{error_code:'joined_turn'}:{}),stage:'assistant',private_output:'not copied into workflow metadata',...timing};
   };
   const services=fixtureServices({...stores,control},{dataDir:root,detectorVersion:'fixture',serviceToken:token,policy:()=>policy,runtime,telegram,
     transcription:{name:'fixture-asr',version:'2',outputKind:'transcript',async run(bytes){assert.deepEqual(bytes,Buffer.from([79,103,103,0,255]));return 'Selected voice fixture-secret';}},
@@ -140,7 +140,7 @@ test('Telegram workflow dispatch uses current prepared derivatives and durable s
       {chat:group,message:String((generalValue.payload as any).message.message_id),topic:undefined,key:generalValue.key,text:'Fixture reply',session:'fixture-session',notify:false,presence:true,class:'reply'});
     assert.equal(answer.id,digest(general.id+':1'),'one reply id per attempt, shared with its presence');assert.equal(generalSends[0]!.input.id,answer.id);
     assert.equal(reader({headers:{authorization:'Bearer '+answer.archive_credential}} as any,token).space,group,'the send carries a pass for the same conversation');
-    // One key for the attempt (ADR-0301): the agent's and the send's pass carry the same jti, signed for the member who
+    // One key for the attempt (ADR-0305): the agent's and the send's pass carry the same jti, signed for the member who
     // wrote, and the delivered reply closes it for good.
     const agentPass=reader({headers:{authorization:'Bearer '+generalCalls[0]!.input.archive_credential}} as any,token),sendPass=reader({headers:{authorization:'Bearer '+answer.archive_credential}} as any,token);
     assert.equal(sendPass.jti,agentPass.jti);assert.equal(agentPass.keyKind,'turn');assert.match(agentPass.person!,/^[a-f0-9]{64}$/,'a group message is its sender\'s');
@@ -228,6 +228,11 @@ test('Telegram workflow dispatch uses current prepared derivatives and durable s
     assert.deepEqual(sends.filter(item=>item.input.event_id===silent.reference.id).map(item=>item.input.finish??null),[null,'clear'],'no answer clears the working reaction');
     assert.deepEqual((await stores.control.query("SELECT closed_reason FROM one_time_keys WHERE kind='turn' AND subject=$1",[silent.reference.id])).rows,[{closed_reason:'not_delivered'}],
       'a turn that ends without a reply closes its key too');
+    // A message that joined the turn running in its chat is answered by that turn's reply: 👍, no reply of its own (ADR-0301).
+    const joined=await capture('Joined the running turn');await prepare(joined.reference.id);mode='joined';
+    assert.equal((await run(joined.reference.id)).state,'skipped');
+    assert.deepEqual(sends.filter(item=>item.input.event_id===joined.reference.id).map(item=>item.input.finish??null),[null,'answered'],'a joined message gets 👍');
+    assert.deepEqual((await stores.control.query('SELECT state,error_code FROM dispatches WHERE event_id=$1',[joined.reference.id])).rows[0],{state:'suppressed',error_code:'joined_turn'});
     // Only the send can be uncertain: the agent sends nothing, so a turn it lost runs again.
     const lost=await capture('Agent lost the turn');await prepare(lost.reference.id);mode='ambiguous';
     assert.equal((await run(lost.reference.id)).state,'retryable_failed');

@@ -10,7 +10,7 @@ import {ProjectRepository} from './projects.js';
 import {OneTimeKeyRepository} from './one-time-keys.js';
 
 /**
- * The one-time key a pass is (ADR-0301): what it is for (kind), what it answers (subject and attempt: the same reply signed
+ * The one-time key a pass is (ADR-0305): what it is for (kind), what it answers (subject and attempt: the same reply signed
  * again gets the same key), its person ('owner' or a members.id; null when nobody can be named, which refuses the pass)
  * and, for a run made earlier, the agent its row was made for (undefined or null: none recorded).
  */
@@ -45,7 +45,7 @@ export class AudienceRepository {
    * A private chat that is not the owner's gets a pass only as its own member's. `lane` (a member id) is signed on a
    * member's private pass (their own id) and on a group pass a member's message started; never on the owner's, an
    * answer's or an ask's, and a lane that fits none of these is left out, as it grants nothing.
-   * Every pass is a one-time key (ADR-0301): it names `key.person`, who must fit the pass (a member's own chat is that
+   * Every pass is a one-time key (ADR-0305): it names `key.person`, who must fit the pass (a member's own chat is that
    * member's, a lane its member's, the owner's chat, an answer, an ask, a review and a filter the owner's), and the agent
    * plugged in now; its row is written before it is signed. No person, no pass (409 one_time_key_person_required).
    */
@@ -70,7 +70,7 @@ export class AudienceRepository {
     if(member===undefined&&(otherPrivate(principal.scope)||otherPrivate(principal.space)))throw new HttpError(409,memberChatClosed);
     const lane=principal.lane!==undefined&&memberClaimId.test(principal.lane)&&(member!==undefined?principal.lane===member:
       bound===null&&principal.scope!==null&&chats().groupOf(principal.scope)!==null)?principal.lane:undefined;
-    // Whose key it is (ADR-0301): somebody it can be named for, who fits the pass, for the agent plugged in now.
+    // Whose key it is (ADR-0305): somebody it can be named for, who fits the pass, for the agent plugged in now.
     const person=key.person;
     if(person===null)throw new HttpError(409,'one_time_key_person_required');
     const owners=principal.scope===null||bound==='answer'||bound==='memberRead'||principal.purpose==='memory-review'||principal.purpose==='filter';

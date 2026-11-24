@@ -228,6 +228,12 @@ A message hidden from the assistant reads **Hidden from assistant** and is never
 linked
 ([ADR-0261](adr/0261-recalled-facts-and-search-hits-name-their-source.md)).
 
+Long-term memory hides facts in two ways, both off by default. Memory ›
+Long-term memory › **Clean up** has **Hide replaced facts**, built into Honcho,
+and **Hidden facts**, which lists what either way hid, each with **Bring back**.
+Memory › Facts has **Hide unused facts**, Nocheh's own rule
+([ADR-0298](adr/0298-retire-old-facts.md), [ADR-0299](adr/0299-hide-unused-facts.md)).
+
 Memory › Long-term memory has a **Facts it learned** card below **Re-run or
 replace**, which is unchanged and still asks before it runs. A line counts the
 facts, such as “412 exact · 96 learned with other messages · 7 none”: exact

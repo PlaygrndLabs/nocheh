@@ -52,7 +52,7 @@ ALTER TABLE controlled_actions ADD COLUMN IF NOT EXISTS free_read text CHECK(fre
 CREATE INDEX IF NOT EXISTS controlled_action_free_reads ON controlled_actions(event_id) WHERE free_read IS NOT NULL;
 -- Why "Do what I ask" left a command to its card: what reached the turn besides the owner's typed words (ADR-0293).
 ALTER TABLE controlled_actions ADD COLUMN IF NOT EXISTS outside_reads text[];
--- Who asked through which agent, from the asking turn's one-time key (ADR-0301); null on a row Nocheh made without one.
+-- Who asked through which agent, from the asking turn's one-time key (ADR-0305); null on a row Nocheh made without one.
 ALTER TABLE controlled_actions ADD COLUMN IF NOT EXISTS person text CHECK(person IS NULL OR person='owner' OR person ~ '^[a-f0-9]{64}$');
 ALTER TABLE controlled_actions ADD COLUMN IF NOT EXISTS agent text CHECK(agent IS NULL OR agent ~ '^[a-z][a-z0-9-]{0,31}$');
 -- Page reads that ended unclear before reads closed themselves.

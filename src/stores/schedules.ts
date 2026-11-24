@@ -53,7 +53,7 @@ ALTER TABLE managed_runs ADD COLUMN IF NOT EXISTS scheduled_for timestamptz;
 ALTER TABLE managed_runs ADD COLUMN IF NOT EXISTS fired_by text;
 -- The id of Nocheh's latest message about a schedule set by asking, which a press on it edits (ADR-0294).
 ALTER TABLE workflow_schedules ADD COLUMN IF NOT EXISTS notice_id text;
--- The agent whose turn first set the schedule (ADR-0301); its person is created_by. Each fire's run is made for both.
+-- The agent whose turn first set the schedule (ADR-0305); its person is created_by. Each fire's run is made for both.
 ALTER TABLE workflow_schedules ADD COLUMN IF NOT EXISTS agent text CHECK(agent IS NULL OR agent ~ '^[a-z][a-z0-9-]{0,31}$');
 `;
 const identity=(value:unknown)=>{const id=string(value,128);if(!/^[a-zA-Z0-9_-]+$/.test(id))throw new HttpError(400,'invalid_schedule_identity');return id;};
@@ -70,14 +70,15 @@ const grantId=(kind:'edit'|'run_now',schedule:string,request:string)=>digest(can
 const bodyHash=(document:Record<string,unknown>)=>{const {enabled:_on,removed:_gone,execution_version:_version,...body}=document;return digest(canonical(body));};
 const LOGICAL=/^nocheh-[a-f0-9]{24}$/;
 /** Who a turn sets schedules as: the member in their own chat, else the owner. */
-/** Reads that never hold a schedule (ADR-0294): the asker's own archive or task lookups, and an unreported conversation. */
-const SCHEDULE_IGNORES=new Set<OutsideRead>(['archive','unchecked']);
+/** Reads that never hold a schedule (ADR-0294): only an unreported conversation. An archive search holds one, since it
+ * returns other people's messages too (owner's choice, 2026-11-24). */
+const SCHEDULE_IGNORES=new Set<OutsideRead>(['unchecked']);
 const turnPerson=(principal:Reader)=>boundReader(principal)==='member'?principal.member??null:'owner';
 
 /** Who set a definition version: a person's live turn, a person's press (edit grant), or Hermes's own checkpoint. */
 export type ScheduleSetBy={via:'turn';person:string;turn:string}|{via:'edit';person:string;request_id:string}|{via:'checkpoint'};
 export interface ScheduleAuthorization {set_by:ScheduleSetBy;created_by?:string;created_turn?:string;
-  /** The agent the setting turn's key named (ADR-0301), kept with created_by. */
+  /** The agent the setting turn's key named (ADR-0305), kept with created_by. */
   agent?:string}
 /** Decides inside the definition's transaction whether this change may be recorded; `version` is null for the read-only
  *  check before any derived records are written, so nothing is consumed then. */
@@ -93,7 +94,7 @@ export class ScheduleRepository {
     readonly detect:(text:string)=>Promise<unknown>){}
   private get control(){return this.access.stores.control;}
   private get guards(){return this.access.guards;}
-  /** The member whose own open private chat `scope` is, or null (ADR-0301: who a schedule there is for). */
+  /** The member whose own open private chat `scope` is, or null (ADR-0305: who a schedule there is for). */
   private async chatMember(scope:string):Promise<string|null> {
     return (await memberReads(this.control,scope,ownerChat(this.access.policy())))?.member??null;
   }
@@ -233,7 +234,7 @@ export class ScheduleRepository {
           revision=revision+1,updated_at=now() WHERE channel='scheduler' AND logical_profile=$1 AND job_id=$2 AND state IN ('captured','running')`,[profile,job]);
         await db.query(`UPDATE runtime_turns SET state='closed',closed_at=now() WHERE id IN
           (SELECT event_id FROM managed_runs WHERE channel='scheduler' AND logical_profile=$1 AND job_id=$2) AND state='open'`,[profile,job]);
-        // Their one-time keys close with them (ADR-0301).
+        // Their one-time keys close with them (ADR-0305).
         await db.query(`UPDATE one_time_keys SET closed_at=now(),closed_reason='schedule_changed' WHERE kind='scheduled' AND closed_at IS NULL AND event_id IN
           (SELECT event_id FROM managed_runs WHERE channel='scheduler' AND logical_profile=$1 AND job_id=$2)`,[profile,job]);
       }
@@ -277,7 +278,7 @@ export class ScheduleRepository {
     if(schedule.kind==='cron'&&!parseCron(schedule.expr))throw new HttpError(400,'schedule_cron_unsupported');
     // What outside content reached this turn so far, and the instruction the schedule ran with before it (ADR-0294). The
     // asker's own typed words are theirs, the owner's or a member's in their own chat, whose chat id is their account's.
-    // Their own archive and task lookups and a runtime that never reported its conversation do not hold a schedule.
+    // A runtime that never reported its conversation does not hold a schedule; an archive search does.
     const asker=grant.person==='owner'?s.access.policy().owner_id:grant.scope;
     const reads=(await outsideReads(this.control,s.stores.archive,turn,asker)).filter(read=>!SCHEDULE_IGNORES.has(read));
     const before=(await this.control.query(currentSql,[scheduleId(grant.profile,identity(body.job_id))])).rows[0];
@@ -363,7 +364,7 @@ export class ScheduleRepository {
       const firedBy=await this.fireGrant(db,current,{reason,scheduled:Date.parse(scheduled),epoch:Number(body.owner_epoch),request_id:pressed,event:operation.id});
       const prompt=current.prompt_reference as DerivativeReference;
       if(binding.mode==='on')await this.guards.read('derived_artifacts:'+prompt.id,binding);
-      // Who the run is for (ADR-0301): the schedule's creator; one with none recorded, the owner in the owner's chat and
+      // Who the run is for (ADR-0305): the schedule's creator; one with none recorded, the owner in the owner's chat and
       // the member in their own chat. Anywhere else nobody can be named, and the fire is refused before it is recorded.
       const person=current.created_by??(scope===ownerChat(this.access.policy())?'owner':await this.chatMember(scope));
       if(!person)throw new HttpError(409,'one_time_key_person_required');

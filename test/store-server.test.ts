@@ -96,7 +96,7 @@ test('separated application captures through control outages, exposes owner repo
     await request('/v1/chat-sends?limit=101',undefined,400);
     const runtimeStatus=await request('/v1/runtime');
     assert.equal(runtimeStatus.status.telegram,'connected');assert.equal(runtimeStatus.agent.id,'hermes');assert.equal(runtimeStatus.agent.capabilities.persona,true);
-    // A signed pass whose one-time key was never minted reaches nothing (ADR-0301).
+    // A signed pass whose one-time key was never minted reaches nothing (ADR-0305).
     await request('/v1/runtime',undefined,401,keyPass(token,'123',Date.now()+60000));
     const persona={action:'persona',scope:'default',role:'Fixture role',skills:[],revision:'r1'};
     assert.deepEqual(await request('/v1/agent/manage',persona),{operation:'persona.write',input:{scope:'default',role:'Fixture role',skills:[],revision:'r1'}});
@@ -126,7 +126,7 @@ test('separated application captures through control outages, exposes owner repo
     controlDown=true;archiveDown=true;
     await request('/health',undefined,503);
     await request('/v1/status',undefined,503);
-    // A pass never ingests; while the control store is down its key cannot even be looked up, so it fails closed (ADR-0301).
+    // A pass never ingests; while the control store is down its key cannot even be looked up, so it fails closed (ADR-0305).
     await request('/v1/ingest',event,503,keyPass(token,'123',Date.now()+60000));
     const accepted=await request('/v1/ingest',event,202);assert.equal(accepted.state,'spooled');
     // The dashboard chat page is off until Nocheh has its own chat page: browser input is refused even with the service
@@ -165,7 +165,7 @@ test('separated application captures through control outages, exposes owner repo
     const mismatched=await services.prepared.audience.turn(token,{scope:'-42',space:'-42'},digest(key),Date.now()+60000,turnKey('group'));
     assert.equal((await request('/v1/memory/check',undefined,200,mismatched)).valid,false);
     await request('/v1/status',undefined,403,credential);
-    // A reply's key reaches the turn's routes only, never the owner's dashboard (ADR-0301).
+    // A reply's key reaches the turn's routes only, never the owner's dashboard (ADR-0305).
     assert.equal((await request('/v1/runtime',undefined,403,credential)).error,'one_time_key_route_denied');
     await request('/v1/chat-sends',undefined,403,credential);
     assert.equal((await request('/v1/events/'+digest(key),undefined,200,credential)).event.text,event.text);

@@ -106,7 +106,7 @@ export class ControlledExecutionRepository {
         if(error.code==='guard_transition_pending'){await db.query('COMMIT');return {claimed:false};}
         const result=await this.blocked(db,row,error.code);await db.query('COMMIT');this.closed(row.id);return result;
       }
-      // An operation asked through another agent than the one plugged in now never runs (ADR-0301).
+      // An operation asked through another agent than the one plugged in now never runs (ADR-0305).
       if(row.agent&&row.agent!==activeAgent){const result=await this.blocked(db,row,'one_time_key_agent_changed');await db.query('COMMIT');this.closed(row.id);return result;}
       // Turning a tool off for a chat or topic stops what was asked there and has not run yet, approved or not. It is
       // the chat's switch, also for a job's or a scheduled task's operation; a Notion call is an outside tool call.
