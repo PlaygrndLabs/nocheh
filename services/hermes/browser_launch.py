@@ -17,16 +17,14 @@ def launch(admin, resume=None, sidecar_url=None, profile=None, active_session_fi
     if workspace.is_symlink(): raise ValueError('workspace_path_denied')
     workspace.mkdir(exist_ok=True,mode=0o700)
     if resume:
-        from hermes_state import SessionDB
+        from . import native_store
         from .isolated_profile import database_path
         # Explicit resume IDs are verified by the authenticated WS boundary.
         # A keep-alive channel may still point at an unpersisted native draft.
         if not database_path(home).exists(): resume=None
         else:
-            db=SessionDB(database_path(home),read_only=True)
-            try:
-                if not db.get_session(resume): resume=None
-            finally: db.close()
+            with native_store.reader(home) as db:
+                if not native_store.session_row(db, resume): resume=None
     env = {key:os.environ[key] for key in ('LANG','LC_ALL','LD_LIBRARY_PATH','SERVICE_TOKEN',
         'ARCHIVE_URL','GUARD_URL','GUARD_MODE',
         'NOCHEH_SECURITY_RUNTIME','NOCHEH_MEMORY_CONTEXT','NOCHEH_REPLY_ROUTE_URL','NOCHEH_GUARD_ROUTE_URL','NOCHEH_INSTALLATION_FIXTURE','NOCHEH_STORAGE_LAYOUT') if key in os.environ}

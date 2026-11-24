@@ -80,7 +80,6 @@ def recallable(profile, value, allowed):
 
 
 def recall(root, body, retirements=None):
-    from hermes_state import SessionDB
     query = body.get('query', '')
     if not isinstance(query, str) or not 0 < len(query) <= 2000:
         raise ValueError('invalid_recall_query')
@@ -149,20 +148,19 @@ def recall(root, body, retirements=None):
                                  'text': line[:8000], 'citations': re.findall(r'nocheh:event:[a-f0-9]{64}', line),
                                  'note': note_sources.note(records, target, entry)})
         if database.is_file():
-            db = SessionDB(database, read_only=True)
-            try:
+            from .native_store import reader
+            with reader(profile) as store:
                 # Hermes returns no row's content, only a snippet of the hit's own row; its `context` would add the
                 # rows before and after without their ids, so a neighbour the skip below misses could be read
                 # through it. It is never asked for (ADR-0261).
-                for row in db.search_messages(query, limit=limit, fields=SESSION_FIELDS):
-                    if row.get('id') in withheld: continue
+                for row in store.search.search_messages(query, limit=limit, fields=SESSION_FIELDS):
+                    if row.message_id in withheld: continue
                     # Who wrote the row: the person, Nocheh, or a tool, which storage puts in words.
-                    role, snippet = row.get('role'), row.get('snippet') if isinstance(row.get('snippet'), str) else ''
+                    role, snippet = row.role, row.snippet if isinstance(row.snippet, str) else ''
                     hits.append({'profile': profile.name, **where, 'kind': 'native_session',
-                                 'session': row.get('session_id'), 'text': around_match(snippet), **sent_at(row.get('timestamp')),
+                                 'session': row.session_id, 'text': around_match(snippet), **sent_at(row.timestamp),
                                  'citations': re.findall(r'nocheh:event:[a-f0-9]{64}', snippet),
                                  'role': role if role in ('user', 'assistant', 'tool', 'system') else None})
-            finally: db.close()
     # A per-profile query can refine a truncated global search without exposing paths.
     return {'hits': hits[:limit], 'truncated': len(hits) > limit,
             'next_profile': profiles[99].name if len(profiles) > 100 else None}

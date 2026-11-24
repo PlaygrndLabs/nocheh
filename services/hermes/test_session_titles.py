@@ -7,9 +7,8 @@ class SessionTitleTests(unittest.TestCase):
     """A Telegram session is listed under its chat's name instead of its first message."""
 
     def setUp(self):
-        try:from hermes_state import SessionDB
+        try:import persistence_assembly  # noqa: F401
         except ImportError:self.skipTest('pinned Hermes runtime required')
-        self.SessionDB=SessionDB
         self.folder=tempfile.TemporaryDirectory();self.profile=Path(self.folder.name)
         (self.profile/'native-state').mkdir()
 
@@ -17,19 +16,18 @@ class SessionTitleTests(unittest.TestCase):
         self.folder.cleanup()
 
     def session(self,session_id,title=None):
-        from .isolated_profile import database_path
-        db=self.SessionDB(database_path(self.profile))
-        try:
-            db.create_session(session_id,source='telegram')
-            db.append_message(session_id,role='user',content='Hi [Archive source: nocheh:event:'+'a'*64+']')
-            if title:db.set_session_title(session_id,title)
-        finally:db.close()
+        from .native_store import writer
+        from .store_fixture import add_message, add_session
+        with writer(self.profile) as db:
+            add_session(db,session_id)
+            add_message(db,session_id,'user','Hi [Archive source: nocheh:event:'+'a'*64+']')
+            if title:db.sessions.set_title(session_id,title)
 
     def title(self,session_id):
-        from .isolated_profile import database_path
-        db=self.SessionDB(database_path(self.profile),read_only=True)
-        try:return db.get_session_title(session_id)
-        finally:db.close()
+        from .native_store import reader
+        with reader(self.profile) as db:
+            record=db.sessions.get(session_id)
+            return None if record is None else record.title
 
     def test_names_follow_the_chat_and_its_topic(self):
         from .assistant_gateway import session_title
@@ -63,29 +61,26 @@ class SessionTitleTests(unittest.TestCase):
 
     def test_a_first_message_title_gives_way_to_the_chat_name(self):
         from .assistant_gateway import title_session
-        from .isolated_profile import database_path
+        from persistence.conversation.sessions import TitleSource
+        from .native_store import writer
         self.session('nocheh-earlier')
-        db=self.SessionDB(database_path(self.profile))
-        try:db.set_auto_title('nocheh-earlier','Hi [Archive source: nocheh:event:aaaa',source=self.SessionDB.TITLE_SOURCE_DERIVED)
-        finally:db.close()
+        with writer(self.profile) as db:db.sessions.set_auto_title('nocheh-earlier','Hi [Archive source: nocheh:event:aaaa',source=TitleSource.DERIVED)
         title_session(self.profile,'nocheh-earlier',{'chat':{'id':42,'type':'private'}},True)
         self.assertEqual(self.title('nocheh-earlier'),'Private chat')
 
     def test_hermes_leaves_a_telegram_session_for_its_chat_name(self):
         from agent import turn_context
         from .assistant_turn import untitled_telegram
-        from .isolated_profile import database_path
+        from .native_store import writer
         original=turn_context._UNTITLED_PLATFORMS
         self.addCleanup(setattr,turn_context,'_UNTITLED_PLATFORMS',original)
         untitled_telegram();untitled_telegram()
         self.assertEqual(turn_context._UNTITLED_PLATFORMS,original|{'telegram'},'browser and job sessions keep Hermes titles')
         self.session('nocheh-turn')
-        db=self.SessionDB(database_path(self.profile))
-        try:
-            agent=type('Agent',(),{'_session_db':db,'session_id':'nocheh-turn','platform':'telegram','_session_db_created':True})()
+        with writer(self.profile) as db:
+            agent=type('Agent',(),{'_session_db':db,'persistence':db,'session_id':'nocheh-turn','platform':'telegram','_session_db_created':True})()
             turn_context._maybe_title_session_at_turn_start(agent,[{'role':'user','content':'Hi there'}])
-            self.assertIsNone(db.get_session_title('nocheh-turn'))
-        finally:db.close()
+        self.assertIsNone(self.title('nocheh-turn'))
 
 
 if __name__=='__main__':
