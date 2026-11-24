@@ -25,6 +25,22 @@ def bind_worker(manager,parse):
         finally: WORKSPACE.reset(token)
     manager.process_work_unit=run
 
+# Honcho runs a gate-bypassing dream after every copy into a named scope (a memory wall) and a card refresh after a
+# removal. Nocheh copies into walls often, and peer cards are off, so those dreams only add cost and crowd the learning
+# queue. A wall still dreams on Honcho's normal timing, like every other memory (ADR-0298).
+SKIPPED_DREAM_TRIGGERS=frozenset({'scope_backfill','scope_removal'})
+
+def skipped_dream(payload):
+    return getattr(payload,'trigger_reason',None) in SKIPPED_DREAM_TRIGGERS or str(getattr(getattr(payload,'dream_type',None),'value','')).lower()=='card_refresh'
+
+def bind_dreams(consumer):
+    original=consumer.process_dream
+    @functools.wraps(original)
+    async def run(payload,*args,**kwargs):
+        if skipped_dream(payload): return None
+        return await original(payload,*args,**kwargs)
+    consumer.process_dream=run
+
 # The gateway's bounds on one embeddings request (meter.validate): inputs, and their UTF-8 bytes. The gateway checks
 # again after the archive prepares the texts, which can mask a few characters longer, so a part leaves some room.
 EMBEDDING_INPUTS,EMBEDDING_BYTES=100,131072

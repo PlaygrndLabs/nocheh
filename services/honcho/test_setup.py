@@ -90,6 +90,21 @@ class HonchoSetupTests(unittest.TestCase):
                 honcho_setup.initialize(state)
                 self.assertEqual(read_env(path)['PEER_CARD_ENABLED'], 'false')
 
+    def test_retire_old_facts_turns_dreams_on_and_peer_cards_stay_off(self):
+        from tools.operations.installation.configuration import env_path, initialize, read_env, write_env
+        with tempfile.TemporaryDirectory() as folder:
+            state = Path(folder)
+            initialize(state)
+            with patch('tools.operations.memory.honcho_setup.state_for', return_value=state / 'honcho'):
+                write_env(env_path(state), {**read_env(env_path(state)), 'NOCHEH_MEMORY_RETIRE_OLD_FACTS': 'true'})
+                honcho_setup.initialize(state)
+                values = read_env(state / 'honcho/honcho.env')
+                self.assertEqual(values['DREAM_ENABLED'], 'true')
+                self.assertEqual(values['PEER_CARD_ENABLED'], 'false')
+                write_env(env_path(state), {**read_env(env_path(state)), 'NOCHEH_MEMORY_RETIRE_OLD_FACTS': 'false'})
+                honcho_setup.initialize(state)
+                self.assertEqual(read_env(state / 'honcho/honcho.env')['DREAM_ENABLED'], 'false')
+
     def test_build_images_are_pinned_and_a_missing_one_fails_closed(self):
         with tempfile.TemporaryDirectory() as folder:
             root, state = Path(folder) / 'root', Path(folder) / 'state'

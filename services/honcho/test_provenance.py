@@ -17,6 +17,8 @@ class ProvenanceTests(unittest.IsolatedAsyncioTestCase):
         sql,values=db.calls[-1]
         self.assertEqual(values,{'workspace':'owned-workspace'})
         self.assertIn('processed AND error IS NOT NULL',sql)
+        self.assertIn("task_type IN ('representation','summary')",sql)
+        self.assertNotIn('dream',sql,'a failed old-fact clean-up learned nothing new, so it never holds the workspace unready')
         db.failed=False
         self.assertFalse(await failed_queue_items('owned-workspace',db))
         from datetime import datetime, timezone

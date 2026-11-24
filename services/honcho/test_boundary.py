@@ -1,6 +1,6 @@
 import unittest
 from types import SimpleNamespace
-from services.honcho.boundary import EMBEDDING_BYTES,EMBEDDING_INPUTS,PART_BYTES,WORKSPACE,WorkspaceMiddleware,bind_reconciler,bind_worker,install_transport,reconciler_parts
+from services.honcho.boundary import EMBEDDING_BYTES,EMBEDDING_INPUTS,PART_BYTES,WORKSPACE,WorkspaceMiddleware,bind_dreams,bind_reconciler,bind_worker,install_transport,reconciler_parts
 
 class BoundaryTests(unittest.IsolatedAsyncioTestCase):
     async def test_api_and_worker_bindings_are_scoped_and_always_reset(self):
@@ -12,6 +12,17 @@ class BoundaryTests(unittest.IsolatedAsyncioTestCase):
         bind_worker(Manager,lambda key:SimpleNamespace(workspace_name=key))
         self.assertEqual(await Manager().process_work_unit('guarded'), 'guarded')
         self.assertIsNone(WORKSPACE.get())
+
+    async def test_only_dreams_on_honchos_normal_timing_run(self):
+        ran=[]
+        async def process_dream(payload,workspace,*,queue_item_id=None): ran.append((payload.trigger_reason,workspace,queue_item_id))
+        consumer=SimpleNamespace(process_dream=process_dream)
+        bind_dreams(consumer)
+        omni,card=SimpleNamespace(value='omni'),SimpleNamespace(value='card_refresh')
+        for reason,kind in (('document_threshold',omni),('work_list_backlog',omni),('scope_backfill',omni),('scope_removal',omni),('scope_removal',card),(None,card)):
+            await consumer.process_dream(SimpleNamespace(trigger_reason=reason,dream_type=kind),'current',queue_item_id=7)
+        # A dream after every wall copy and a peer-card refresh (cards are off) never reach Honcho's dreamer.
+        self.assertEqual(ran,[('document_threshold','current',7),('work_list_backlog','current',7)])
 
     async def test_malformed_work_unit_reaches_honcho_unbound_and_frees_the_slot(self):
         def parse(key):

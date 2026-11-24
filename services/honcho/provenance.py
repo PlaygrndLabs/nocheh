@@ -6,16 +6,18 @@ NATIVE_ID = re.compile(r'^[A-Za-z0-9_-]{21}$')
 
 
 async def failed_queue_items(workspace_id, db, since=None):
-    """Report only whether current-workspace derivation has terminal failures.
+    """Report only whether current-workspace learning has terminal failures.
 
     ``since`` limits the answer to work queued after Nocheh last saw the queue
     drained. Honcho keeps failed items for 30 days, so without it one old
-    failure would hold the workspace unready for that long."""
+    failure would hold the workspace unready for that long. A failed dream
+    (old-fact retirement) learned nothing new, so it never holds the
+    workspace unready (ADR-0298); it is still counted and retried with the rest."""
     from sqlalchemy import text
     values = {'workspace': workspace_id, **({'since': since} if since is not None else {})}
     result = await db.execute(text('''SELECT EXISTS(
         SELECT 1 FROM queue WHERE workspace_name=:workspace
-        AND task_type IN ('representation','summary','dream')
+        AND task_type IN ('representation','summary')
         AND processed AND error IS NOT NULL''' + (' AND created_at > :since' if since is not None else '') + ')'), values)
     return bool(result.scalar_one())
 
