@@ -51,7 +51,16 @@ def dispatch(body):
         return status(state)
     if operation == 'problems.check':
         from tools.operations.provider.problems import check
-        return check(state)
+        from tools.operations.provider import spending
+        # The monthly spending limit is checked on the same beat (ADR-0298), first, so a failing problem check never skips it.
+        try:
+            spent = spending.check(state)
+        except Exception:
+            spent = {'state': 'unavailable'}
+        return {**check(state), 'spending': spent}
+    if operation == 'spending.view':
+        from tools.operations.provider.spending import summary
+        return summary(state)
     if operation == 'storage.report':
         from tools.operations.installation.storage import report
         return report(state)

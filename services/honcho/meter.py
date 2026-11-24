@@ -110,6 +110,8 @@ class Ledger:
             if 'last_operation_id' not in policy_columns: db.execute('ALTER TABLE policy ADD COLUMN last_operation_id TEXT')
             # Memory thinking's monthly dollar limit in microdollars; none until the owner turns one on.
             if 'thinking_limit' not in policy_columns: db.execute('ALTER TABLE policy ADD COLUMN thinking_limit INTEGER')
+            # The UTC month Nocheh's one monthly spending limit was reached (ADR-0298); memory thinking waits until it passes.
+            if 'spend_paused' not in policy_columns: db.execute('ALTER TABLE policy ADD COLUMN spend_paused TEXT')
             db.execute('CREATE TABLE IF NOT EXISTS embedding_route(id INTEGER PRIMARY KEY CHECK(id=1),provider TEXT,model TEXT,dimensions INTEGER)')
             db.execute('CREATE TABLE IF NOT EXISTS egress_cooldown(route TEXT PRIMARY KEY, until REAL NOT NULL, streak INTEGER NOT NULL, failed_at REAL NOT NULL)')
             if 'audit' not in [r[1] for r in db.execute('PRAGMA table_info(calls)')]: db.execute('ALTER TABLE calls ADD COLUMN audit TEXT')
@@ -266,6 +268,13 @@ class Ledger:
                        (proposed,operation_id))
             return revision+1
 
+    def set_spend_pause(self, month):
+        """Pause memory thinking for `month` ('YYYY-MM', UTC) at the monthly spending limit, or resume with None."""
+        if month is not None and not (type(month) is str and re.fullmatch(r'\d{4}-\d{2}', month)):
+            raise Rejected('invalid_spending_pause')
+        with self.connect() as db:
+            db.execute('UPDATE policy SET spend_paused=? WHERE id=1', (month,))
+
     @staticmethod
     def thinking_spent(db, now=None):
         """Microdollars memory thinking cost this UTC month, at list price."""
@@ -307,7 +316,10 @@ class Ledger:
             total = db.execute("SELECT coalesce(sum(CASE WHEN outcome IN ('http_error','legacy_error_unverified') THEN 0 ELSE reserved END),0) FROM calls WHERE route='/v1/embeddings' AND started>=?",(start,)).fetchone()[0]
             if amount and total + amount > limit:
                 raise Rejected('pilot_budget_exhausted' if mode=='pilot' else 'monthly_budget_exhausted')
-            thinking_limit=db.execute('SELECT thinking_limit FROM policy WHERE id=1').fetchone()[0]
+            thinking_limit,spend_paused=db.execute('SELECT thinking_limit,spend_paused FROM policy WHERE id=1').fetchone()
+            # Memory search keeps working so recall still finds notes; only thinking waits for next month (ADR-0298).
+            if route=='/v1/chat/completions' and spend_paused==datetime.now(timezone.utc).strftime('%Y-%m'):
+                raise Rejected('monthly_spend_limit_reached')
             if route=='/v1/chat/completions' and thinking_limit is not None:
                 # A model without a known price could spend past the limit unseen, so it is refused while one is on.
                 if claude_rates(model or REASONING_MODEL) is None: raise Rejected('thinking_price_unknown')

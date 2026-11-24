@@ -4,7 +4,7 @@ import pg from 'pg';
 import {initialize} from '../src/database.js';
 import {ingest} from '../src/archive.js';
 import {turnToken,type Reader} from '../src/access.js';
-import {ANTHROPIC_MESSAGES,ANTHROPIC_URL,anthropicCredential,anthropicHeaders,brokerServer,configuredReplyUrl,FIXTURE_PROVIDER_URL,jobErrors,machineErrors,providerTarget,scopedRoute,type TurnBinding} from '../src/security/broker.js';
+import {ANTHROPIC_MESSAGES,ANTHROPIC_URL,anthropicCredential,anthropicHeaders,brokerServer,configuredReplyUrl,FIXTURE_PROVIDER_URL,jobErrors,machineErrors,providerTarget,scopedRoute,spendingPause,type TurnBinding} from '../src/security/broker.js';
 import {createServer,type IncomingMessage} from 'node:http';
 import {once} from 'node:events';
 import {effectLog} from '../src/security/store.js';
@@ -124,6 +124,44 @@ test('a long-term recall reaches a slow archive without Node fetch, which gives 
   }
 });
 
+test('at the monthly spending limit only the owner’s own chat reaches a model',async t=>{
+  const secret='synthetic-test-secret',source='b'.repeat(64);const month=new Date().toISOString().slice(0,7);
+  const pool={query:async(sql:string)=>({rows:sql.includes('spending_pause')?[{month}]:sql.includes('SELECT p.revision')?[{revision:1,document:{version:1,rules:[]}}]:[],rowCount:1})} as unknown as pg.Pool;
+  const binding=async(principal:Reader):Promise<TurnBinding>=>({event_id:principal.turnEvent!,scope:principal.scope??'42',profile:'synthetic',logical_profile:'synthetic',owner:principal.scope===null,guard_epoch:1,
+    ...(principal.space==='job'?{job:'synthetic-job'}:{})});
+  const previous=process.env.NOCHEH_REPLY_ROUTE_URL;process.env.NOCHEH_REPLY_ROUTE_URL='https://provider.example.test/v1';
+  const realFetch=globalThis.fetch;t.mock.method(globalThis,'fetch',async()=>{throw Error('no upstream in this test');});
+  const broker=brokerServer({pool,token:secret,archive:'http://archive',hermes:'http://hermes',model:'synthetic',prepare:async()=>({}),
+    storage:{binding,assertAudience:async()=>{},turnFile:async()=>{throw Error();}}});
+  broker.listen(0,'127.0.0.1');await once(broker,'listening');
+  try {
+    const address=broker.address();assert.ok(address&&typeof address!=='string');
+    const ask=async(scope:string|null,space:string)=>{
+      const credential=turnToken(secret,scope,Date.now()+600000,source,{space,revision:1,guard_epoch:1,purpose:'assistant'});
+      const response=await realFetch('http://127.0.0.1:'+address.port+'/v1/chat/completions',{method:'POST',
+        headers:{authorization:'Bearer '+credential,'content-type':'application/json'},body:JSON.stringify({model:'synthetic',messages:[{role:'user',content:'Synthetic'}]})});
+      return {status:response.status,body:await response.text()};
+    };
+    const group=await ask('-10','-10');
+    assert.equal(group.status,402);assert.equal(JSON.parse(group.body).error,'monthly_spend_limit');
+    assert.equal((await ask(null,'job')).status,402,'a scheduled run waits too');
+    assert.notEqual((await ask(null,'1')).status,402,'the owner\'s own chat still reaches the model');
+  }finally{
+    if(previous===undefined)delete process.env.NOCHEH_REPLY_ROUTE_URL;else process.env.NOCHEH_REPLY_ROUTE_URL=previous;
+    broker.closeAllConnections();broker.close();await once(broker,'close');
+  }
+});
+test('a spending pause from an earlier month has passed, and is read again after 15 seconds',async()=>{
+  let month:string|null='2000-01',now=Date.parse('2026-03-20T12:00:00Z'),reads=0;
+  const pool={query:async()=>{reads++;return {rows:month?[{month}]:[]};}} as unknown as pg.Pool;
+  const paused=spendingPause(pool,()=>now);
+  assert.equal(await paused(),false);
+  month='2026-03';assert.equal(await paused(),false,'read at most every 15 seconds');
+  now+=16_000;assert.equal(await paused(),true);
+  month=null;now+=16_000;assert.equal(await paused(),false);
+  assert.equal(reads,3);
+});
+
 test('PostgreSQL broker: scoped credential, exact preparation, route denial and every-attempt epoch checks',{skip:!process.env.PGHOST},async t=>{
   const connection={host:process.env.PGHOST,user:'nocheh',database:'nocheh',password:process.env.PGPASSWORD};
   const admin=new pg.Pool(connection),namespace='security_broker_'+Date.now();await admin.query('CREATE SCHEMA '+namespace);
@@ -152,7 +190,7 @@ test('PostgreSQL broker: scoped credential, exact preparation, route denial and 
     }}),{headers:{'content-type':'text/event-stream'}});
     return Response.json({ok:true});
   };
-  const server=brokerServer({pool,token,archive:'http://archive',prepare:async(principal,input)=>{preparedPrincipals.push(principal);if(guardDown)throw Error('detector unavailable');return {guarded:true,payload:(input as any).payload};},hermes:'http://hermes',model:'same-model',fetch:mock});
+  const server=brokerServer({pool,token,archive:'http://archive',prepare:async(principal,input)=>{preparedPrincipals.push(principal);if(guardDown)throw Error('detector unavailable');return {guarded:true,payload:(input as any).payload};},hermes:'http://hermes',model:'same-model',backupModel:'backup-model',fetch:mock});
   try {
     await initialize(pool);
     const event=await ingest(pool,{version:1,key:'security-turn',origin:'live',kind:'message',channel:'browser',bot_id:'fixture',scope:'1',source_id:'1',revision:'0',occurred_at:null,text:'exact source',payload:{profile:'owner'}},false);
@@ -179,6 +217,10 @@ test('PostgreSQL broker: scoped credential, exact preparation, route denial and 
     const provider=calls.at(-1)!;assert.deepEqual(provider.body,payload);assert.equal(provider.auth,'Bearer '+secret);
     assert.equal(provider.agent,'Nocheh','a reply names its client, so a gateway bot check does not refuse it');
     assert.equal(preparedPrincipals[0].turnEvent,event.id);assert.equal(preparedPrincipals[0].admin,false);
+    // The backup reply model is admitted as well, and reaches the provider unchanged.
+    const backup=await request('/v1/chat/completions',{...payload,model:'backup-model'});
+    assert.equal(backup.status,200);await backup.text();
+    assert.equal((calls.at(-1)!.body as {model:string}).model,'backup-model');
     const before=calls.length;
     for(const path of ['/internal/security/transport','/v1/tools/claim','/v1/chat/completions?url=https://evil.example'])assert.equal((await request(path,payload)).status,403);
     assert.equal((await request('/v1/chat/completions',{...payload,model:'changed-model'})).status,403);
