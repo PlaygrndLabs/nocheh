@@ -118,8 +118,12 @@ def _copy(source,profile):
             new.sessions.create(NewSession(session_id=session,source=origin))
             new.messages.append_batch(session,[NewMessage.from_live(message) for message in messages])
             copied+=len(messages)
+            # The session keeps its day, so a new epoch never starts a new day's session early (ADR-0288).
+            try:saved=json.loads((source/name).read_text())
+            except (OSError,ValueError):saved={}
+            kept={key:saved[key] for key in ('day','last_active') if isinstance(saved,dict) and key in saved}
             cursor=profile/name;temporary=cursor.with_suffix('.tmp')
-            temporary.write_text(json.dumps({'session_id':session}));temporary.replace(cursor)
+            temporary.write_text(json.dumps({'session_id':session,**kept}));temporary.replace(cursor)
     return copied
 
 

@@ -96,7 +96,7 @@ CHILD = ("import sys\nfrom unittest.mock import patch\n"
 
 
 class TurnFailureCodeTests(unittest.TestCase):
-    def turn(self, script, guard, tools=mcp_fixture.TOOLS, down=False):
+    def turn(self, script, guard, tools=mcp_fixture.TOOLS, down=False, before=None, after=None):
         server, calls, checks = broker(script, guard)
         root = Path(__file__).resolve().parents[2]
         url = 'http://127.0.0.1:%d' % server.server_address[1]
@@ -105,6 +105,7 @@ class TurnFailureCodeTests(unittest.TestCase):
                 profile = Path(folder) / 'profile'
                 (profile / 'native-state').mkdir(parents=True)
                 (profile / 'memories').mkdir()
+                if before:before(profile)
                 if down:
                     endpoint.server.shutdown()
                     endpoint.server.server_close()
@@ -118,6 +119,7 @@ class TurnFailureCodeTests(unittest.TestCase):
                 self.assertEqual(process.returncode, 0, process.stderr[-3000:])
                 # Hermes writes some notices to the terminal itself; the turn's own lines are JSON.
                 lines = [json.loads(line) for line in process.stdout.splitlines() if line.startswith('{')]
+                if after:after(profile)
                 return lines[-1], calls, checks
         finally:
             server.shutdown()
@@ -158,6 +160,26 @@ class TurnFailureCodeTests(unittest.TestCase):
         result, calls, checks = self.turn([('ok',)], [('pass',)])
         self.assertEqual((result['state'], calls), ('done', [('ok',)]))
         self.assertNotIn('failure_reason', result)
+
+    def test_a_new_days_session_runs_on_from_the_messages_it_started_with(self):
+        from . import daily_session, native_store
+        from .store_fixture import add_message, add_session
+        def before(profile):
+            with native_store.writer(profile) as db:
+                add_session(db, 'old')
+                for number in (1, 2, 3):
+                    add_message(db, 'old', role='user', content='question ' + str(number))
+                    add_message(db, 'old', role='assistant', content='answer ' + str(number))
+                daily_session.start(db, 's', 'old', 2)
+        seen = {}
+        def after(profile):
+            with native_store.reader(profile) as db:
+                seen['new'] = [(m['role'], m['content'].split('\n')[0]) for m in native_store.conversation(db, 's')]
+                seen['old'] = native_store.session_row(db, 'old')['end_reason']
+        result, calls, checks = self.turn([('ok',)], [('pass',)], before=before, after=after)
+        self.assertEqual((result['state'], result['session_id']), ('done', 's'))
+        self.assertEqual(seen['new'][:3], [('user', 'question 3'), ('assistant', 'answer 3'), ('user', 'weather?')])
+        self.assertEqual(seen['old'], 'daily', 'the day before stays closed, so session search still reads it')
 
 
 if __name__ == '__main__':
