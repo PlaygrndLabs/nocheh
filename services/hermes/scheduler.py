@@ -30,7 +30,7 @@ class Scheduler:
     def __init__(self,admin,credentials,call=None,runner=None):
         self.admin,self.credentials=admin,credentials
         self.root=Path(admin.root);self.actor=uuid.uuid4().hex
-        self.call=call or (lambda route,body:archive(route,body,admin.token))
+        self.call=call or (lambda route,body:archive(route,body,admin.agent_key))
         self.stopping=threading.Event();self.thread=None;self.status='starting'
         self.receipts=self.root/'nocheh-scheduler-receipts'
         self.managed_flush=lambda:None

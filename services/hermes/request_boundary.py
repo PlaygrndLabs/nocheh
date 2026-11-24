@@ -1,7 +1,7 @@
 """Mandatory compatibility shim for pinned Hermes/OpenAI clients (httpx 0.28.1)."""
 from __future__ import annotations
 
-from services.hermes.environment import secret as environment_secret
+from services.hermes.environment import agent_key
 
 import asyncio
 import contextlib
@@ -116,7 +116,7 @@ class NoRedirect(urllib.request.HTTPRedirectHandler):
 
 def guard_rpc(destination,payload):
     from .archive_tools import _PROCESS_CREDENTIAL, ARCHIVE_CREDENTIAL
-    token=_PROCESS_CREDENTIAL or ARCHIVE_CREDENTIAL.get() or environment_secret('SERVICE_TOKEN')
+    token=_PROCESS_CREDENTIAL or ARCHIVE_CREDENTIAL.get() or agent_key()
     req=urllib.request.Request(os.environ.get('GUARD_URL','http://nocheh-security:8786')+'/v1/guard',
         data=json.dumps({'destination':destination,'payload':payload},ensure_ascii=False).encode(),
         headers={'Authorization':'Bearer '+token,'Content-Type':'application/json'})

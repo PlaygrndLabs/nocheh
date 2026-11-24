@@ -18,26 +18,19 @@ from .profile_config import (read, revision, resolved, inherited_config, inspect
 
 NAME = re.compile(r'[a-zA-Z0-9][a-zA-Z0-9_-]{0,63}')
 
-def audience_revision(token,space):
-    from urllib.request import Request,urlopen
-    request=Request(os.environ.get('ARCHIVE_URL','http://nocheh-app:8780')+'/v1/memory/spaces?'+urlencode({'id':space}),headers={'Authorization':'Bearer '+token})
-    with urlopen(request,timeout=5) as response:value=json.load(response)['revision']
-    if type(value) is not int or value<1:raise ValueError('invalid_audience_revision')
-    return value
-
-
 class Administration:
-    def __init__(self, app, root, model, policy, token, revision_reader=None, profile_catalog=None):
+    def __init__(self, app, root, model, policy, agent_key, revision_reader=None, profile_catalog=None, session_token=None):
         from .isolated_profile import install_database_paths
         install_database_paths()
         self.app, self.root, self.model = app, Path(root).resolve(), model
-        self.policy, self.token = policy, token
+        # The agent login calls Nocheh; the session token is the only key the dashboard's requests here carry (ADR-0295).
+        self.policy, self.agent_key, self.session_token = policy, agent_key, session_token
         self.lock = asyncio.Lock()
         self.revision_reader = revision_reader
         self.profile_catalog = profile_catalog
         if self.profile_catalog is None and os.environ.get('NOCHEH_STORAGE_LAYOUT') == 'original-only-v1':
             from .runtime_profiles import ProfileCatalog
-            self.profile_catalog = ProfileCatalog(self.root, policy, token)
+            self.profile_catalog = ProfileCatalog(self.root, policy, agent_key)
 
     def binding(self,name):
         if self.profile_catalog:
@@ -140,7 +133,7 @@ class Administration:
         if scope['type'] != 'http': return
         headers = dict(scope['headers'])
         supplied = headers.get(b'x-hermes-session-token', b'').decode()
-        if not self.token or not hmac.compare_digest(supplied, self.token):
+        if not self.session_token or not hmac.compare_digest(supplied, self.session_token):
             return await JSONResponse({'error': 'unauthorized'}, 401)(scope, receive, send)
         async with self.lock:
             try:
@@ -154,6 +147,10 @@ class Administration:
                 # Schedules page, where Nocheh grants each change.
                 if path.startswith('/api/cron/') and method not in ('GET', 'HEAD'):
                     return await JSONResponse({'error': 'cron_read_only', 'detail': 'cron_read_only'}, 403)(scope, receive, send)
+                # Hermes's Profiles page only reads too (ADR-0295, the owner's choice for now): the agent login cannot save
+                # profiles in Nocheh. To allow it again, drop this check and add POST /v1/runtime/profiles to Nocheh's agent routes.
+                if (path == '/api/profiles' and method == 'POST') or (re.fullmatch(r'/api/profiles/[^/]+', path) and method in ('PATCH', 'DELETE')):
+                    return await JSONResponse({'error': 'profiles_read_only', 'detail': 'profiles_read_only'}, 403)(scope, receive, send)
                 selected=query.get('profile', [''])[0]
                 name, home = self.profile('' if selected=='all' and path.startswith('/api/cron/') else selected)
                 if path.startswith('/api/files') and (method, path) in {
@@ -361,11 +358,11 @@ class Administration:
                 await JSONResponse({'error': 'native_administration_unavailable'}, 503)(scope, receive, send)
 
 
-def create_app(root, model, policy, token, revision_reader=None, presentation_home=None, profile_catalog=None):
+def create_app(root, model, policy, agent_key, session_token, revision_reader=None, presentation_home=None, profile_catalog=None):
     from hermes_cli import web_server as native
     from hermes_cli import web_server_sessions as sessions
     from hermes_cli import web_server_profiles, web_server_cron
-    app = Administration(native.app, root, model, policy, token, revision_reader, profile_catalog)
+    app = Administration(native.app, root, model, policy, agent_key, revision_reader, profile_catalog, session_token)
     from .presentation import install
     install(presentation_home or Path(root)/'dashboard-presentation')
     web_server_profiles._resolve_profile_dir = lambda name: app.profile(name)[1]
@@ -379,7 +376,7 @@ def create_app(root, model, policy, token, revision_reader=None, presentation_ho
     @contextlib.asynccontextmanager
     async def lifespan(_): yield
     native.app.router.lifespan_context = lifespan
-    native._SESSION_TOKEN = token
+    native._SESSION_TOKEN = session_token
     from hermes_cli import web_server_chat
     # The dashboard chat page is off until Nocheh has its own chat page (Telegram only): nothing can launch a chat.
     def chat_off(*_, **__): raise ValueError('browser_chat_off')
@@ -395,10 +392,17 @@ def main():
     logging.disable(logging.CRITICAL)
     root = Path(os.environ['HERMES_HOME'])
     os.environ['NOCHEH_RUNTIME_HOME'] = str(root)
-    token = os.environ['SERVICE_TOKEN']
-    os.environ['HERMES_DASHBOARD_SESSION_TOKEN'] = token
+    from .environment import agent_key, refuse_master_key, session_token
+    refuse_master_key()
+    try: key = agent_key()
+    except ValueError as error: raise SystemExit(str(error) + '; run ./bin/nocheh up') from None
+    session = session_token()
+    # The upstream dashboard and anything it starts see the session token only, never the agent login.
+    os.environ.pop('AGENT_KEY', None); os.environ.pop('AGENT_KEY_FILE', None); os.environ.pop('NOCHEH_HERMES_SESSION_TOKEN', None)
+    os.environ['HERMES_DASHBOARD_SESSION_TOKEN'] = session
     import uvicorn
-    uvicorn.run(create_app(root, os.environ.get('NOCHEH_MODEL', 'claude-sonnet-5-5'), Scopes.load(None), token, lambda space:audience_revision(token,space),os.environ.get('NOCHEH_DASHBOARD_HOME',str(root.parent/'admin/dashboard/home'))),
+    uvicorn.run(create_app(root, os.environ.get('NOCHEH_MODEL', 'claude-sonnet-5-5'), Scopes.load(None), key, session,
+                           presentation_home=os.environ.get('NOCHEH_DASHBOARD_HOME',str(root.parent/'admin/dashboard/home'))),
                 host='0.0.0.0', port=8785, access_log=False, log_level='critical')
 
 

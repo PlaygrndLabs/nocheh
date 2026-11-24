@@ -48,7 +48,7 @@ def commands(revision):
             '--build-arg','LOCAL_UID='+str(os.getuid()),'--build-arg','LOCAL_GID='+str(os.getgid()),'-t',runtime,'.']),
         ('native_contract_tests',['docker','run','--rm','--network=none','--read-only','--tmpfs','/tmp:rw,exec,nosuid,nodev,mode=1777',
             '--cap-drop=ALL','--security-opt=no-new-privileges','-e','HERMES_HOME=/tmp/nocheh-candidate-tests',
-            '-e','SERVICE_TOKEN='+'0'*64,
+            '-e','AGENT_KEY='+'1'*64,
             runtime,'python','-m','unittest','discover','-s','services/hermes','-t','.','-p','test_*.py','-q']),
         ('dashboard_assets',['docker','run','--rm','--network=none','--read-only',runtime,'python','-c',
             "from pathlib import Path; assert Path('/opt/hermes/hermes_cli/web_dist/index.html').is_file(); assert Path('/workspace/services/hermes/dashboard/manifest.json').is_file()"]),

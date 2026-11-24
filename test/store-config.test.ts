@@ -39,8 +39,20 @@ test('new-layout settings do not require administrator credentials and cannot us
   const saved={...process.env};
   try {
     delete process.env.PGPASSWORD;delete process.env.PGPASSWORD_FILE;
-    Object.assign(process.env,env(),{SERVICE_TOKEN:digest('fixture-service'),GUARD_MODE:'on'});
+    Object.assign(process.env,env(),{SERVICE_TOKEN:digest('fixture-service'),AGENT_KEY:digest('fixture-agent'),GUARD_MODE:'on'});
     const config=settings();assert.equal(config.databasePassword,'');assert.equal(config.storageLayout,'original-only-v1');
+    assert.equal(config.agentKey,digest('fixture-agent'));
     assert.throws(()=>connectDatabase(config),/separated_storage_repositories_required/);
+  }finally{for(const key of Object.keys(process.env))delete process.env[key];Object.assign(process.env,saved);}
+});
+test('the agent login is its own key of at least 32 characters, never the master key',()=>{
+  const saved={...process.env};
+  try {
+    delete process.env.PGPASSWORD;delete process.env.PGPASSWORD_FILE;delete process.env.AGENT_KEY_FILE;
+    Object.assign(process.env,env(),{SERVICE_TOKEN:digest('fixture-service'),GUARD_MODE:'on'});
+    delete process.env.AGENT_KEY;assert.throws(()=>settings(),/Missing or short AGENT_KEY/);
+    process.env.AGENT_KEY='a'.repeat(31);assert.throws(()=>settings(),/AGENT_KEY must contain at least 32 characters and differ from SERVICE_TOKEN/);
+    process.env.AGENT_KEY=digest('fixture-service');assert.throws(()=>settings(),/AGENT_KEY must contain at least 32 characters and differ from SERVICE_TOKEN/);
+    process.env.AGENT_KEY='a'.repeat(32);assert.equal(settings().agentKey,'a'.repeat(32));
   }finally{for(const key of Object.keys(process.env))delete process.env[key];Object.assign(process.env,saved);}
 });

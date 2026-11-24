@@ -11,14 +11,14 @@ NAME = re.compile(r'[a-zA-Z0-9][a-zA-Z0-9_-]{0,63}')
 
 
 class ProfileCatalog:
-    def __init__(self, root, policy, token, request=None):
-        self.root, self.policy, self.token = Path(root), policy, token
+    def __init__(self, root, policy, agent_key, request=None):
+        self.root, self.policy, self.agent_key = Path(root), policy, agent_key
         self.request = request or self.http
 
     def http(self, route, body=None):
         request = Request(os.environ.get('ARCHIVE_URL', 'http://nocheh-app:8780') + route,
             data=None if body is None else json.dumps(body).encode(),
-            headers={'Authorization': 'Bearer ' + self.token, 'Content-Type': 'application/json'})
+            headers={'Authorization': 'Bearer ' + self.agent_key, 'Content-Type': 'application/json'})
         try:
             with urlopen(request, timeout=10) as response:
                 limit = 1024 * 1024

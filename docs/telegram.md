@@ -830,11 +830,9 @@ answer could read and what became of it
 
 `./bin/nocheh test` exercises scope, native memory/session isolation, attachment
 provenance and retry behavior, immutable action requests and owner-only approval.
-The synthetic native memory rehearsal sends no Telegram messages:
-
-```sh
-docker compose exec -T hermes python -m services.hermes.verify_assistant
-```
+It and the tester cover the native memory rehearsal; Hermes holds no key that
+could sign a pass itself
+([ADR-0295](adr/0295-agent-login-replaces-the-master-key-in-hermes.md)).
 
 Before release, verify actual owner DM replies, selected-group replies and silence,
 group-private retrieval boundaries, voice note persistence, approved action

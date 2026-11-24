@@ -22,7 +22,7 @@ class DeliveryPolicyTests(unittest.TestCase):
         # ADR-0266: the owner's private chat gets each result with no card; a group's result waits for the owner's card.
         from .native_cron import delivery_policy
         with tempfile.TemporaryDirectory() as temp,patch.dict(os.environ,{'NOCHEH_RUNTIME_HOME':temp}):
-            admin=Administration(None,Path(temp),'gpt-5.6-sol',Scopes({'enabled':False},Served.of('42',groups=['-10'])),'fixture-token-long-enough')
+            admin=Administration(None,Path(temp),'gpt-5.6-sol',Scopes({'enabled':False},Served.of('42',groups=['-10'])),'fixture-agent-key-not-a-real-credential')
             bound=lambda profile:admin.binding(admin.profile(profile)[0])
             self.assertEqual(delivery_policy({'deliver':'telegram'},bound('default')),'send_each_result')
             self.assertEqual(delivery_policy({},bound('default')),'local')
@@ -59,7 +59,7 @@ class SchedulerTests(unittest.TestCase):
     def setUp(self):
         self.temp=tempfile.TemporaryDirectory();self.root=Path(self.temp.name)
         self.env=patch.dict(os.environ,{'NOCHEH_RUNTIME_HOME':str(self.root)});self.env.start()
-        self.admin=Administration(None,self.root,'gpt-5.6-sol',Scopes({'enabled':False},Served.of('42')), 'fixture-token-long-enough')
+        self.admin=Administration(None,self.root,'gpt-5.6-sol',Scopes({'enabled':False},Served.of('42')), 'fixture-agent-key-not-a-real-credential')
         self.calls=[];self.inputs={};self.finished={};self.failed=None;self.executions=0;self.hold=False
         self.scheduler=Scheduler(self.admin,lambda:SimpleNamespace(access_token='ephemeral'),self.call,self.runner)
 
@@ -75,7 +75,7 @@ class SchedulerTests(unittest.TestCase):
             if body['event_id'] in self.finished:return {'claimed':False,'state':self.finished[body['event_id']]['state']}
             claims={'scope':None,'event_id':body['event_id'],'audience':'nocheh-assistant','space':'42','revision':1,'expires':(time.time()+600)*1000}
             encoded=base64.urlsafe_b64encode(json.dumps(claims).encode()).decode().rstrip('=')
-            signature=base64.urlsafe_b64encode(hmac.new(self.admin.token.encode(),encoded.encode(),hashlib.sha256).digest()).decode().rstrip('=')
+            signature=base64.urlsafe_b64encode(hmac.new(b'fixture-pass-signer',encoded.encode(),hashlib.sha256).digest()).decode().rstrip('=')
             return {**body,'claimed':True,'archive_credential':'turn.'+encoded+'.'+signature,'text':self.inputs[body['event_id']]['text']}
         if route=='finish':self.finished[body['event_id']]=body;return {'state':body['state']}
         if route in ('ownership','announce','delivery'):raise AssertionError('Nocheh no longer offers '+route)
@@ -539,7 +539,7 @@ class StoreSchedulerTests(SchedulerTests):
         self.store_env=patch.dict(os.environ,{'NOCHEH_STORAGE_LAYOUT':'original-only-v1'});self.store_env.start()
         self.control=ControlFixture()
         self.admin.policy=Scopes({'enabled':False},Served.of('42',groups=['-10']))
-        self.admin.profile_catalog=ProfileCatalog(self.root,self.admin.policy,self.admin.token,self.control.request)
+        self.admin.profile_catalog=ProfileCatalog(self.root,self.admin.policy,self.admin.agent_key,self.control.request)
 
     def tearDown(self):
         self.store_env.stop();super().tearDown()
@@ -551,7 +551,7 @@ class StoreSchedulerTests(SchedulerTests):
                 'revision':self.control.epoch,'guard_epoch':self.control.epoch,'generation':self.control.generation,
                 'logical_profile':body['profile'],'expires':(time.time()+600)*1000}
             encoded=base64.urlsafe_b64encode(json.dumps(claims).encode()).decode().rstrip('=')
-            signature=base64.urlsafe_b64encode(hmac.new(self.admin.token.encode(),encoded.encode(),hashlib.sha256).digest()).decode().rstrip('=')
+            signature=base64.urlsafe_b64encode(hmac.new(b'fixture-pass-signer',encoded.encode(),hashlib.sha256).digest()).decode().rstrip('=')
             result['archive_credential']='turn.'+encoded+'.'+signature
         return result
 

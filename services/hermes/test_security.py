@@ -22,7 +22,7 @@ class SecurityTests(unittest.TestCase):
     def test_no_ambient_authority_in_container(self):
         spec=container_spec('nocheh-'+'a'*24,'/owned/profiles','sha256:'+'b'*64,'nocheh-agent',1000,1000)
         host=spec['HostConfig'];encoded=json.dumps(spec)
-        for value in ['SERVICE_TOKEN','TELEGRAM_BOT_TOKEN','api_key','docker.sock','/auth','network=host']:self.assertNotIn(value,encoded)
+        for value in ['SERVICE_TOKEN','AGENT_KEY','NOCHEH_HERMES_SESSION_TOKEN','TELEGRAM_BOT_TOKEN','api_key','docker.sock','/auth','network=host']:self.assertNotIn(value,encoded)
         self.assertEqual(host['CapDrop'],['ALL']);self.assertTrue(host['ReadonlyRootfs']);self.assertEqual(host['Dns'],['127.0.0.1'])
         self.assertEqual([Path(m['Source']).name for m in host['Mounts'] if not m['ReadOnly']],list(DATA_DIRS+DATA_FILES))
         self.assertFalse(any(m['Target']=='/profile' for m in host['Mounts']))
@@ -139,7 +139,7 @@ body=json.load(sys.stdin)
 assert body['text']=='exact synthetic context'
 assert not Path('/var/run/docker.sock').exists()
 assert not Path('/workspace/data/local/hermes/auth.json').exists()
-assert not any(k in os.environ for k in ('SERVICE_TOKEN','TELEGRAM_BOT_TOKEN','OPENAI_API_KEY'))
+assert not any(k in os.environ for k in ('SERVICE_TOKEN','AGENT_KEY','NOCHEH_HERMES_SESSION_TOKEN','TELEGRAM_BOT_TOKEN','OPENAI_API_KEY'))
 try: Path('/profile/config.yaml').write_text('changed');raise AssertionError('configuration writable')
 except OSError: pass
 Path('/profile/memories/MEMORY.md').write_text('Exact memory 😃\\n')

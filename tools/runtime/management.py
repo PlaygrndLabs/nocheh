@@ -93,8 +93,9 @@ def dispatch(body):
         return launch_check(load(state))
     if operation == 'native.connection':
         from tools.operations.installation.configuration import native_endpoint
+        from tools.operations.security.native import session_token
         host,port=native_endpoint(state)
-        return {'host':host,'port':port,'token':load(state)['SERVICE_TOKEN']}
+        return {'host':host,'port':port,'token':session_token(state)}
     if operation == 'memory.api':
         from urllib.parse import urlsplit
         path=body['path'];parsed=urlsplit(path)
