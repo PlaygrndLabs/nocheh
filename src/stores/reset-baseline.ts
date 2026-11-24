@@ -85,7 +85,7 @@ export async function verifyResetBaseline(stores:StorePools,input:unknown) {
     chats:configuration.chats.length,chat_ids:configuration.chat_ids.length,chat_connections:chatApps.size,
     members:configuration.members.length,member_chats:configuration.member_chats.length,chat_accounts:configuration.member_accounts.length,
     runtime_profiles:profileCount,owner_commands:profileCount,workflow_registry:profileCount*2,workflow_outbox:profileCount*2,
-    // Each restored profile's epoch keeps every chat's notes (ADR-0291).
+    // Each restored profile's epoch keeps every chat's notes (ADR-0292).
     guard_notes_epochs:profileCount,
     // The members' task version key is made by the first member read after the stores start, so it may already be there.
     owner_task_version_key:[0,1],

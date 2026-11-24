@@ -121,7 +121,7 @@ test('separated application captures through control outages, exposes owner repo
     const unchanged=await services.guards.state();
     const project=await request('/v1/projects',{name:key,description:'HTTP rehearsal',state:'active',expected_revision:0,operation_id:key+':project'});
     assert.equal(project.name,key);
-    // Hermes asks whether a chat's notes cross the epochs since; a project change keeps only the owner's chat's (ADR-0291).
+    // Hermes asks whether a chat's notes cross the epochs since; a project change keeps only the owner's chat's (ADR-0292).
     const across={generation:unchanged.generation,from:unchanged.epoch,to:(await services.guards.state()).epoch};
     assert.deepEqual(await request('/internal/notes/carry',{...across,owner:true}),{carry:true});
     assert.deepEqual(await request('/internal/notes/carry',{...across,owner:false}),{carry:false});

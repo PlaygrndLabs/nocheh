@@ -528,7 +528,7 @@ def after_turn(profile,body,session,watch,result,memory=()):
     """Record the notes a turn wrote, with what it read; reads it could not read in full are incomplete. A turn whose
     stored messages could not be read counts once, when it added or changed a note, whose label that made less exact.
     The notes it wrote also rest on the message it answered and the long-term memory it was given (`memory`, the ids
-    that memory cited), so a later hide of either removes them (retired_history.add_dependencies, ADR-0291)."""
+    that memory cited), so a later hide of either removes them (retired_history.add_dependencies, ADR-0292)."""
     try:
         from .isolated_profile import database_path
         reads,ops,ok=turn_reads(database_path(profile),session,watch['last'],body)

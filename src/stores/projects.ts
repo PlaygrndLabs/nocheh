@@ -112,7 +112,7 @@ export class ProjectRepository {
       throw new HttpError(400,'invalid_project');
     const change={id:projectId,name,description,state:body.state as Project['state'],...(typeof body.share_chats==='boolean'?{share_chats:body.share_chats}:{}),
       ...(Array.isArray(body.own_groups)?{own_groups:body.own_groups as string[]}:{}),expected_revision:expected};
-    // A project change can stop a group reading another (Share group chats off), so only the owner's notes carry (ADR-0291).
+    // A project change can stop a group reading another (Share group chats off), so only the owner's notes carry (ADR-0292).
     return this.commands.run(principal,operationId,{kind:'project',...change},db=>writeProject(db,change),{notes:'owner'});
   }
   async assign(principal:Reader,input:unknown):Promise<Assignment> {

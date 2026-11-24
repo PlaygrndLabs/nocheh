@@ -107,7 +107,7 @@ export function storageServer(s:StorageServices,config:Settings,call:RuntimeCall
       return json(res,200,await s.retirements.historyRetirements(ids as string[]));
     }
     if(req.method==='POST'&&path==='/internal/notes/carry') {
-      // Hermes asks before a chat's new profile takes the notes of its earlier one (ADR-0291): whether every epoch since
+      // Hermes asks before a chat's new profile takes the notes of its earlier one (ADR-0292): whether every epoch since
       // let notes through for this chat. It names no chat, only whether it is the owner's.
       authorize(req,config.token);const body=object(await readJson(req,1024));
       if(Object.keys(body).some(key=>!['generation','from','to','owner'].includes(key))||typeof body.generation!=='string'||typeof body.owner!=='boolean'||

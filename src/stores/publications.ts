@@ -39,7 +39,7 @@ export async function revokeBeforePublication(control:pg.Pool,change:Representat
         [change.operation_id,change.kind,change.source_id,change.revision,change.expected_revision,epoch]);
       if(changed) {
         // A learned memory correction keeps every chat's Hermes notes; a new guarded copy or selection may mask what a
-        // note copied, so it starts them fresh (ADR-0291).
+        // note copied, so it starts them fresh (ADR-0292).
         if(change.kind==='memory')await keepNotes(client,epoch,'all');
         await client.query('INSERT INTO guard_invalidations(source_id,epoch) VALUES($1,$2)',[change.source_id,epoch]);
         await requestWorkflow(client,'honcho','refresh',epoch);await requestWorkflow(client,'memory_review','refresh',epoch);

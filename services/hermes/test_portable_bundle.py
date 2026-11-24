@@ -109,7 +109,7 @@ class PortableBundleTests(unittest.TestCase):
             finally:counted.close()
 
     def test_what_each_carried_note_rests_on_travels_with_it_and_is_checked_again(self):
-        # ADR-0291: a carried note's dependencies go with its profile, marked unchecked so the first turn after a restore
+        # ADR-0292: a carried note's dependencies go with its profile, marked unchecked so the first turn after a restore
         # looks them up again; an altered file stops the restore before anything is written.
         from services.hermes.retired_history import DEPENDENCIES,load_dependencies,save_dependencies
         entries={'c'*64:{'turn':['d'*64],'sources':['e'*64]}}

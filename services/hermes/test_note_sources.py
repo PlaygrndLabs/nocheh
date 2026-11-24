@@ -437,7 +437,7 @@ class TurnTests(unittest.TestCase):
                 self.assertEqual((origin['by'],origin['event'],origin['complete']),('turn',EVENT,complete))
 
     def test_a_turns_new_note_rests_on_its_message_and_the_long_term_memory_it_was_given(self):
-        # ADR-0291: no stored row holds the memory a turn was given, so the parent records it; the next turn looks it up.
+        # ADR-0292: no stored row holds the memory a turn was given, so the parent records it; the next turn looks it up.
         from services.hermes.retired_history import load_dependencies
         with tempfile.TemporaryDirectory() as folder:
             write(folder,['Old.']);self.database(folder,[])

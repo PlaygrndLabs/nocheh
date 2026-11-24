@@ -1,6 +1,6 @@
 import type pg from 'pg';
 
-/** Which chats keep their Hermes notes across an epoch (ADR-0291): every chat, or only the owner's private chat, which reads
+/** Which chats keep their Hermes notes across an epoch (ADR-0292): every chat, or only the owner's private chat, which reads
  *  every chat anyway. An epoch with no record starts every chat's notes fresh, so a change not named here never lets notes
  *  through. */
 export type NotesKept='all'|'owner';
@@ -11,7 +11,7 @@ export async function keepNotes(db:Pick<pg.PoolClient,'query'>,epoch:number,keep
     ON CONFLICT DO NOTHING`,[epoch,keeps]);
 }
 
-/** Whether a chat's Hermes notes written up to epoch `from` may carry into its profile for epoch `to` (ADR-0291): both in
+/** Whether a chat's Hermes notes written up to epoch `from` may carry into its profile for epoch `to` (ADR-0292): both in
  *  the current installation generation, `to` not past the current epoch, and every epoch after `from` up to `to` recorded
  *  as keeping notes for every chat, or for the owner's chat when `owner`. */
 export async function notesCarry(db:Pick<pg.Pool,'query'>,generation:string,from:number,to:number,owner:boolean):Promise<boolean> {

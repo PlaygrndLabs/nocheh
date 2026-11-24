@@ -223,7 +223,7 @@ test('people and projects keep stable identity, attributed evidence, connected r
     await entities.merge(owner,otherAlex!.id,{target_id:sam!.id,expected_revision:otherAlex!.revision,operation_id:`${stamp}:merge`});
     assert.equal((await stores.control.query('SELECT entity_id FROM memory_entity_bindings WHERE source_object_id IS NOT NULL AND entity_id=$1',[sam!.id])).rowCount,2);
     const kept=async()=>(await stores.control.query('SELECT keeps FROM guard_notes_epochs g JOIN guard_state s ON s.epoch=g.epoch WHERE s.singleton')).rows[0]?.keeps;
-    assert.equal(await kept(),'all','a merge takes nothing from any chat: every chat keeps its Hermes notes (ADR-0291)');
+    assert.equal(await kept(),'all','a merge takes nothing from any chat: every chat keeps its Hermes notes (ADR-0292)');
     await entities.unmerge(owner,otherAlex!.id,{expected_revision:otherAlex!.revision+1,operation_id:`${stamp}:unmerge`});
     assert.equal((await stores.control.query('SELECT entity_id FROM memory_entity_bindings WHERE source_object_id IS NOT NULL AND entity_id=$1',[otherAlex!.id])).rowCount,1,
       'undo restores original identity bindings');

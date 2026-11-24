@@ -27,7 +27,7 @@ Nocheh is in development mode and not yet released. Everything below is built an
   `text-embedding-3-small` until the owner picks another model ([ADR-0181](docs/adr/0181-memory-search-model-change-rebuilds-memory.md)); a group's recall, search and learning read
   through a memory wall that only holds its own chats ([ADR-0286](docs/adr/0286-memory-walls.md)); each project ticks which of its groups share memory ([ADR-0287](docs/adr/0287-projects-tick-the-groups-that-share-memory.md)). Hermes's own notes
   carry through safety changes, minus what rests on a hidden message, and start fresh only after a change that takes
-  something away from a chat ([ADR-0291](docs/adr/0291-chat-notes-carry-into-new-guard-epochs.md)).
+  something away from a chat ([ADR-0292](docs/adr/0292-chat-notes-carry-into-new-guard-epochs.md)).
 - People: the name the owner sets in Memory › People is the person's name everywhere, and each
   person has a private note only the owner reads
   ([ADR-0274](docs/adr/0274-people-names-everywhere-and-private-notes.md)). Honcho 3.6.2 reads
@@ -82,7 +82,7 @@ Checks and follow-ups:
   script policy from Report-Only to enforced in one commit. Later: one shared name cleaner for
   cards, forwards and recall labels, and a notice when an off-site restore check fails.
 - Development startup order: a full tester run of `project_groups_stay_apart` alone.
-- Notes carry ([ADR-0291](docs/adr/0291-chat-notes-carry-into-new-guard-epochs.md)): on the owner's install, hide a message
+- Notes carry ([ADR-0292](docs/adr/0292-chat-notes-carry-into-new-guard-epochs.md)): on the owner's install, hide a message
   and check that the private chat's notes are still in Memory › Assistant notes after its next reply.
 - A project's tasks are one list ([ADR-0276](docs/adr/0276-a-projects-tasks-are-one-list.md)): a full tester run of
   `project_groups_stay_apart`, `member_private_chat_reads_joined_groups`, `member_app_tasks`,

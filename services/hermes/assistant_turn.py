@@ -237,7 +237,7 @@ RUNS=[]
 # Long-term memory this turn could not read in full, for the parent to count (memory_problem).
 PROBLEMS=[]
 # The ids the long-term memory this turn was given cites (nocheh:<kind>:<id>), sent to the parent as soon as it is read
-# (a memory_sources line), so the turn's notes rest on them even when the turn stops early (ADR-0291).
+# (a memory_sources line), so the turn's notes rest on them even when the turn stops early (ADR-0292).
 CITED=re.compile(r'nocheh:[a-z_]+:([a-f0-9]{64})(?![a-f0-9])')
 SEND=None
 

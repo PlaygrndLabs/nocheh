@@ -156,7 +156,7 @@ class TurnProcessTests(unittest.IsolatedAsyncioTestCase):
             await self.execute('import sys,json; body=json.load(sys.stdin); assert body["note_sources"]=={}; print(json.dumps({"state":"done","text":"hi"}))')
             self.assertEqual(counted,[('memory_read','done')])
     async def test_the_long_term_memory_a_turn_was_given_reaches_the_parent_even_when_its_answer_is_dropped(self):
-        # ADR-0291: the ids come on their own line as soon as the turn reads its memory, so a turn whose answer the guard
+        # ADR-0292: the ids come on their own line as soon as the turn reads its memory, so a turn whose answer the guard
         # drops still leaves them for its notes; only well-formed ids count.
         memory=[]
         source=('import sys,json; sys.stdin.read(); print(json.dumps({"event":"memory_sources","ids":["'+'d'*64+'","not an id"]})); '
@@ -184,7 +184,7 @@ class TurnProcessTests(unittest.IsolatedAsyncioTestCase):
                     else:await run_process(profile,Scope('42','42',True,'owner'),body,'model',None,'session')
                 origin=note_sources.load(profile)[note_sources.key('memory','Learned in this turn.')]['origins'][0]
                 self.assertEqual((origin['by'],origin['event'],origin['channel'],origin['complete']),('turn',event,'telegram',outcome=='done'))
-                # The note also rests on the turn's message and the long-term memory it was given (ADR-0291).
+                # The note also rests on the turn's message and the long-term memory it was given (ADR-0292).
                 from .retired_history import load_dependencies
                 self.assertEqual(load_dependencies(profile)['entries'][note_sources.key('memory','Learned in this turn.')],
                                  {'turn':[event],'sources':['d'*64]},'also when the turn stopped')

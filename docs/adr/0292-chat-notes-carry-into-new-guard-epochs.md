@@ -1,4 +1,4 @@
-# ADR-0291: A chat's Hermes notes carry into new guard epochs
+# ADR-0292: A chat's Hermes notes carry into new guard epochs
 
 <status>
 Accepted on 2026-11-24. The owner asked why Hermes's own notes are wiped on every safety

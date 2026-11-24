@@ -206,7 +206,7 @@ export class ScheduleRepository {
       if(current&&current.execution_version!==document.execution_version){
         const epoch=Number((await db.query('UPDATE guard_state SET epoch=epoch+1 WHERE singleton RETURNING epoch')).rows[0].epoch);
         await requestWorkflow(db,'honcho','refresh',epoch);await requestWorkflow(db,'memory_review','refresh',epoch);
-        // A schedule's new definition takes nothing from any chat's Hermes notes (ADR-0291).
+        // A schedule's new definition takes nothing from any chat's Hermes notes (ADR-0292).
         await keepNotes(db,epoch,'all');
         await db.query(`UPDATE managed_runs SET cancel_requested=true,state=CASE WHEN state='captured' THEN 'cancelled' ELSE state END,
           revision=revision+1,updated_at=now() WHERE channel='scheduler' AND logical_profile=$1 AND job_id=$2 AND state IN ('captured','running')`,[profile,job]);
