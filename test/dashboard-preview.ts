@@ -164,8 +164,9 @@ function memberRoute(route:string,body:unknown):unknown {
  * The Keys list and "Stop everything now" (ADR-0307), in memory, with the real body check (src/stores/keys.ts): the owner
  * with two keys open, then each member as storage lists them, Mira with one open. Stop ends them all and is kept as the
  * last stop; the same operation id answers the same. The new agent login is a job like Apply: it restarts for a few
- * seconds, goes back to the old login in the `login-rollback` scenario, waits for another task in `login-busy`, and in
- * `login-lost` starts but loses its answer, so the page finds it in the job list.
+ * seconds, goes back to the old login in the `login-rollback` scenario, waits for another task in `login-busy`, in
+ * `login-lost` starts but loses its answer, so the page finds it in the job list, waits for saved settings in
+ * `login-pending`, and in `login-unclosed` cannot end the keys again after the restart.
  */
 const keyOpen=new Map<string,number>([['owner',2],[previewMembers[0]!.id,1]]);
 const keyUse=new Map<string,string>([['owner',new Date(Date.now()-4*60000).toISOString()],[previewMembers[0]!.id,new Date(Date.now()-2*3600000).toISOString()]]);
@@ -1264,7 +1265,8 @@ const server=createServer((req,res)=>{void(async()=>{
   if(route==='/keys/agent-login'){if(applying||agentLogin||mode==='login-busy')throw new HttpError(409,'wait_for_active_jobs');
    const job:any={id:randomUUID(),kind:'settings.agent_login',state:'running',step:'restarting',created_at:new Date().toISOString()};jobs.unshift(job);agentLogin=job;
    if(mode==='login-rollback'){setTimeout(()=>{job.step='rolling_back';},1500);setTimeout(()=>{job.state='failed';job.error='operation_failed';job.result={status:'apply_failed',rolled_back:true};agentLogin=null;},3000);}
-   else setTimeout(()=>{job.state='complete';job.result={status:'applied'};agentLogin=null;},3000);
+   else if(mode==='login-pending'){job.state='complete';job.result={status:'settings_pending_apply'};agentLogin=null;}
+   else setTimeout(()=>{job.step='closing_keys';},2000),setTimeout(()=>{job.state='complete';job.result={status:'applied',keys_closed:mode!=='login-unclosed'};agentLogin=null;},3000);
    if(mode==='login-lost')throw new HttpError(502,'bad_gateway');
    return json(res,202,job);}
   // The Members routes: each change at once, with its operation id (step 3).

@@ -194,6 +194,18 @@ test('Telegram workflow dispatch uses current prepared derivatives and durable s
     assert.equal((await run(unstarted.reference.id)).state,'retryable_failed');
     await due(unstarted.reference.id);mode='done';assert.equal((await run(unstarted.reference.id)).state,'completed');
     assert.deepEqual(calls.filter(c=>c.input.event_id===unstarted.reference.id&&c.operation==='run.start').map(c=>c.input.attempt),[1,2]);
+    // "Stop everything now" closes a running reply's key (ADR-0307): the turn is cancelled, its reply never sent, and it is
+    // not run again under a new key.
+    const halted=await capture('Running when everything stops');await prepare(halted.reference.id);mode='running';
+    assert.equal((await run(halted.reference.id)).state,'running');
+    await services.keys.stop({scope:null,admin:true} as any,{operation_id:'stop:'+base});
+    await due(halted.reference.id);await run(halted.reference.id);
+    assert.ok(calls.some(c=>c.input.event_id===halted.reference.id&&c.operation==='run.cancel'),'the running turn is cancelled');
+    assert.equal((await stores.control.query('SELECT state FROM dispatches WHERE event_id=$1',[halted.reference.id])).rows[0].state,'cancelled');
+    await due(halted.reference.id);await run(halted.reference.id);
+    assert.equal(calls.filter(c=>c.input.event_id===halted.reference.id&&c.operation==='run.start').length,1,'never run again');
+    assert.ok(!sends.some(item=>item.operation==='telegram.reply'&&item.input.event_id===halted.reference.id),'no reply is sent');
+    mode='done';
     // A reaction while a reply runs waits to advance the epoch, so it never revokes that reply.
     const busy=await capture('Reply running during a reaction');await prepare(busy.reference.id);mode='running';
     assert.equal((await run(busy.reference.id)).state,'running');

@@ -3,7 +3,7 @@
  * when one was last used; and "Stop everything now", which ends every key and everything waiting on one, then gives the
  * agent a new login. A member's pause stays on the Members page.
  */
-import {useEffect, useState} from 'react';
+import {useEffect, useState, useSyncExternalStore} from 'react';
 import {KeyRound, OctagonX} from 'lucide-react';
 import type {KeyList, KeyPerson, KeyStopCounts, KeyStopResult} from '../../src/key-wire';
 import {apiGet, apiPost, type ApiError} from '../lib/api';
@@ -109,7 +109,13 @@ type Progress = {step: 'stopping' | 'login'; job?: string; started: number};
 
 /** What a finished new login says: nothing when it worked, else a plain line. */
 function loginProblem({job, ended}: ApplyOutcome): string | null {
-  if (ended === 'finished' && job.state === 'complete') return null;
+  if (ended === 'finished' && job.state === 'complete') {
+    if (job.result?.status === 'settings_pending_apply')
+      return 'Keys were ended, but saved settings are waiting to be applied, so the agent login didn’t change. Apply or discard them in Settings, then stop again.';
+    if (job.result?.keys_closed === false)
+      return 'The agent has a new login, but ending the keys again after the restart didn’t go through. Stop again to be sure.';
+    return null;
+  }
   if (ended === 'finished' && job.result?.status === 'apply_failed' && job.result?.rolled_back)
     return 'Keys were ended, but the services didn’t start with the new login, so the old login is back. Try again.';
   return 'Keys were ended, but the new login didn’t finish. Check System, then try again.';
@@ -125,13 +131,81 @@ async function runningLogin(): Promise<ApplyJob | null> {
   }
 }
 
-// The login this page follows, so a second mount or a second press never follows it twice.
+// The stop in progress and how the last one ended, kept outside the page so leaving Keys and coming back still shows it.
+type StopState = {progress: Progress | null; problem: string};
+let stopState: StopState = {progress: null, problem: ''};
+const stopListeners = new Set<() => void>();
+function setStop(next: Partial<StopState>) {
+  stopState = {...stopState, ...next};
+  for (const listener of stopListeners) listener();
+}
+function subscribeStop(listener: () => void) {
+  stopListeners.add(listener);
+  return () => void stopListeners.delete(listener);
+}
+// The login being followed, so it is followed once however often the page mounts or Stop is pressed.
 let followingLogin: string | null = null;
+
+/** Follows a new login to its end and says how it went. */
+async function followLogin(job: ApplyJob, toast: (text: string) => void) {
+  if (followingLogin === job.id) return;
+  followingLogin = job.id;
+  try {
+    const started = Date.parse(job.created_at ?? '') || Date.now();
+    setStop({progress: {step: 'login', job: job.step, started}});
+    const outcome = await followJob(job, started, step => setStop({progress: {step: 'login', job: step, started}}));
+    const failed = loginProblem(outcome);
+    if (failed) setStop({problem: failed});
+    else toast('Everything stopped. The agent has a new login.');
+  } finally {
+    followingLogin = null;
+    setStop({progress: null});
+    void refreshResources();
+  }
+}
+
+/** Ends every key, then starts the new agent login and follows it. */
+async function stopEverything(toast: (text: string) => void) {
+  if (stopState.progress) return;
+  setStop({problem: '', progress: {step: 'stopping', started: Date.now()}});
+  let job: ApplyJob | null = null;
+  try {
+    try {
+      await apiPost<KeyStopResult>('/keys/stop', {operation_id: crypto.randomUUID()});
+    } catch {
+      setStop({problem: 'Stopping didn’t go through. Try again.'});
+      return;
+    }
+    try {
+      job = await apiPost<ApplyJob>('/keys/agent-login', {});
+    } catch (error) {
+      // The login may have started although its answer was lost, or another tab may have started one.
+      job = await runningLogin();
+      if (!job) {
+        const code = (error as ApiError).message;
+        setStop({
+          problem:
+            code === 'wait_for_active_jobs' || code === 'job_busy'
+              ? 'Keys were ended, but another task, such as a backup, is running. Try again when it finishes.'
+              : 'Keys were ended, but the new login didn’t start. Check System, then try again.',
+        });
+      }
+    }
+  } finally {
+    if (!job) {
+      setStop({progress: null});
+      void refreshResources();
+    }
+  }
+  if (job) {
+    // A login another press or tab already follows shows here through the shared state.
+    if (followingLogin !== job.id) await followLogin(job, toast);
+  }
+}
 
 function StopEverything({stopped}: {stopped: KeyList['stopped']}) {
   const {confirm, toast} = useFeedback();
-  const [progress, setProgress] = useState<Progress | null>(null);
-  const [problem, setProblem] = useState('');
+  const {progress, problem} = useSyncExternalStore(subscribeStop, () => stopState);
   const [, tick] = useState(0);
   // The elapsed time counts up while the services restart, so the page visibly keeps working.
   useEffect(() => {
@@ -139,40 +213,16 @@ function StopEverything({stopped}: {stopped: KeyList['stopped']}) {
     const timer = setInterval(() => tick(n => n + 1), 1000);
     return () => clearInterval(timer);
   }, [progress?.step]);
-
-  /** Follows a new login to its end and says how it went. */
-  const follow = async (job: ApplyJob) => {
-    if (followingLogin === job.id) return;
-    followingLogin = job.id;
-    try {
-      const started = Date.parse(job.created_at ?? '') || Date.now();
-      setProgress({step: 'login', job: job.step, started});
-      const outcome = await followJob(job, started, step => setProgress({step: 'login', job: step, started}));
-      const failed = loginProblem(outcome);
-      if (failed) setProblem(failed);
-      else toast('Everything stopped. The agent has a new login.');
-    } finally {
-      followingLogin = null;
-    }
-  };
-
   // A login started before a reload keeps showing until it ends.
   useEffect(() => {
     let live = true;
-    void runningLogin().then(async job => {
-      if (!live || !job || followingLogin) return;
-      setProblem('');
-      try {
-        await follow(job);
-      } finally {
-        setProgress(null);
-        void refreshResources();
-      }
+    void runningLogin().then(job => {
+      if (live && job && followingLogin !== job.id) void followLogin(job, toast);
     });
     return () => {
       live = false;
     };
-  }, []);
+  }, [toast]);
 
   const stop = async () => {
     const ok = await confirm({
@@ -181,39 +231,7 @@ function StopEverything({stopped}: {stopped: KeyList['stopped']}) {
       confirm: 'Stop everything',
       danger: true,
     });
-    if (!ok) return;
-    setProblem('');
-    setProgress({step: 'stopping', started: Date.now()});
-    try {
-      try {
-        await apiPost<KeyStopResult>('/keys/stop', {operation_id: crypto.randomUUID()});
-      } catch {
-        setProblem('Stopping didn’t go through. Try again.');
-        return;
-      }
-      let job: ApplyJob;
-      try {
-        job = await apiPost<ApplyJob>('/keys/agent-login', {});
-      } catch (error) {
-        // The login may have started although its answer was lost, or another tab may have started one.
-        const running = await runningLogin();
-        if (running) {
-          job = running;
-        } else {
-          const code = (error as ApiError).message;
-          setProblem(
-            code === 'wait_for_active_jobs' || code === 'job_busy'
-              ? 'Keys were ended, but another task, such as a backup, is running. Try again when it finishes.'
-              : 'Keys were ended, but the new login didn’t start. Check System, then try again.',
-          );
-          return;
-        }
-      }
-      await follow(job);
-    } finally {
-      setProgress(null);
-      void refreshResources();
-    }
+    if (ok) await stopEverything(toast);
   };
 
   const busy = progress !== null;
@@ -222,9 +240,11 @@ function StopEverything({stopped}: {stopped: KeyList['stopped']}) {
       ? 'Ending keys…'
       : progress?.job === 'rolling_back'
         ? `Going back to the old login… ${elapsed(progress.started)}`
-        : progress
-          ? `Restarting services… ${elapsed(progress.started)}`
-          : '';
+        : progress?.job === 'closing_keys'
+          ? 'Ending keys made during the restart…'
+          : progress
+            ? `Restarting services… ${elapsed(progress.started)}`
+            : '';
   return (
     <Card className="border-bad/40 px-5 py-4">
       <div className="flex flex-wrap items-end justify-between gap-x-6 gap-y-3">

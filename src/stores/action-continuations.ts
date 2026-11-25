@@ -47,12 +47,16 @@ CREATE TRIGGER action_continuation_requested AFTER UPDATE OF state ON controlled
 `;
 
 const protocol='action-continuation-v1';
-const maxAttempts=3,chainLimit=3,askingWaitMs=600000,receiptWaitMs=120000,siblingWaitMs=120000;
+/** A follow-up runs at most this many times; a failed one under it waits to run again ("Stop everything now" reads it). */
+export const continuationMaxAttempts=3;
+const maxAttempts=continuationMaxAttempts,chainLimit=3,askingWaitMs=600000,receiptWaitMs=120000,siblingWaitMs=120000;
 const closedRows=new Set(['done','ambiguous','suppressed','cancelled','skipped']);
 const renewedCodes=['guard_context_changed','audience_context_changed','guard_transition_pending'];
 const withdrawnCodes=[...renewedCodes,'conversation_not_selected','source_retired',
   // The asker can no longer be named (they stopped being a member): no key, so the follow-up is withdrawn (ADR-0305).
-  'one_time_key_person_required'];
+  'one_time_key_person_required',
+  // Its key was closed (a member paused or removed, or "Stop everything now"): it is not sent and not run again (ADR-0307).
+  'one_time_key_closed'];
 /** Names the continuation in AsyncRuns, the gateway receipt and the archived result; never an integer, so it cannot meet a message turn's. */
 export const continuationAttempt=(leader:string,attempts:number)=>'c'+attempts+'-'+leader.slice(0,40);
 /** A leader counts once it started, or from its claim while it has yet to start. */

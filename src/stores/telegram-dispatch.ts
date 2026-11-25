@@ -57,7 +57,9 @@ const renewedCodes=['guard_context_changed','audience_context_changed','guard_tr
  * so is a member's private turn whose chat closed or that may no longer read a group it was given (step 4). */
 const withdrawnCodes=[...renewedCodes,'conversation_not_selected','source_retired','private_answer_closed',memberChatClosed,
   // A sender nobody can name now (they stopped being a member since the turn was built) gets no key: withdrawn (ADR-0305).
-  'one_time_key_person_required'];
+  'one_time_key_person_required',
+  // Its key was closed (a member paused or removed, or "Stop everything now"): it is not sent and not run again (ADR-0307).
+  'one_time_key_closed'];
 /**
  * Who sent a group message and when, as one line for the model. Names come
  * from the guarded representation, the time from the captured original, and

@@ -517,25 +517,49 @@ class AgentKeyTests(unittest.TestCase):
 
     def test_stop_everything_makes_a_new_agent_login_alone(self):
         # "Stop everything now" (ADR-0307): a new agent login, applied at once; the master key and session token stay, so the
-        # dashboard and executor keep theirs and are not restarted. Services that do not come back get the old login again.
+        # dashboard and executor keep theirs and are not restarted, even with a marker an earlier key change left. Once it is
+        # in use, keys are closed again. Services that do not come back get the old login again, and the next Stop may run.
         from tools.operations.installation import settings
         from types import SimpleNamespace
         with tempfile.TemporaryDirectory() as folder:
-            state=Path(folder);old=initialize(state);steps=[]
-            def ran(command,**options):return SimpleNamespace(returncode=0,stdout='')
+            state=Path(folder);old=initialize(state);steps=[];closes=[]
+            (state/'admin').mkdir(exist_ok=True);(state/'admin/restart-cached').touch()
+            def ran(command,**options):return SimpleNamespace(returncode=0,stdout='nocheh-dashboard\nnocheh-executor\n' if 'ps' in command else '')
             with patch('tools.operations.installation.settings.subprocess.run',side_effect=ran) as run,\
                  patch('tools.operations.installation.settings.refresh_honcho',return_value='skipped'),\
                  patch('tools.operations.installation.settings.rebuild_memory',return_value='skipped'),\
                  patch('tools.operations.installation.settings.mini_app.menu_button',return_value='skipped'):
-                self.assertEqual(settings.rotate_agent_login(state,steps.append)['status'],'applied')
+                result=settings.rotate_agent_login(state,steps.append,close_keys=lambda:closes.append(load(state)['AGENT_KEY']))
+            self.assertEqual((result['status'],result['keys_closed']),('applied',True))
             new=load(state)
-            self.assertNotEqual(new['AGENT_KEY'],old['AGENT_KEY'])
+            self.assertNotEqual(new['AGENT_KEY'],old['AGENT_KEY']);self.assertEqual(closes,[new['AGENT_KEY']],'keys close again once the new login is in use')
             for name in ('SERVICE_TOKEN','NOCHEH_HERMES_SESSION_TOKEN','NOCHEH_BOX_TOKEN','NOCHEH_MACHINE_TOKEN','POSTGRES_PASSWORD'):self.assertEqual(new[name],old[name],name)
-            self.assertIn('restarting',steps);self.assertFalse(any('restart' in call.args[0] for call in run.call_args_list),'no dashboard or executor restart')
-            self.assertFalse((state/'admin/previous.env').exists());self.assertFalse((state/'admin/restart-cached').exists())
+            self.assertEqual(steps,['restarting','memory','telegram','closing_keys'])
+            self.assertFalse(any('restart' in call.args[0] for call in run.call_args_list),'no dashboard or executor restart')
+            self.assertFalse((state/'admin/previous.env').exists());self.assertTrue((state/'admin/restart-cached').exists(),'the marker waits for the next up')
+            # A close that fails is said, and the login stays.
+            with patch('tools.operations.installation.settings.subprocess.run',side_effect=ran),\
+                 patch('tools.operations.installation.settings.refresh_honcho',return_value='skipped'),\
+                 patch('tools.operations.installation.settings.rebuild_memory',return_value='skipped'),\
+                 patch('tools.operations.installation.settings.mini_app.menu_button',return_value='skipped'):
+                def refused():raise ValueError('storage down')
+                self.assertEqual(settings.rotate_agent_login(state,close_keys=refused)['keys_closed'],False)
+            new=load(state)
             with patch('tools.operations.installation.settings.subprocess.run',side_effect=[SimpleNamespace(returncode=code) for code in (1,0,0)]):
-                self.assertEqual(settings.rotate_agent_login(state)['status'],'apply_failed')
+                self.assertEqual(settings.rotate_agent_login(state,close_keys=lambda:self.fail('no close'))['status'],'apply_failed')
             self.assertEqual(load(state)['AGENT_KEY'],new['AGENT_KEY'],'the old login is back')
+            self.assertFalse((state/'admin/previous.env').exists(),'nothing waits to apply after the rollback')
+
+    def test_stop_everything_waits_for_saved_settings_not_yet_applied(self):
+        # Saved settings not yet applied would restart with the new login: it waits, and changes nothing.
+        from tools.operations.installation import settings
+        with tempfile.TemporaryDirectory() as folder:
+            state=Path(folder);initialize(state);(state/'admin').mkdir(exist_ok=True)
+            write_env(state/'admin/previous.env',load(state))
+            env=settings.env_path(state);saved=env.read_bytes()
+            with patch('tools.operations.installation.settings.subprocess.run',side_effect=AssertionError('no restart')):
+                self.assertEqual(settings.rotate_agent_login(state,close_keys=lambda:self.fail('no close')),{'status':'settings_pending_apply'})
+            self.assertEqual(env.read_bytes(),saved,'the login stays')
 
     def test_apply_after_a_cutover_restarts_what_caches_the_keys(self):
         from tools.operations.installation import settings

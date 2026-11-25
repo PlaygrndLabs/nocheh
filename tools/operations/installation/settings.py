@@ -213,9 +213,11 @@ def save(state, changes, expected, rebuild_memory=False, owner_change=False):
     return view(state)
 
 
-def apply(state, progress=lambda step: None):
+def apply(state, progress=lambda step: None, restart_cached_services=True):
     """Restarts the services with the saved settings. `progress` hears each step so
-    the dashboard can say what is happening while services restart."""
+    the dashboard can say what is happening while services restart. A new agent login alone passes
+    `restart_cached_services=False`: the dashboard and executor keep theirs, and a marker left by an earlier key change
+    stays for the next up or Apply."""
     try:
         from tools.operations.installation.operations import compose, environment
         from tools.operations.installation.configuration import read_env
@@ -270,7 +272,7 @@ def apply(state, progress=lambda step: None):
     from tools.operations.installation.configuration import RESTART_MARKER
     # A key change since the last up (a cutover or rotate-keys) also restarts the dashboard and executor, which keep
     # the keys they read once. Apply pressed in the dashboard restarts the dashboard itself last.
-    if (Path(state) / RESTART_MARKER).exists(): restart_cached(state)
+    if restart_cached_services and (Path(state) / RESTART_MARKER).exists(): restart_cached(state)
     return {'status': 'applied', 'honcho': honcho, 'memory_rebuild': memory, 'mini_app': menu, **view(state)}
 
 
@@ -323,22 +325,43 @@ def rotate_keys(state, print=print):
     return 1
 
 
-def rotate_agent_login(state, progress=lambda step: None):
+def rotate_agent_login(state, progress=lambda step: None, close_keys=None):
     """The dashboard's "Stop everything now" (ADR-0307): a new agent login alone, applied at once. The master key and
-    Hermes's session token stay, so the dashboard and executor keep working and need no restart; Hermes and the services
-    that check the agent login restart with the new one. Apply rolls back to the old login when they do not come back."""
+    Hermes's session token stay, so the dashboard and executor keep working and are not restarted; Hermes and the services
+    that check the agent login restart with the new one. Apply rolls back to the old login when they do not come back.
+    Saved settings not yet applied would be applied with it, so it waits for them (`settings_pending_apply`): Apply or
+    discard them first. Once the new login is in use, every key the old one could still open is closed again
+    (`keys_closed`), since it could start work until the services restarted."""
     import secrets
     directory = Path(state) / 'admin'; directory.mkdir(exist_ok=True, mode=0o700)
     with (directory / 'settings.lock').open('a') as lock:
         fcntl.flock(lock, fcntl.LOCK_EX)
         current = load(state)
-        previous = directory / 'previous.env'
-        # The last applied baseline stays when unapplied settings already left one.
-        if not previous.exists(): write_env(previous, current)
+        if (directory / 'previous.env').exists() or pending_rebuild(state) or view(state)['apply_state'] == 'pending':
+            return {'status': 'settings_pending_apply'}
+        write_env(directory / 'previous.env', current)
         updated = {**current, 'AGENT_KEY': secrets.token_hex(32)}
         validate(updated)
         write_env(env_path(state), updated)
-    return apply(state, progress)
+    result = apply(state, progress, restart_cached_services=False)
+    if result.get('status') != 'applied':
+        # Back on the old login, .env is the baseline again: nothing waits to apply, so the next Stop may run.
+        if result.get('rolled_back'): (directory / 'previous.env').unlink(missing_ok=True)
+        return result
+    progress('closing_keys')
+    try:
+        (close_keys or close_old_keys)()
+        closed = True
+    except Exception:
+        closed = False
+    return {**result, 'keys_closed': closed}
+
+
+def close_old_keys():
+    """Closes every key again through storage, adding to the stop that the new agent login finishes."""
+    import uuid
+    from tools.operations.archive.archive import API
+    API().call('/v1/keys/stop', {'operation_id': 'agent-login:' + str(uuid.uuid4()), 'again': True})
 
 
 def telegram_api(token, method, **params):

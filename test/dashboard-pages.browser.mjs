@@ -3075,6 +3075,48 @@ test('Keys lists each person’s keys, and Stop everything now ends them first, 
   }
   await page.getByRole('status').filter({hasText: 'Everything stopped. The agent has a new login.'}).last().waitFor();
   assert.equal(await page.getByRole('alert').count(), 0);
+  // Saved settings wait to be applied: the login does not change, and the page says how to go on.
+  writeFileSync('/tmp/nocheh-ui-scenario', 'login-pending');
+  try {
+    await confirmStop();
+    await page
+      .getByRole('alert')
+      .filter({
+        hasText:
+          'Keys were ended, but saved settings are waiting to be applied, so the agent login didn’t change. Apply or discard them in Settings, then stop again.',
+      })
+      .waitFor();
+  } finally {
+    rmSync('/tmp/nocheh-ui-scenario', {force: true});
+  }
+  // Keys can't be ended again after the restart: said, so the owner stops again.
+  writeFileSync('/tmp/nocheh-ui-scenario', 'login-unclosed');
+  try {
+    await confirmStop();
+    await page
+      .getByRole('alert')
+      .filter({
+        hasText:
+          'The agent has a new login, but ending the keys again after the restart didn’t go through. Stop again to be sure.',
+      })
+      .waitFor();
+  } finally {
+    rmSync('/tmp/nocheh-ui-scenario', {force: true});
+  }
+  // Leaving Keys during the login and coming back still shows it, with the button off, and how it ended.
+  writeFileSync('/tmp/nocheh-ui-scenario', 'login-rollback');
+  try {
+    await confirmStop();
+    await page.getByText(/^Restarting services… \d+:\d\d$/).waitFor();
+    await page.evaluate(() => (location.hash = '#members'));
+    await page.getByRole('heading', {name: 'Members', level: 1}).waitFor();
+    await page.evaluate(() => (location.hash = '#keys'));
+    await page.getByText(/^(Restarting services|Going back to the old login)… \d+:\d\d$/).waitFor();
+    assert.equal(await stop.isDisabled(), true);
+    await page.getByRole('alert').filter({hasText: 'so the old login is back'}).waitFor();
+  } finally {
+    rmSync('/tmp/nocheh-ui-scenario', {force: true});
+  }
   // Pressed again, it is a new stop with a new operation id, and this time the new login works.
   await confirmStop();
   await page.getByText(/^Restarting services… \d+:\d\d$/).waitFor();
@@ -3085,18 +3127,9 @@ test('Keys lists each person’s keys, and Stop everything now ends them first, 
   await page.getByRole('status').filter({hasText: 'Everything stopped. The agent has a new login.'}).last().waitFor();
   assert.deepEqual(
     posts.map(post => post.path),
-    [
-      '/keys/stop',
-      '/keys/agent-login',
-      '/keys/stop',
-      '/keys/agent-login',
-      '/keys/stop',
-      '/keys/agent-login',
-      '/keys/stop',
-      '/keys/agent-login',
-    ],
+    Array.from({length: 7}, () => ['/keys/stop', '/keys/agent-login']).flat(),
   );
-  assert.equal(new Set(posts.filter(post => post.path === '/keys/stop').map(post => post.body.operation_id)).size, 4);
+  assert.equal(new Set(posts.filter(post => post.path === '/keys/stop').map(post => post.body.operation_id)).size, 7);
   assert.equal(await page.getByRole('alert').count(), 0);
   await page.getByTestId('keys-last-stop').getByText('Last stopped just now: 0 keys, 1 card, 1 run ended.').waitFor();
   assert.equal(await stop.isEnabled(), true);
