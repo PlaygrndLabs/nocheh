@@ -662,6 +662,35 @@ class ProductScenarios(Scenarios):
                                                                    'operation_id': 'scenario-unhide-'+hide[:16]})
         self.gate('unhidden', restored.get('retired') is False)
 
+    def notes_survive_a_hide(self):
+        # A hide moves the guard epoch and gives the chat a new Hermes profile. Hermes's notes carry into it (ADR-0292): a
+        # note saved before the hide is still there on the next reply, and only a note written in the hidden message's
+        # own turn stays behind. The hide is undone at the end.
+        number = str(self.f.ids())
+        kept, gone = 'KEEPMARK'+number, 'GONEMARK'+number
+        save = lambda mark, note: ' [[tool:memory {"target":"memory","operations":[{"action":"add","content":"'+mark+': '+note+'"}]}]]'
+        self.turn(self.f.message(OWNER, 'این را یادداشت کن'+save(kept, 'the owner keeps synthetic notes across a hide.')), OWNER)
+        _, text = self.turn(self.f.message(OWNER, 'یادداشت‌هایت را می‌بینی؟ [[notes:'+kept+']]'), OWNER)
+        self.gate('note_saved_before_the_hide', 'present' in text, answer=text)
+        hide, _ = self.turn(self.f.message(OWNER, 'این را هم یادداشت کن، بعدا پنهانش می‌کنم'+save(gone, 'written in a message that is hidden later.')), OWNER)
+        _, text = self.turn(self.f.message(OWNER, 'و این یکی؟ [[notes:'+gone+']]'), OWNER)
+        self.gate('note_from_the_hidden_turn_saved', 'present' in text, answer=text)
+        current = self.f.app('/v1/sources/'+hide+'/retirement')
+        result = self.f.app('/v1/sources/'+hide+'/retirement', {'retired': True, 'expected_revision': current['revision'],
+                                                                 'operation_id': 'scenario-notes-hide-'+hide[:16]})
+        self.gate('hidden', result.get('retired') is True)
+        try:
+            _, text = self.turn(self.f.message(OWNER, 'یادداشت‌هایت هنوز هست؟ [[notes:'+kept+']]'), OWNER)
+            self.gate('note_survives_the_hide', 'present' in text, answer=text)
+            _, text = self.turn(self.f.message(OWNER, 'و آن یکی؟ [[notes:'+gone+']]'), OWNER)
+            self.gate('note_resting_on_the_hidden_message_left', 'absent' in text, answer=text)
+        finally:
+            restored = self.f.app('/v1/sources/'+hide+'/retirement', {'retired': False, 'expected_revision': result['revision'],
+                                                                       'operation_id': 'scenario-notes-unhide-'+hide[:16]})
+            self.gate('unhidden', restored.get('retired') is False)
+        _, text = self.turn(self.f.message(OWNER, 'بعد از برگرداندن؟ [[notes:'+kept+']]'), OWNER)
+        self.gate('note_survives_the_unhide', 'present' in text, answer=text)
+
     # Native notes ------------------------------------------------------------------------------
 
     def native_notes_reach_later_turns(self):
@@ -5597,7 +5626,7 @@ PRODUCT_ORDER = ['group_members', 'group_name_addresses', 'unaddressed_messages_
                  'owner_private_card_and_approve', 'owner_private_card_reject', 'tool_card_reads_in_words', 'owner_freedom_opens_only_given_links', 'forwarded_messages_are_not_the_owners_words', 'same_group_post_goes_right_away', 'member_cross_group_card_in_origin',
                  'owner_reviews_when_member_not_allowed_there', 'member_switched_off_in_a_group', 'member_posting_off_is_refused',
                  'member_who_left_a_group_is_not_reached_there', 'owner_from_group_to_own_private_chat', 'owner_from_group_to_other_group',
-                 'hidden_message_keeps_the_chat', 'native_notes_reach_later_turns', 'reaction_keeps_group_name', 'learning_reaches_honcho',
+                 'hidden_message_keeps_the_chat', 'notes_survive_a_hide', 'native_notes_reach_later_turns', 'reaction_keeps_group_name', 'learning_reaches_honcho',
                  'not_allowed_group_text_stays_out_of_owner_notes', 'display_name_cannot_borrow', 'forward_kept_apart_and_labelled', 'own_file_stays_recallable',
                  # Source tags on search hits and opened messages (ADR-0261).
                  'search_hits_name_their_source', 'group_tags_stay_in_the_group', 'reply_thread_opens', 'topic_sharing_group_keeps_evidence',
