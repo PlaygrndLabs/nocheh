@@ -104,8 +104,6 @@ Checks and follow-ups:
 - Development startup order: a full tester run of `project_groups_stay_apart` alone.
 - Talk while it works ([ADR-0301](docs/adr/0301-a-message-joins-the-running-turn-in-its-chat.md)): the tester covers it
   (`message_joins_running_turn`); left is one check with the real model, two messages in a row while the agent uses a tool.
-- Notes carry ([ADR-0292](docs/adr/0292-chat-notes-carry-into-new-guard-epochs.md)): on the owner's install, hide a message
-  and check that the private chat's notes are still in Memory › Assistant notes after its next reply.
 - A project's tasks are one list ([ADR-0276](docs/adr/0276-a-projects-tasks-are-one-list.md)): a full tester run of
   `project_groups_stay_apart`, `member_private_chat_reads_joined_groups`, `member_app_tasks`,
   `member_app_drops_a_left_group` and `member_app_never_leaks`.
