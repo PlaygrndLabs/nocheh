@@ -91,7 +91,7 @@ async def run_process(root, scope, body, model, credentials, session_id, emit=No
 # owner tag of a speaker line, or a replied-to message's lines, as frame() compares them. Retiring a message withholds
 # what these lines quote from stored history (retired_history.py), so message text never writes one.
 FRAME_WORDS=('groupmessagefrom','recentmessagesinthisgroup','endofrecentmessages','privateanswer','forwarded','theowner',
-             'replyingto','inreplyto','endofreplied')
+             'replyingto','inreplyto','endofreplied','localtime')
 OWNER_TAG=re.compile(r'\[the owner\]',re.I)
 
 
@@ -240,6 +240,24 @@ def job_run(limits):
     return limits
 
 
+def local_time(body):
+    """The turn's date and time in the chat's time zone (ADR-0288), as one line for the model, or '' without a zone.
+    Hermes dates its prompt once per session in the server's zone, so after midnight in the chat a reply would still
+    count "today", "tomorrow" and "yesterday" from the day before. A message uses the time it was sent, so a retry reads
+    the same line; a scheduled run uses the time it runs."""
+    name=body.get('day_zone')
+    if not isinstance(name,str) or not 0<len(name)<=64:return ''
+    from datetime import datetime
+    from zoneinfo import ZoneInfo
+    try:place=ZoneInfo(name)
+    except Exception:return ''
+    payload=body.get('payload') if isinstance(body.get('payload'),dict) else {}
+    message=payload.get('message') if isinstance(payload.get('message'),dict) else {}
+    sent=message.get('date')
+    at=datetime.fromtimestamp(sent if type(sent) is int and sent>0 else time.time(),place)
+    return '[Local time: '+at.strftime('%A, %-d %B %Y, %H:%M')+' ('+name+')]'
+
+
 def message_text(body, scope, answer=None):
     """The turn's message as the model reads it, with Nocheh's own lines around it, and the text its memory query uses.
     A message that joins a running turn (steering.py) reaches the agent the same way."""
@@ -291,6 +309,8 @@ def message_text(body, scope, answer=None):
         # Telegram does not let a bot download a file over 20 MB; only its reference is archived.
         text += ('\n\n[' + ('One attached file is' if too_large==1 else str(too_large)+' attached files are') +
                  ' over the 20 MB limit for bot downloads, so only a reference is archived and the content is not available to you.]')
+    stamp=local_time(body)
+    if stamp: text += '\n\n' + stamp
     text += '\n\n[Archive source: nocheh:event:' + body['event_id'] + ']'
     # The question is a source of a private answer too: retiring it withholds the answer's history.
     if answer: text += '\n[Archive source: nocheh:event:' + answer['question_event'] + ']'

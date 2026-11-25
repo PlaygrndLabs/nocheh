@@ -75,6 +75,12 @@ const LOGICAL=/^nocheh-[a-f0-9]{24}$/;
  * returns other people's messages too (owner's choice, 2026-11-24). */
 const SCHEDULE_IGNORES=new Set<OutsideRead>(['unchecked']);
 const turnPerson=(principal:Reader)=>boundReader(principal)==='member'?principal.member??null:'owner';
+/** The Telegram user id member `member` writes from in their own private chat `chat`, or null: what their own messages
+ *  there name as their sender. */
+export async function memberSender(control:Pick<pg.Pool,'query'>,chat:string,member:string):Promise<string|null> {
+  return (await control.query<{external_id:string}>(`SELECT a.external_id FROM chats c JOIN chat_accounts a ON a.id=c.account_id
+    JOIN chat_connections n ON n.id=a.connection_id WHERE c.id=$1 AND c.kind='private' AND a.member_id=$2 AND n.app='telegram'`,[chat,member])).rows[0]?.external_id??null;
+}
 
 /** Who set a definition version: a person's live turn, a person's press (edit grant), or Hermes's own checkpoint. */
 export type ScheduleSetBy={via:'turn';person:string;turn:string}|{via:'edit';person:string;request_id:string}|{via:'checkpoint'};
@@ -280,9 +286,10 @@ export class ScheduleRepository {
       typeof document.timezone==='string'&&!knownZone(document.timezone))throw new HttpError(400,'invalid_schedule_definition');
     if(schedule.kind==='cron'&&!parseCron(schedule.expr))throw new HttpError(400,'schedule_cron_unsupported');
     // What outside content reached this turn so far, and the instruction the schedule ran with before it (ADR-0294). The
-    // asker's own typed words are theirs, the owner's or a member's in their own chat, whose chat id is their account's.
-    // A runtime that never reported its conversation does not hold a schedule; an archive search does.
-    const asker=grant.person==='owner'?s.access.policy().owner_id:grant.scope;
+    // asker's own typed words are theirs: the owner's, or a member's in their own chat, by their Telegram user id (a chat
+    // first seen after step 2b has a digest id, never theirs). A runtime that never reported its conversation does not
+    // hold a schedule; an archive search does.
+    const asker=grant.person==='owner'?s.access.policy().owner_id:await memberSender(this.control,grant.scope,grant.person);
     const reads=(await outsideReads(this.control,s.stores.archive,turn,asker)).filter(read=>!SCHEDULE_IGNORES.has(read));
     const before=(await this.control.query(currentSql,[scheduleId(grant.profile,identity(body.job_id))])).rows[0];
     const earlier=before&&!before.configuration?.removed?await this.currentBody(before):null;

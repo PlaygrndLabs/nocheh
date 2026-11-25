@@ -206,7 +206,9 @@ class ManagedAsync:
             else:
                 progress('assistant')
                 native={**claim,**prepared,'channel':channel}
-                if channel=='scheduler':native.update(job_id=context['job_id'],job_preferences=context['definition'].get('preferences',{}))
+                if channel=='scheduler':
+                    # The schedule's own time zone dates the run, as a message's chat zone dates a reply (ADR-0288).
+                    native.update(job_id=context['job_id'],job_preferences=context['definition'].get('preferences',{}),day_zone=context['definition'].get('timezone'))
                 if channel=='background':native.update(background=context['background'])
                 result=asyncio.run(self.runner(self.root,scope,native,self.admin.model,
                     self.credentials(),context['conversation'],emit=(lambda text:self.emit(body,text)) if channel=='browser' else None,cancelled=cancelled,
