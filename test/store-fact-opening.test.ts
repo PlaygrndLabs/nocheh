@@ -165,6 +165,12 @@ test('a recall\'s facts open by their record and number until a source is retire
     // Restoring the second session's message too: the record stands again, and a fact the engine still holds opens.
     await s.retirements.set(owner,quiet.id,{retired:false,expected_revision:1,operation_id:`fact-opening:${run}:restore:quiet`});
     assert.deepEqual((await s.retirements.historyRetirements(ids)).retired_records,[]);
+    // A message written to the second session only after these records were made cannot be what they rest on: hiding it
+    // retires none of them, so the notes of a turn that read them earlier keep them (ADR-0292).
+    const late=await say(bob,'said after the records',T+7400);await write(late,BOB,second);
+    await s.retirements.set(owner,late.id,{retired:true,expected_revision:0,operation_id:`fact-opening:${run}:retire:late`});
+    assert.deepEqual((await s.retirements.historyRetirements(ids)).retired_records,[],'a later message of the session');
+    await s.retirements.set(owner,late.id,{retired:false,expected_revision:1,operation_id:`fact-opening:${run}:restore:late`});
     assert.equal((await s.memory.openFact(await turn(),factsRecord,2) as any).text,'Bob likes tea');
     // The engine deleted the tea fact (its session was rebuilt): it no longer opens.
     conclusions.splice(conclusions.findIndex(c=>c.id===likes),1);

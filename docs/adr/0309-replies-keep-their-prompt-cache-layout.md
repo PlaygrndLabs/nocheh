@@ -1,4 +1,4 @@
-# ADR-0307: Replies keep their prompt cache layout
+# ADR-0309: Replies keep their prompt cache layout
 
 <status>
 Accepted on 2026-11-25. Anthropic reported that the account's prompt cache hit rate dropped 91% in

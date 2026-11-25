@@ -187,7 +187,7 @@ Nocheh is a personal AI brain. It owns the original archive, the rules, the secr
 - A part that names no model uses its default on its provider, else the main model; the secret check's default on Anthropic is `claude-haiku-5-5` ([0246](0246-the-secret-check-on-anthropic-defaults-to-haiku-5-5.md)).
 - Embeddings have explicit provider, model and key settings, and a provider failure starts a durable cooldown ([0034](0034-explicit-embedding-environment.md), [0100](0100-durable-embedding-egress-cooldown.md)).
 - Anthropic replies use the Messages API for prompt caching ([0199](0199-anthropic-replies-use-the-messages-api-for-prompt-caching.md)).
-- Replies keep their prompt cache layout: memory evidence first, five-minute cache life, schedule tool per message; moving the evidence saves nothing on replies that use tools ([0307](0307-replies-keep-their-prompt-cache-layout.md)).
+- Replies keep their prompt cache layout: memory evidence first, five-minute cache life, schedule tool per message; moving the evidence saves nothing on replies that use tools ([0309](0309-replies-keep-their-prompt-cache-layout.md)).
 
 ### Health and usage
 

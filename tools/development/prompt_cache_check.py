@@ -1,4 +1,4 @@
-"""How much of a chat's replies Anthropic's prompt cache would read, measured on real Hermes turns (ADR-0307).
+"""How much of a chat's replies Anthropic's prompt cache would read, measured on real Hermes turns (ADR-0309).
 
 Each reply runs Hermes in its own process, as a sealed turn does, against a local stand-in for Anthropic's Messages API
 that keeps a prompt cache by Anthropic's rules: a request reads the longest start, ending at a cache mark or up to 20
@@ -183,7 +183,7 @@ def main():
 
 def moved(payload):
     """The payload with Nocheh's memory evidence, which it puts first, moved to right after the turn's own message: the
-    layout ADR-0307 measured and did not take. The turn's message is the last user message with an archive source line."""
+    layout ADR-0309 measured and did not take. The turn's message is the last user message with an archive source line."""
     from services.hermes.memory_evidence import PREFIX
     messages = [dict(message) for message in payload.get('messages') or []]
     first = messages[0].get('content') if messages else None
