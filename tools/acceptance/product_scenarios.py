@@ -4751,6 +4751,124 @@ class ProductScenarios(Scenarios):
             for item in items:
                 self.remove_member(item)
 
+    # Schedules set by asking (test plan step 3) ---------------------------------
+
+    @staticmethod
+    def schedule_request(arguments):
+        """A cronjob_manage directive whose prompt may itself hold directives: they are written as JSON escapes, so the
+        scripted model reads them only in the schedule's own run, never in the turn that sets it."""
+        body = json.dumps(arguments, ensure_ascii=False).replace('[', '\\u005b').replace(']', '\\u005d')
+        return '[[tool:cronjob_manage '+body+']]'
+
+    def schedules_listed(self):
+        return self.f.app('/v1/agent/manage', {'action': 'schedules', 'operation': 'list'})['schedules']
+
+    def scheduler_runs(self, scope, started, done_only=True):
+        """The scheduler's runs in `scope` since `started`, oldest first: [{id, state}]."""
+        found = self.f.query('nocheh_control', "SELECT coalesce(json_agg(json_build_object('id',event_id,'state',state,'error',error_code) ORDER BY created_at),'[]') "
+                             "FROM managed_runs WHERE channel='scheduler' AND scope='"+scope+"' AND created_at>='"+started+"'"
+                             + (" AND state='done'" if done_only else ''))
+        return json.loads(found or '[]')
+
+    def schedule_notice(self, before, chat, job, kind):
+        """The notice about `job` sent to `chat` since `before` with the button of `kind` (p pause, s start, d delete)."""
+        return next((row for row in self.f.sent()[before:] if row['message']['chat']['id'] == chat
+                     and any(str(button.get('callback_data') or '').startswith('nk'+kind) and str(button['callback_data']).endswith(job)
+                             for button in self.buttons(row))), None)
+
+    def schedule_runs_tools_quietly_and_pauses_by_button(self):
+        # The owner asks in their private chat for a schedule whose run reads their tasks and conversations and has nothing to
+        # send. Each tool answers through the whole chain (Hermes, broker, storage) with no error, the run answers
+        # [NO_REPLY], nothing is sent, and the run log says nothing new (ADR-0266). Pause on the schedule's notice in
+        # Telegram stops it: no later run, and the notice loses its buttons. The owner then deletes it as the Schedules
+        # page does.
+        number = str(self.f.ids())
+        mark, name = 'QUIETSCHED'+number, 'Quiet check '+number
+        prompt = ('[[tool:mcp__nocheh__tasks '+json.dumps({'action': 'list', 'q': mark})+']] '
+                  '[[tool:mcp__nocheh__owner_read {"view":"conversations"}]] [[after:silent]]')
+        started = self.f.query('nocheh_control', 'SELECT now()')
+        before, events = len(self.f.sent()), len(self.f.agent())
+        self.turn(self.f.message(OWNER, 'هر دقیقه چک کن '+self.schedule_request({'action': 'create', 'name': name, 'prompt': prompt,
+                                                                             'schedule': 'every 1m', 'repeat': 3})), OWNER)
+        job = next((row for row in self.schedules_listed() if row['name'] == name), None)
+        self.gate('schedule_created', job is not None and job.get('enabled') is not False, job=job and job['id'])
+        notice = self.schedule_notice(before, OWNER, job['id'], 'p')
+        self.gate('notice_has_pause_and_delete', notice is not None
+                  and [button['callback_data'][:3] for button in self.buttons(notice)] == ['nkp', 'nkd'])
+        try:
+            after_notice = len(self.f.sent())
+            runs = self.wait('scheduled_run_done', lambda: self.scheduler_runs(job['scope'], started), 300)
+            calls = [event for event in self.f.agent()[events:] if event.get('phase') == 'final'
+                     and (event.get('tool') == 'mcp__nocheh__tasks' and mark in str(event.get('argument'))
+                          or event.get('tool') == 'mcp__nocheh__owner_read')]
+            self.current['observed'] = {'calls': [{'tool': event['tool'], 'result': str(event.get('result'))[:300]} for event in calls]}
+            self.gate('run_called_both_tools', {event['tool'] for event in calls} == {'mcp__nocheh__tasks', 'mcp__nocheh__owner_read'},
+                      tools=sorted({event['tool'] for event in calls}))
+            self.gate('tools_answered_without_error', all('"error"' not in str(event.get('result')) for event in calls))
+            sends = self.f.query('nocheh_control', "SELECT count(*) FROM telegram_action_requests WHERE source_reference->>'id'='"+runs[0]['id']+"'")
+            self.gate('silent_run_sends_nothing', sends == '0' and not self.replies(after_notice, OWNER), sends=sends)
+            log = self.f.app('/v1/schedules/runs?scope='+urllib.parse.quote(job['scope'])+'&job_id='+job['id'])['runs']
+            self.gate('run_log_says_nothing_new', bool(log) and log[0]['result'] == 'nothing_new', log=log[:2])
+            answer = self.tap(notice, next(button['callback_data'] for button in self.buttons(notice) if button['callback_data'].startswith('nkp')))
+            now = next((row for row in self.schedules_listed() if row['id'] == job['id']), {})
+            self.gate('pause_press_pauses', now.get('enabled') is False, answer=answer.get('text'), enabled=now.get('enabled'))
+            self.gate('notice_loses_its_buttons', not self.buttons(self.card_message(notice)))
+            time.sleep(80)
+            self.gate('paused_schedule_does_not_run', len(self.scheduler_runs(job['scope'], started, done_only=False)) == 1)
+        finally:
+            removed = self.f.app('/v1/agent/manage', {'action': 'schedules', 'operation': 'delete', 'profile': job['profile'], 'job_id': job['id'],
+                                                      'request_id': 'scenario-delete-'+job['id']})
+            self.gate('schedule_removed', removed == {'ok': True} and all(row['id'] != job['id'] for row in self.schedules_listed()))
+
+    def member_schedule_runs_in_their_own_chat(self):
+        # A member with Personal assistant on asks in their own private chat for a schedule (ADR-0277, ADR-0305). It is set
+        # as theirs, its notice goes to them, and its run's result goes to their chat with no card, for nobody else. With
+        # Personal assistant off it does not run. The member deletes it with the Delete button on its notice.
+        person, number = self.fresh_person(), str(self.f.ids())
+        mark, name = 'MEMBERSCHED'+number, 'Member reminder '+number
+        chat = self.f.chat(person)
+        item = self.add_member(person, (GROUP,))
+        job = None
+        try:
+            item = self.change_member(item, assistant=True)
+            self.gate('personal_assistant_on', item['permissions'].get('assistant') is True, member=item)
+            started = self.f.query('nocheh_control', 'SELECT now()')
+            known, before = {row['id'] for row in self.proposals()}, len(self.f.sent())
+            self.private_turn(person, 'هر دقیقه یادم بنداز '+self.schedule_request({'action': 'create', 'name': name, 'prompt': 'یادآوری '+mark,
+                                                                                    'schedule': 'every 1m', 'repeat': 3}))
+            job = next((row for row in self.schedules_listed() if row['name'] == name), None)
+            self.gate('schedule_set_in_member_chat', job is not None and job['scope'] == chat and job['deliver'] == 'telegram',
+                      job=job and {key: job.get(key) for key in ('id', 'scope', 'deliver')})
+            set_by = self.f.query('nocheh_control', "SELECT created_by FROM workflow_schedules WHERE logical_profile='"+job['profile']+"' AND job_id='"+job['id']+"'")
+            self.gate('schedule_set_by_the_member', set_by == item['id'], set_by=set_by)
+            notice = self.schedule_notice(before, person, job['id'], 'd')
+            self.gate('notice_goes_to_the_member', notice is not None and not self.schedule_notice(before, OWNER, job['id'], 'd'))
+            after_notice = len(self.f.sent())
+            self.wait('scheduled_run_done', lambda: self.scheduler_runs(chat, started), 300)
+            result = self.wait('result_staged', lambda: next((row for row in self.proposals() if row['id'] not in known
+                                                              and row['arguments']['destination'] == chat), None), 120)
+            self.wait('result_delivered', lambda: next(row for row in self.proposals() if row['id'] == result['id'])['state'] in ('done', 'ambiguous'), 240)
+            final = next(row for row in self.proposals() if row['id'] == result['id'])
+            self.gate('result_sent_to_member_without_card', final['state'] == 'done' and not self.cards_since(after_notice, person)
+                      and not self.cards_since(after_notice, OWNER), state=final['state'], error=final.get('error_code'))
+            self.gate('result_reaches_only_the_member', any(row['message']['text'] == final['arguments']['text'] for row in self.replies(after_notice, person))
+                      and not [row for row in self.f.sent()[after_notice:] if mark in str(row['message'].get('text')) and row['message']['chat']['id'] != person])
+            item = self.change_member(self.member_item(person), assistant=False)
+            done, sent = len(self.scheduler_runs(chat, started)), len(self.f.sent())
+            time.sleep(80)
+            self.gate('assistant_off_stops_the_schedule', len(self.scheduler_runs(chat, started)) == done and not self.replies(sent, person),
+                      runs=len(self.scheduler_runs(chat, started)), before=done)
+            item = self.change_member(self.member_item(person), assistant=True)
+            answer = self.tap(self.card_message(notice), next(button['callback_data'] for button in self.buttons(notice)
+                                                               if button['callback_data'].startswith('nkd')), presser=person)
+            self.gate('member_deletes_by_button', all(row['id'] != job['id'] for row in self.schedules_listed()), answer=answer.get('text'))
+            job = None
+        finally:
+            if job:
+                self.f.app('/v1/agent/manage', {'action': 'schedules', 'operation': 'delete', 'profile': job['profile'], 'job_id': job['id'],
+                                                'request_id': 'scenario-delete-'+job['id']}, allow_error=True)
+            self.remove_member(item)
+
     def member_private_over_the_daily_cap(self):
         # The daily message cap counts a member's group and private turns together: with the cap at 1, a member answered
         # in GROUP gets the private limit text, once a UTC day, and no model turn when they then write privately.
@@ -5653,6 +5771,8 @@ PRODUCT_ORDER = ['group_members', 'group_name_addresses', 'unaddressed_messages_
                  # A member's own private chat (step 4) and the owner's ask about it (step 4b), ADR-0262; the ask needs the marks
                  # the scenario before it planted, and the sweep after them reads both.
                  'member_private_chat_reads_joined_groups', 'member_private_chat_with_group_talk_off', 'member_private_chat_off_or_paused_gets_fixed_reply',
+                 # Schedules set by asking (test plan step 3): the owner's quiet run and Pause, a member's own schedule.
+                 'schedule_runs_tools_quietly_and_pauses_by_button', 'member_schedule_runs_in_their_own_chat',
                  'member_private_over_the_daily_cap', 'owner_and_member_never_swap_profiles', 'member_chat_is_never_a_sharing_source',
                  'member_private_chat_rechecks_old_presence', 'member_private_chat_stays_with_the_member', 'owner_asks_about_a_member',
                  # The members' app (step 5), ADR-0265; its sweep reads every answer the scenarios before it got, and the
