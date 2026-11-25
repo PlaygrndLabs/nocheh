@@ -124,10 +124,21 @@ test('a press pauses or deletes only a schedule of the owner\'s private chat, th
     assert.equal(await notices([],member,grants(none)).press('d',STORE,JOB,'b'.repeat(64),'777'),scheduleNoticeLines('').changed);
     assert.deepEqual([asked.map(input=>input.operation),none.length],[['list'],0]);
     assert.equal(sent[0]!.edit,true);assert.equal(sent[0]!.buttons,undefined);assert.ok(sent[0]!.text.endsWith('\n\n'+paused));
+    // The edit is a notice, the only kind a member's own chat takes an edit of.
+    assert.equal(sent[0]!.send_class,'notice');
     // A schedule that is gone, or another chat's, is not touched.
     asked.length=0;
     assert.equal(await notices([],manage).press('d',STORE,'ffffffffffff','e'.repeat(64)),scheduleNoticeLines('').changed);
     assert.deepEqual(asked.map(input=>input.operation),['list']);
+    // A member's own press in their own chat deletes it as theirs, and their chat's message is edited as a notice.
+    {
+      const memberSent:Record<string,any>[]=[],memberGranted:unknown[][]=[],theirs=grants(memberGranted);
+      const store={query:async(sql:string,values:unknown[]=[])=>/AS member FROM chats/.test(sql)&&values[0]==='777'?{rows:[{chat:'777',member:'m1'}]}:theirs.query(sql,values)} as any;
+      const deleted=await notices(memberSent,member,store).press('d',STORE,JOB,'9'.repeat(64),'777');
+      assert.equal(deleted,scheduleNoticeLines('').deleted);
+      assert.deepEqual(memberGranted.map(values=>values.slice(2,6)),[['edit','delete','press-'+'9'.repeat(64),'m1']]);
+      assert.deepEqual(memberSent.map(input=>[input.chat_id,input.edit,input.send_class,input.buttons]),[['777',true,'notice',undefined]]);
+    }
     // The agent refusing it reads as changed, never as a failure of the press.
     const refusing:FakeCall=async(_,input)=>{if(input.operation==='list')return {schedules:listed};throw new HttpError(400,'cron_change_refused');};
     assert.equal(await notices([],refusing).press('d',STORE,JOB,'d'.repeat(64)),scheduleNoticeLines('').changed);

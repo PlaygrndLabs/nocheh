@@ -125,6 +125,21 @@ class ApprovalCardTests(unittest.IsolatedAsyncioTestCase):
             self.assertEqual(answers[-1],('q4','Only the person who asked can use this button.'),'a refusal popup carries no link')
             self.assertEqual(sent,[])
 
+    async def test_a_press_in_a_members_own_private_chat_gets_its_answer_and_nothing_else(self):
+        # Members' schedules: the member's press on their schedule message is answered in their chat, a popup only they
+        # see. A card, a settle or a topic there is still refused, and so is a private chat that is not a member's.
+        with tempfile.TemporaryDirectory() as folder:
+            sent=[];edits=[];answers=[];gateway=self.gateway(Path(folder),sent,edits,answers)
+            gateway.policy=Policy.of(True,'123',['-20'],members=['777'])
+            self.assertEqual(await gateway.send_approval({'kind':'answer','chat_id':'777','callback_query_id':'q1','text':'🗑 Deleted.'}),{'state':'done','answered':True})
+            self.assertEqual(answers,[('q1','🗑 Deleted.')])
+            for bad in ({'kind':'answer','chat_id':'888','callback_query_id':'q2','text':'x'},{'kind':'answer','chat_id':'777','topic':'17','callback_query_id':'q3','text':'x'},
+                        {'kind':'card','id':'a'*64,'chat_id':'777','text':'Send?','buttons':[['Approve','na'+'a'*56],['Reject','nd'+'a'*56]]},
+                        {'kind':'settle','id':'a'*64,'chat_id':'777','text':'Done'}):
+                with self.subTest(body=bad),self.assertRaisesRegex(ValueError,'approval_chat_not_allowed'):
+                    await gateway.send_approval(bad)
+            self.assertEqual((len(answers),sent,edits),(1,[],[]))
+
     async def test_a_card_whose_send_lost_its_answer_is_settled_through_the_press(self):
         with tempfile.TemporaryDirectory() as folder:
             sent=[];edits=[];gateway=self.gateway(Path(folder),sent,edits)
