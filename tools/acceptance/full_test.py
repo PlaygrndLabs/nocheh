@@ -178,6 +178,9 @@ TITLES = {
     'memory_search_model_change_rebuilds_memory': 'Changing the memory search model rebuilds memory',
     'member_private_chat_reads_joined_groups': 'In their private chat a member reads the groups they joined and the whole task list of each of their projects, one at a time, and changes nothing',
     'member_private_chat_with_group_talk_off': 'With group talk off, a member is still answered in their private chat',
+    'backup_and_restore_drill': 'Back up now on the full copy keeps Nocheh answering; a restore of it keeps every row and file',
+    'schedule_runs_tools_quietly_and_pauses_by_button': 'A schedule set by asking reads tasks quietly; Pause on its notice stops it',
+    'member_schedule_runs_in_their_own_chat': "A member's own schedule runs in their chat with no card and stops when Personal assistant is off",
     'member_private_chat_off_or_paused_gets_fixed_reply': 'A paused member, or one whose private chat is off, gets the fixed reply once a day',
     'member_private_over_the_daily_cap': 'Over the daily cap, a member\'s private chat gets the limit reply once',
     'owner_and_member_never_swap_profiles': 'A member\'s private chat never runs as you, and your chat never as a member',
@@ -284,10 +287,29 @@ LEFTOVER_WORK = ("SELECT family||' '||state||coalesce(' ('||waiting_reason||')',
 # Honcho's learning queue: tasks not yet done, and tasks that ended with an error.
 HONCHO_QUEUE = ("SELECT task_type||': '||count(*) FILTER (WHERE NOT processed)||' waiting, '"
                 "||count(*) FILTER (WHERE processed AND error IS NOT NULL)||' failed' FROM queue GROUP BY task_type ORDER BY 1")
+# How long the check lets work the last scenarios started finish on its own, such as note reviews waiting for a busy
+# agent profile, before it reads what is left: what remains after this is reported as stuck.
+DRAIN_SECONDS = 300
 
 
 def end_of_run_health(project, directory):
-    """What the logs and the stores show once every scenario ran: errors no scenario looked for, work left stuck."""
+    """What the logs and the stores show once every scenario ran: errors no scenario looked for, work left stuck. Work
+    still going when the last scenario ends gets up to DRAIN_SECONDS to finish first."""
+    compose = ['docker', 'compose', '-p', project, '-f', str(directory/'compose.json'), 'exec', '-T']
+
+    def rows(service, user, database, sql):
+        result = subprocess.run(compose+[service, 'psql', '-X', '-q', '-A', '-t', '-U', user, '-d', database, '-c', sql],
+                                capture_output=True, text=True)
+        return result.stdout.split('\n') if result.returncode == 0 else ['could not read: '+result.stderr.strip()[:200]]
+
+    def leftover():
+        return [line for line in rows('nocheh-db', 'nocheh', 'nocheh_control', LEFTOVER_WORK) if line]
+    started = time.monotonic()
+    left = leftover()
+    while left and not any(line.startswith('could not read') for line in left) and time.monotonic()-started < DRAIN_SECONDS:
+        time.sleep(10)
+        left = leftover()
+    waited = round(time.monotonic()-started)
     ids = containers(project)
     states = subprocess.run(['docker', 'inspect', '--format', '{{index .Config.Labels "com.docker.compose.service"}} '
                              '{{.RestartCount}} {{.State.OOMKilled}}']+ids, capture_output=True, text=True).stdout.splitlines() if ids else []
@@ -304,14 +326,7 @@ def end_of_run_health(project, directory):
                     row['count'] += 1
                     if len(row['examples']) < 2:
                         row['examples'].append(text.strip()[:240])
-    compose = ['docker', 'compose', '-p', project, '-f', str(directory/'compose.json'), 'exec', '-T']
-
-    def rows(service, user, database, sql):
-        result = subprocess.run(compose+[service, 'psql', '-X', '-q', '-A', '-t', '-U', user, '-d', database, '-c', sql],
-                                capture_output=True, text=True)
-        return result.stdout.split('\n') if result.returncode == 0 else ['could not read: '+result.stderr.strip()[:200]]
-    observed = {'unhealthy_containers': unhealthy, 'log_signals': signals,
-                'leftover_work': [line for line in rows('nocheh-db', 'nocheh', 'nocheh_control', LEFTOVER_WORK) if line],
+    observed = {'unhealthy_containers': unhealthy, 'log_signals': signals, 'leftover_work': left, 'waited_seconds': waited,
                 'honcho_learning_queue': [line for line in rows('honcho-postgres', 'experiment', 'honcho_experiment', HONCHO_QUEUE) if line]}
     return {'scenario': 'end_of_run_health', 'passed': not unhealthy, 'observed': observed,
             'error': '; '.join(unhealthy) or None}
@@ -327,7 +342,9 @@ def health_lines(row):
         lines += ['  - `'+example.replace('`', "'")+'`' for value in services.values() for example in value['examples'][:1]]
     if not observed['log_signals']:
         lines.append('- Logs: no missing tables, deadlocks, Python tracebacks or unhandled Node errors')
-    lines.append('- Work left in Nocheh: '+('; '.join(observed['leftover_work']) or 'none'))
+    waited = observed.get('waited_seconds', 0)
+    after = f' (after waiting {waited} s for work still going to finish)' if waited else ''
+    lines.append('- Work left in Nocheh'+after+': '+('; '.join(observed['leftover_work']) or 'none'))
     lines.append('- Honcho learning queue: '+('; '.join(observed['honcho_learning_queue']) or 'empty'))
     return lines+['']
 
