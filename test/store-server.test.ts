@@ -126,7 +126,8 @@ test('separated application captures through control outages, exposes owner repo
     const across={generation:unchanged.generation,from:unchanged.epoch,to:(await services.guards.state()).epoch};
     assert.deepEqual(await request('/internal/notes/carry',{...across,owner:true}),{carry:true});
     assert.deepEqual(await request('/internal/notes/carry',{...across,owner:false}),{carry:false});
-    await request('/internal/notes/carry',{...across,owner:true},401,scopeToken(token,'123',Date.now()+60000));
+    assert.deepEqual(await request('/internal/notes/carry',{...across,owner:true},200,settings.agentKey),{carry:true},'Hermes asks with the agent login');
+    await request('/internal/notes/carry',{...across,owner:true},401,keyPass(token,'123',Date.now()+60000));
     await request('/internal/notes/carry',{...across,owner:'yes'},400);
     const event:Envelope={version:1,key,origin:'live',bot_id:'fixture',kind:'telegram_update',scope:'123',source_id:String(Date.now()),revision:'1',occurred_at:null,text:'Original HTTP observation',
       payload:{message:{message_id:Date.now(),chat:{id:123,type:'private'},from:{id:123},text:'Original HTTP observation'}}};
