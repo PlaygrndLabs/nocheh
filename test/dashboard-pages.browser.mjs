@@ -4791,6 +4791,9 @@ test('Cmd+K search finds pages, settings, chats, members, people, projects, task
     assert.match(page.url(), address, `${group}: ${title}`);
     // A schedule has no page of its own: its row is shown.
     if (group === 'Schedules') await page.locator('tr[data-search-found]', {hasText: title}).waitFor();
+    // A person and a project open in a side panel; the next search must still open over it.
+    if (group === 'People' || group === 'Projects')
+      await page.getByRole('dialog', {name: title}).getByRole('heading', {name: title}).waitFor();
   }
   // The arrow keys and Enter pick a result.
   const box = await search(page, 'speed');
@@ -4800,6 +4803,31 @@ test('Cmd+K search finds pages, settings, chats, members, people, projects, task
   await box.press('Enter');
   await page.waitForFunction(() => document.activeElement?.id === 'NOCHEH_PARALLEL_REPLIES');
   assert.match(page.url(), /#settings\?view=speed$/);
+  assert.deepEqual(problems, []);
+  await page.close();
+});
+
+test('a panel that finishes opening after the search stays under it', async () => {
+  const {page, problems} = await open('home');
+  // The person's panel waits for its details; the search is opened again before they arrive.
+  await page.route('**/api/nocheh/entities/**', async route => {
+    await new Promise(resolve => setTimeout(resolve, 1500));
+    await route.continue().catch(() => {});
+  });
+  await search(page, 'mira');
+  await results(page, 'People')
+    .getByRole('option', {name: /Mira Chen/})
+    .click();
+  const box = await search(page, 'aurora');
+  // The panel opens under the search, which hides it from screen readers while it is open.
+  await page.locator('[role="dialog"] h2', {hasText: 'Mira Chen'}).waitFor({state: 'attached'});
+  // The search is still on top: it keeps what was typed and the cursor, and its results take clicks.
+  await page.waitForFunction(() => document.activeElement?.getAttribute('aria-label') === 'Search the dashboard');
+  assert.equal(await box.inputValue(), 'aurora');
+  await results(page, 'Projects')
+    .getByRole('option', {name: /Aurora field guide/})
+    .click({timeout: 5000});
+  await page.waitForURL(/#memory\?view=projects&project=\w+$/);
   assert.deepEqual(problems, []);
   await page.close();
 });
