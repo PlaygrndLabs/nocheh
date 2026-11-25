@@ -35,6 +35,9 @@ of why it was allowed.
    409 `schedule_start_needed`; Hermes's plugin then saves the job paused, with a new
    execution version, and posts it again in the same turn. Nocheh records it and answers
    `held: true`. A pause or removal from such a turn needs nothing more.
+   The schedule tool's own result is not outside content: a schedule set, changed or removed
+   earlier in the conversation holds nothing later. A list of schedules is, since it shows
+   prompts a held turn may have shaped.
 3. **Start.** The held schedule's message says it is paused and why, and has ▶️ Start
    (`nks…`) and Delete instead of Pause. Start is the person's own press, granted as a
    resume (ADR-0290), and only the latest message about a schedule
