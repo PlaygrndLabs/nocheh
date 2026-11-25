@@ -9,8 +9,9 @@ behind. Rows already withheld for retired sources keep their placeholders, and
 the profile's first turn withholds anything retired since, before its history
 is prepared again for the new epoch.
 
-Once a newer profile exists, earlier-epoch profiles of the same chat are
-removed after they have been idle for a while, so hidden or corrected content
+Its Hermes notes carry separately (profile_notes.py, ADR-0292). Once a newer
+profile exists, earlier-epoch profiles of the same chat are removed after they
+have been idle for a while, so hidden or corrected content
 does not stay behind in conversations that are no longer used. A private
 answer's own profile, and the owner's ask about a member's, is removed once nothing can run in it any more.
 """
@@ -170,6 +171,9 @@ def prune(profile,now=None):
         try:carried=json.loads((profile/CARRIED).read_text())
         except (OSError,ValueError):carried=None
         if not (isinstance(carried,dict) and carried.get('error') is None or _cursors(profile)):return []
+        # Nor the notes it could not carry over yet (ADR-0292).
+        from .profile_notes import carries, done
+        if carries(current) and not done(profile):return []
     now=time.time() if now is None else now
     removed=[]
     for other in profile.parent.iterdir():

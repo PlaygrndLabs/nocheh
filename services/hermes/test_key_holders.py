@@ -82,7 +82,7 @@ class KeyHolderTests(unittest.TestCase):
                 if length: self.rfile.read(length)
                 seen.append((self.command, self.path, self.headers.get('Authorization')))
                 data = json.dumps({'labels': {}, 'revision': 'r', 'retired': [], 'answered': {}, 'retired_records': [],
-                                   'profiles': [], 'state': 'local'}).encode()
+                                   'profiles': [], 'state': 'local', 'carry': False}).encode()
                 self.send_response(200); self.send_header('Content-Type', 'application/json')
                 self.send_header('Content-Length', str(len(data))); self.end_headers(); self.wfile.write(data)
             do_GET = do_POST = answer
@@ -95,6 +95,7 @@ class KeyHolderTests(unittest.TestCase):
         from .managed_async import ManagedAsync
         from .runtime_profiles import ProfileCatalog
         from .note_sources import service_post
+        from .profile_notes import service_post as notes_carry
         from .retired_history import service_lookup
         from .request_boundary import guard_rpc
         from .scopes import Scopes
@@ -113,12 +114,13 @@ class KeyHolderTests(unittest.TestCase):
                 ProfileCatalog(folder, policy, admin.agent_key).http('/v1/runtime/profiles')
                 with patch.dict(os.environ, {'NOCHEH_STORAGE_LAYOUT': 'original-only-v1'}):
                     self.assertEqual(Administration(None, folder, 'model', policy, KEY).profile_catalog.agent_key, KEY)
-                service_post({}); service_lookup([])
+                service_post({}); service_lookup([]); notes_carry({})
                 try: guard_rpc('model', {})
                 except Exception: pass
         finally: server.shutdown(); server.server_close(); thread.join()
         self.assertEqual({path for _, path, _ in seen}, {'/v1/scheduler/runs', '/v1/background/claim', '/v1/runtime/profiles',
-                                                         '/internal/notes/sources', '/internal/sources/retired', '/v1/guard'})
+                                                         '/internal/notes/sources', '/internal/sources/retired', '/internal/notes/carry',
+                                                         '/v1/guard'})
         self.assertEqual({authorization for _, _, authorization in seen}, {'Bearer ' + KEY})
 
 

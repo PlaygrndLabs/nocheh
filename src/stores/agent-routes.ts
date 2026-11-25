@@ -5,6 +5,7 @@ import type {Settings} from '../config.js';
 import {HttpError,json,object,readJson} from '../http.js';
 import {memberAssistant,memberPrivate} from '../spaces.js';
 import {currentChats} from './chats.js';
+import {notesCarry} from './notes-epochs.js';
 import {assertGuardConfiguration} from './lifecycle.js';
 import type {StorageServices} from './services.js';
 
@@ -15,7 +16,7 @@ import type {StorageServices} from './services.js';
  * removing native_admin's profiles_read_only check is the whole change if that decision is reversed.
  */
 export const agentRoutes:readonly (readonly [method:string,path:string])[]=[
-  ['GET','/internal/chats'],['POST','/internal/notes/sources'],['POST','/internal/sources/retired'],
+  ['GET','/internal/chats'],['POST','/internal/notes/sources'],['POST','/internal/sources/retired'],['POST','/internal/notes/carry'],
   ['GET','/v1/runtime/profiles'],['POST','/v1/runtime/profiles/resolve'],
   ...['definition','input','workflow-context','claim','prepare','heartbeat','observe','cancel','finish','recover','runs'].map(operation=>['POST','/v1/scheduler/'+operation] as const),
   ...['workflow-context','claim','prepare','heartbeat','observe','finish'].map(operation=>['POST','/v1/background/'+operation] as const),
@@ -36,6 +37,14 @@ export async function retiredSources(s:StorageServices,req:IncomingMessage){
   const ids=object(await readJson(req,64*1024)).event_ids;
   if(!Array.isArray(ids)||ids.length>500||ids.some(id=>typeof id!=='string'||!/^[a-f0-9]{64}$/.test(id)))throw new HttpError(400,'invalid_event_ids');
   return s.retirements.historyRetirements(ids as string[]);
+}
+/** Whether a chat's new profile may take the notes of its earlier one (ADR-0292): whether every epoch since let notes
+ *  through for this chat. It names no chat, only whether it is the owner's. */
+export async function notesCarryAnswer(s:StorageServices,req:IncomingMessage){
+  const body=object(await readJson(req,1024));
+  if(Object.keys(body).some(key=>!['generation','from','to','owner'].includes(key))||typeof body.generation!=='string'||typeof body.owner!=='boolean'||
+    !Number.isSafeInteger(body.from)||!Number.isSafeInteger(body.to))throw new HttpError(400,'invalid_notes_carry');
+  return {carry:await notesCarry(s.stores.control,body.generation,Number(body.from),Number(body.to),body.owner)};
 }
 /** Where Hermes's notes came from, before each turn and review (ADR-0257). */
 export async function noteSources(s:StorageServices,req:IncomingMessage){return s.noteSources.lookup(await readJson(req,256*1024));}
@@ -85,6 +94,7 @@ export async function serveAgent(s:StorageServices,config:Settings,login:AgentLo
   if(path==='/internal/chats')return json(res,200,await internalChats(s));
   if(path==='/internal/notes/sources')return json(res,200,await noteSources(s,req));
   if(path==='/internal/sources/retired')return json(res,200,await retiredSources(s,req));
+  if(path==='/internal/notes/carry')return json(res,200,await notesCarryAnswer(s,req));
   if(path.startsWith('/v1/runtime/profiles'))return json(res,200,await runtimeProfiles(s,config,login,req,path));
   const body=object(await readJson(req,2*1024*1024));
   if(path.startsWith('/v1/scheduler/'))return json(res,200,await schedulerOperation(s,config,login,path.slice('/v1/scheduler/'.length),body));

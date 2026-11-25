@@ -56,7 +56,7 @@ import {noticeAuthorizeRequest,type NoticeAuthorizeResponse} from '../notice-aut
 import {authorizeNotice} from './task-reminder-delivery.js';
 import type {hostTransport} from '../workflows/host-transport.js';
 import {MEMBER_APP_CORE_PREFIX} from '../member-app-wire.js';
-import {backgroundOperation,internalChats,noteSources,retiredSources,runtimeProfiles,schedulerOperation,serveAgent} from './agent-routes.js';
+import {backgroundOperation,internalChats,noteSources,notesCarryAnswer,retiredSources,runtimeProfiles,schedulerOperation,serveAgent} from './agent-routes.js';
 import {conversationReads,isTurnRead,recordTurnReads} from './turn-reads.js';
 
 /** No legacy pool, schema initialization, cross-store SQL or fallback route. */
@@ -126,6 +126,11 @@ export function storageServer(s:StorageServices,config:Settings,call:RuntimeCall
     if(req.method==='POST'&&path==='/internal/sources/retired') {
       // Hermes withholds retired turns from its own native history before each turn.
       authorize(req,config.token);return json(res,200,await retiredSources(s,req));
+    }
+    if(req.method==='POST'&&path==='/internal/notes/carry') {
+      // Hermes asks before a chat's new profile takes the notes of its earlier one (ADR-0292): whether every epoch since
+      // let notes through for this chat. It names no chat, only whether it is the owner's.
+      authorize(req,config.token);return json(res,200,await notesCarryAnswer(s,req));
     }
     if(req.method==='POST'&&path==='/internal/notes/sources') {
       // Hermes asks where its notes came from before each turn and review (ADR-0257). The labels name groups only as
