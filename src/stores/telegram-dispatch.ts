@@ -297,6 +297,8 @@ export class TelegramDispatchRepository {
       if(!(error instanceof HttpError)||!withdrawnCodes.includes(error.code))throw error;
       withdrawn=error.code;
     }
+    // A turn whose key was closed ends here, however it ended: it is not sent and not run again under a new key (ADR-0307).
+    if(withdrawn==='one_time_key_closed'&&state!=='done')return await this.storeResult(row,{state:'cancelled'});
     if(state!=='done') {
       // Without a current pass the bot cannot be asked; an unrenewed presence lapses on its own. A message that joined the
       // running turn in its chat is answered by that turn's reply, so it gets 👍 too (ADR-0301).
@@ -844,7 +846,8 @@ export class TelegramDispatchRepository {
           }
           if(renewed)return await this.receive(row,observed);
           if(observed.state==='not_found')return await this.storeResult(row,{state:'cancelled'});
-          try{return await this.receive(row,await this.agent.cancelTurn({channel:'telegram',event_id:id,attempt:row.attempts}));}
+          try{const cancelled=await this.agent.cancelTurn({channel:'telegram',event_id:id,attempt:row.attempts});
+            return await this.receive(row,error.code==='one_time_key_closed'&&['failed','ambiguous'].includes(String(cancelled.state))?{state:'cancelled'}:cancelled);}
           catch{return await this.receive(row,{state:'running'});}
         }
         if(!['not_found','queued'].includes(String(observed.state))) {

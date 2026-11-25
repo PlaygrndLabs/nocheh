@@ -28,18 +28,22 @@ was copied. The design promised a dashboard Keys list and a "Stop everything now
    and records the stop in `key_stops` (one row, the last stop). The workflow rows of the cancelled cards and follow-ups
    are cancelled if still queued or waiting. After it commits, each stopped job's live run is ended, each on its own.
    A reply or follow-up already under way finds its key closed when next checked (`one_time_key_closed`), so it is
-   withdrawn like a retired source: the agent's turn is cancelled, nothing is sent, and it does not run again.
+   withdrawn like a retired source: the agent's turn is cancelled, and however it ended it is stored as cancelled, so
+   nothing is sent and it does not run again under a new key.
 3. **Then a new agent login, alone.** The dashboard then asks for `POST /keys/agent-login` (browser session only), a job
    like Apply: a new `AGENT_KEY` is written and applied (`rotate_agent_login`), so Hermes and the services that check the
    login restart with it, in about a minute. The master key and Hermes's session token stay, so the dashboard and executor
    keep theirs and are not restarted, even when an earlier key change left them a restart marker (it waits for the next up
-   or Apply). Saved settings not yet applied would be applied with it, so it changes nothing while any wait
-   (`settings_pending_apply`), and the page asks the owner to apply or discard them first. If the services do not come
+   or Apply). Saved settings not yet applied (Settings shows Apply) would be applied with it, so it changes nothing while
+   any wait (`settings_pending_apply`), and the page asks the owner to apply or discard them first. A leftover baseline
+   that waits for nothing does not hold it up, and a failed login that put the old one back leaves none. If the services do not come
    back, Apply's roll back returns the old login, and the page says so; the keys stay ended either way.
-4. **Keys close again once the new login is in use.** Until its services restart, the old login could still start work
-   and get new keys. So the job then calls `POST /v1/keys/stop` with `again: true`, which closes and cancels everything
-   again and adds its counts to the stop. If that call fails, the job says so (`keys_closed: false`) and the page asks the
-   owner to stop again.
+4. **Runs the old login started close again once the new one is in use.** Until its services restart, the old login
+   could still claim scheduled and background runs, each with a new key. So the job then calls `POST /v1/keys/stop` with
+   `again: true`, which closes the scheduled and background keys minted since the stop and cancels their runs and jobs,
+   adding its counts to the stop. Replies, follow-ups and cards are Nocheh's own, never the agent login's, so messages
+   answered after the stop are left alone; a schedule that fires during the restart is cancelled too. If that call fails,
+   the job says so (`keys_closed: false`) and the page asks the owner to stop again.
 5. **One-shot.** Stop does not latch: new messages after it start new replies with new keys. Messages waiting in line are
    answered as usual.
 6. **The page follows the login wherever it is opened.** The stop in progress and how it ended are kept outside the page,

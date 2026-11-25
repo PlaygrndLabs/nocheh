@@ -152,7 +152,7 @@ async function followLogin(job: ApplyJob, toast: (text: string) => void) {
   followingLogin = job.id;
   try {
     const started = Date.parse(job.created_at ?? '') || Date.now();
-    setStop({progress: {step: 'login', job: job.step, started}});
+    setStop({problem: '', progress: {step: 'login', job: job.step, started}});
     const outcome = await followJob(job, started, step => setStop({progress: {step: 'login', job: step, started}}));
     const failed = loginProblem(outcome);
     if (failed) setStop({problem: failed});

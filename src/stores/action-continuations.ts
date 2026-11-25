@@ -170,6 +170,8 @@ export class ActionContinuationRepository {
       if(!(error instanceof HttpError)||!withdrawnCodes.includes(error.code))throw error;
       withdrawn=error.code;
     }
+    // A turn whose key was closed ends here, however it ended: it is not sent and not run again under a new key (ADR-0307).
+    if(withdrawn==='one_time_key_closed'&&state!=='done')return await this.storeResult(row,{state:'cancelled'});
     if(state!=='done') {
       if(credential)await finishPresence(this.call,replyTarget(input,attempt,credential),unansweredFinish(state));
       return await this.storeResult(row,state==='ambiguous'?{...receipt,state:'failed',error_code:'assistant_runtime_unavailable'}:receipt);
@@ -236,7 +238,8 @@ export class ActionContinuationRepository {
           }
           if(renewed)return await this.receive(row,observed);
           if(observed.state==='not_found')return await this.storeResult(row,{state:'cancelled'});
-          try{return await this.receive(row,await this.agent.cancelTurn({channel:'telegram',event_id:row.event_id,attempt}));}
+          try{const cancelled=await this.agent.cancelTurn({channel:'telegram',event_id:row.event_id,attempt});
+            return await this.receive(row,error.code==='one_time_key_closed'&&['failed','ambiguous'].includes(String(cancelled.state))?{state:'cancelled'}:cancelled);}
           catch{return await this.receive(row,{state:'running'});}
         }
         if(!['not_found','queued'].includes(String(observed.state))) {

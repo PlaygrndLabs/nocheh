@@ -25,6 +25,34 @@ export function keyStopRequest(input:unknown):KeyStopRequest {
 type Jobs={runs:{end(id:string,reason:'stopped'):Promise<void>};settled(id:string):Promise<void>};
 
 /**
+ * The close after the new agent login is in use (ADR-0307): until its services restarted, the old login could still claim
+ * scheduled and background runs, each with a new key. Those keys, minted since the stop, close, and their runs and jobs are
+ * cancelled; the counts add to the stop, which keeps its time. Replies, follow-ups and cards are Nocheh's own, never the
+ * agent login's, so messages answered after the stop are left alone.
+ */
+async function again(db:pg.PoolClient) {
+  const prior=(await db.query('SELECT stopped_at,counts FROM key_stops WHERE singleton FOR UPDATE')).rows[0];
+  const none={keys:0,cards:0,follow_ups:0,runs:0,jobs:0,grants:0};
+  if(!prior)return {stopped_at:new Date().toISOString(),...none,halt:[] as string[]};
+  const closed=(await db.query(`UPDATE one_time_keys SET closed_at=now(),closed_reason='stopped'
+    WHERE closed_at IS NULL AND kind IN ('scheduled','background') AND created_at>=$1 RETURNING event_id,expires_at>now() AS open`,[prior.stopped_at])).rows;
+  const events=[...new Set(closed.map(row=>row.event_id as string))];
+  const jobs=events.length?(await db.query(`UPDATE background_jobs SET cancel_requested=true,state=CASE WHEN state='proposed' THEN 'stopped' ELSE state END,
+    finished_at=CASE WHEN state='proposed' THEN now() ELSE finished_at END,
+    machine_cleanup=CASE WHEN machine IS NOT NULL AND state IN ('running','reporting') THEN coalesce(machine_cleanup,'pending') ELSE machine_cleanup END,
+    revision=revision+1,updated_at=now() WHERE id IN (SELECT job_id FROM background_runs WHERE event_id=ANY($1::text[]))
+    AND state NOT IN ('done','failed','stopped','rejected') RETURNING id`,[events])).rows.map(row=>row.id as string):[];
+  const runs=events.length?(await db.query(`UPDATE managed_runs SET cancel_requested=true,state=CASE WHEN state='captured' THEN 'cancelled' ELSE state END,
+    error_code=CASE WHEN state='captured' THEN 'owner_stopped' ELSE error_code END,revision=revision+1,updated_at=now()
+    WHERE event_id=ANY($1::text[]) AND state IN ('captured','running') RETURNING event_id`,[events])).rows.map(row=>row.event_id as string):[];
+  if(runs.length)await db.query(`UPDATE runtime_turns SET state='closed',closed_at=now() WHERE id=ANY($1::text[]) AND state='open'`,[runs]);
+  const counts={...none,keys:closed.filter(row=>row.open).length,runs:runs.length,jobs:jobs.length};
+  const kept=Object.fromEntries(Object.entries(counts).map(([name,value])=>[name,value+Number(prior.counts[name]??0)]));
+  await db.query('UPDATE key_stops SET counts=$1 WHERE singleton',[kept]);
+  return {stopped_at:(prior.stopped_at as Date).toISOString(),...counts,halt:jobs};
+}
+
+/**
  * The owner's Keys list and "Stop everything now" (ADR-0307). The list shows each person's keys: the owner and every
  * member, on or paused, how many keys are open and when one was last used. Stop ends every open key at once and cancels
  * what is waiting on one: cards not yet approved or started, follow-ups not yet run, runs captured or under way, and jobs
@@ -54,6 +82,7 @@ export class KeyRepository {
 
   async stop(principal:Reader,request:KeyStopRequest):Promise<KeyStopResult> {
     const done=await this.commands.run(principal,request.operation_id,{kind:'keys_stop',again:request.again===true},async db=>{
+      if(request.again)return await again(db);
       const count=async(sql:string,params:unknown[]=[])=>(await db.query(sql,params)).rowCount??0;
       // Every key, so every reply, run, review and filter under way reads nothing more and is never signed again. A reply or
       // follow-up whose key closed is withdrawn when it is next checked. Only keys still open count: an expired key is
@@ -90,11 +119,8 @@ export class KeyRepository {
       const grants=await count('UPDATE schedule_turn_grants SET expires_at=now() WHERE expires_at>now()')+
         await count('UPDATE schedule_grants SET expires_at=now() WHERE expires_at>now() AND used_at IS NULL');
       const counts={keys,cards:sends.length+tools.length,follow_ups:followUps.length,runs:runs.length,jobs:jobs.length,grants};
-      // The close after the new login adds to the stop it finishes; any other stop replaces the last one.
-      const prior=request.again?(await db.query('SELECT stopped_at,counts FROM key_stops WHERE singleton FOR UPDATE')).rows[0]:undefined;
-      const kept=prior?Object.fromEntries(Object.entries(counts).map(([name,value])=>[name,value+Number(prior.counts[name]??0)])) as typeof counts:counts;
-      const stopped=(await db.query(`INSERT INTO key_stops(singleton,stopped_at,counts) VALUES(true,coalesce($2,now()),$1)
-        ON CONFLICT(singleton) DO UPDATE SET stopped_at=EXCLUDED.stopped_at,counts=EXCLUDED.counts RETURNING stopped_at`,[kept,prior?.stopped_at??null])).rows[0].stopped_at as Date;
+      const stopped=(await db.query(`INSERT INTO key_stops(singleton,stopped_at,counts) VALUES(true,now(),$1)
+        ON CONFLICT(singleton) DO UPDATE SET stopped_at=EXCLUDED.stopped_at,counts=EXCLUDED.counts RETURNING stopped_at`,[counts])).rows[0].stopped_at as Date;
       return {stopped_at:stopped.toISOString(),...counts,halt:jobs};
     },{epoch:false});
     const {halt,...result}=done as KeyStopResult&{halt:string[]};

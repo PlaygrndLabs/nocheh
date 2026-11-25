@@ -337,7 +337,9 @@ def rotate_agent_login(state, progress=lambda step: None, close_keys=None):
     with (directory / 'settings.lock').open('a') as lock:
         fcntl.flock(lock, fcntl.LOCK_EX)
         current = load(state)
-        if (directory / 'previous.env').exists() or pending_rebuild(state) or view(state)['apply_state'] == 'pending':
+        # Waiting settings are what the running services do not use yet. A previous.env left by a failed Apply, or by
+        # saves that came back to what is applied, waits for nothing: it is replaced by the current baseline.
+        if pending_rebuild(state) or view(state)['apply_state'] == 'pending':
             return {'status': 'settings_pending_apply'}
         write_env(directory / 'previous.env', current)
         updated = {**current, 'AGENT_KEY': secrets.token_hex(32)}
@@ -345,8 +347,10 @@ def rotate_agent_login(state, progress=lambda step: None, close_keys=None):
         write_env(env_path(state), updated)
     result = apply(state, progress, restart_cached_services=False)
     if result.get('status') != 'applied':
-        # Back on the old login, .env is the baseline again: nothing waits to apply, so the next Stop may run.
-        if result.get('rolled_back'): (directory / 'previous.env').unlink(missing_ok=True)
+        # Back on the old login, .env is the baseline again whether or not the services came back: nothing waits to apply.
+        from tools.operations.installation.configuration import read_env
+        previous = directory / 'previous.env'
+        if previous.exists() and dict(read_env(previous)) == dict(read_env(env_path(state))): previous.unlink(missing_ok=True)
         return result
     progress('closing_keys')
     try:

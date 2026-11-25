@@ -13,7 +13,7 @@ export interface KeyPerson {
 export interface KeyStopCounts {keys:number;cards:number;follow_ups:number;runs:number;jobs:number;grants:number}
 /** GET /v1/keys: the owner first, then each member as the Members page lists them; and the last stop, if any. */
 export interface KeyList {people:KeyPerson[];stopped:({at:string}&KeyStopCounts)|null}
-/** POST /v1/keys/stop. `again` is the close after the new agent login is in use (ADR-0307): it ends what the old login
- * started during the restart, and its counts add to the last stop's instead of replacing it. */
+/** POST /v1/keys/stop. `again` is the close after the new agent login is in use (ADR-0307): it ends the scheduled and
+ * background runs the old login claimed since the stop, and its counts add to that stop's instead of replacing it. */
 export interface KeyStopRequest {operation_id:string;again?:boolean}
 export interface KeyStopResult extends KeyStopCounts {stopped_at:string}

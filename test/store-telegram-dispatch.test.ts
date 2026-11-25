@@ -205,6 +205,16 @@ test('Telegram workflow dispatch uses current prepared derivatives and durable s
     await due(halted.reference.id);await run(halted.reference.id);
     assert.equal(calls.filter(c=>c.input.event_id===halted.reference.id&&c.operation==='run.start').length,1,'never run again');
     assert.ok(!sends.some(item=>item.operation==='telegram.reply'&&item.input.event_id===halted.reference.id),'no reply is sent');
+    // One that the closed key made fail ends the same way, and is not run again under a new key either.
+    const failing=await capture('Failing when everything stops');await prepare(failing.reference.id);
+    assert.equal((await run(failing.reference.id)).state,'running');
+    await services.keys.stop({scope:null,admin:true} as any,{operation_id:'stop-failed:'+base});
+    native.set(failing.reference.id,{state:'failed',error_code:'one_time_key_closed'});
+    await due(failing.reference.id);await run(failing.reference.id);
+    assert.equal((await stores.control.query('SELECT state FROM dispatches WHERE event_id=$1',[failing.reference.id])).rows[0].state,'cancelled');
+    await due(failing.reference.id);await run(failing.reference.id);
+    assert.equal(calls.filter(c=>c.input.event_id===failing.reference.id&&c.operation==='run.start').length,1,'never run again');
+    assert.ok(!sends.some(item=>item.operation==='telegram.reply'&&item.input.event_id===failing.reference.id),'no reply is sent');
     mode='done';
     // A reaction while a reply runs waits to advance the epoch, so it never revokes that reply.
     const busy=await capture('Reply running during a reaction');await prepare(busy.reference.id);mode='running';

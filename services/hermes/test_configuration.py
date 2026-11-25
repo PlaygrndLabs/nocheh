@@ -551,15 +551,33 @@ class AgentKeyTests(unittest.TestCase):
             self.assertFalse((state/'admin/previous.env').exists(),'nothing waits to apply after the rollback')
 
     def test_stop_everything_waits_for_saved_settings_not_yet_applied(self):
-        # Saved settings not yet applied would restart with the new login: it waits, and changes nothing.
+        # Saved settings not yet applied would restart with the new login: it waits, and changes nothing. A previous.env that
+        # waits for nothing (saves that came back to what is applied, or a failed Apply) does not hold it up.
         from tools.operations.installation import settings
+        from types import SimpleNamespace
         with tempfile.TemporaryDirectory() as folder:
             state=Path(folder);initialize(state);(state/'admin').mkdir(exist_ok=True)
-            write_env(state/'admin/previous.env',load(state))
             env=settings.env_path(state);saved=env.read_bytes()
-            with patch('tools.operations.installation.settings.subprocess.run',side_effect=AssertionError('no restart')):
+            with patch('tools.operations.installation.settings.view',return_value={'apply_state':'pending'}),\
+                 patch('tools.operations.installation.settings.subprocess.run',side_effect=AssertionError('no restart')):
                 self.assertEqual(settings.rotate_agent_login(state,close_keys=lambda:self.fail('no close')),{'status':'settings_pending_apply'})
             self.assertEqual(env.read_bytes(),saved,'the login stays')
+            write_env(state/'admin/previous.env',{**load(state),'AGENT_KEY':'stale-'+'x'*40})
+            def ran(command,**options):return SimpleNamespace(returncode=0,stdout='')
+            with patch('tools.operations.installation.settings.view',return_value={'apply_state':'current'}),\
+                 patch('tools.operations.installation.settings.subprocess.run',side_effect=ran),\
+                 patch('tools.operations.installation.settings.refresh_honcho',return_value='skipped'),\
+                 patch('tools.operations.installation.settings.rebuild_memory',return_value='skipped'),\
+                 patch('tools.operations.installation.settings.mini_app.menu_button',return_value='skipped'):
+                self.assertEqual(settings.rotate_agent_login(state,close_keys=lambda:None)['status'],'applied')
+            self.assertFalse((state/'admin/previous.env').exists())
+            # Neither the services nor the rollback come back: .env is the old login again, so nothing waits to apply.
+            before=load(state)['AGENT_KEY']
+            with patch('tools.operations.installation.settings.view',return_value={'apply_state':'current'}),\
+                 patch('tools.operations.installation.settings.subprocess.run',side_effect=[SimpleNamespace(returncode=1)]*3):
+                result=settings.rotate_agent_login(state,close_keys=lambda:self.fail('no close'))
+            self.assertEqual((result['status'],result['rolled_back']),('apply_failed',False))
+            self.assertEqual(load(state)['AGENT_KEY'],before);self.assertFalse((state/'admin/previous.env').exists())
 
     def test_apply_after_a_cutover_restarts_what_caches_the_keys(self):
         from tools.operations.installation import settings

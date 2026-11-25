@@ -41,13 +41,17 @@ test('the Keys list shows each person\'s open keys and last use, and Stop ends e
     const after=await services.keys.list(owner as any);
     assert.equal(after.people[0]!.open,0);assert.deepEqual(after.stopped,{at:stopped.stopped_at,keys:2,cards:0,follow_ups:0,runs:0,jobs:0,grants:0});
     await assert.rejects(services.keys.stop({scope:null,admin:false} as any,{operation_id:'stop-2'}),{status:403});
-    // The close after the new login adds to the stop it finishes and keeps its time; a later stop replaces it.
+    // The close after the new login ends only runs the old login could have claimed since the stop: a scheduled run's key
+    // closes and adds to the stop, which keeps its time; a reply's key made since then stays open. A later stop replaces it.
     await key('5'.repeat(32),'owner',true,false);
+    await stores.control.query(`INSERT INTO one_time_keys(jti,kind,subject,attempt,person,agent,event_id,expires_at)
+      VALUES($1,'scheduled',$1,'1','owner','hermes',$2,now()+interval '10 minutes')`,['6'.repeat(32),digest('6')]);
     const again=await services.keys.stop(owner as any,keyStopRequest({operation_id:'stop-again',again:true}));
-    assert.equal(again.keys,1);
+    assert.equal(again.keys,1);assert.equal(again.stopped_at,stopped.stopped_at);
+    assert.deepEqual((await stores.control.query(`SELECT jti,closed_reason FROM one_time_keys WHERE jti IN ($1,$2) ORDER BY jti`,['5'.repeat(32),'6'.repeat(32)])).rows.map(row=>row.closed_reason),[null,'stopped']);
     assert.deepEqual((await services.keys.list(owner as any)).stopped,{at:stopped.stopped_at,keys:3,cards:0,follow_ups:0,runs:0,jobs:0,grants:0});
     const next=await services.keys.stop(owner as any,{operation_id:'stop-3'});
-    assert.deepEqual((await services.keys.list(owner as any)).stopped,{at:next.stopped_at,keys:0,cards:0,follow_ups:0,runs:0,jobs:0,grants:0});
+    assert.deepEqual((await services.keys.list(owner as any)).stopped,{at:next.stopped_at,keys:1,cards:0,follow_ups:0,runs:0,jobs:0,grants:0});
     assert.throws(()=>keyStopRequest({operation_id:'x',again:'yes'}),{status:400});
     assert.throws(()=>keyStopRequest({operation_id:'x',other:true}),{status:400});
   } finally {await stores.close();await rm(root,{recursive:true,force:true});}
