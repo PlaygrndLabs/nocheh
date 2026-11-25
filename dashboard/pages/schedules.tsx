@@ -9,9 +9,12 @@ import {apiPost} from '../lib/api';
 import {problemText} from '../lib/messages-format';
 import {refreshResources, useResource} from '../lib/resource';
 import {ago, dateTime, duration} from '../lib/system-format';
-import {Badge, Button, Card, Empty, LoadError, LoadingRows, Select, Table, Td, Th, type Tone} from '../ui/core';
+import {Badge, Button, Card, Empty, LoadError, LoadingRows, Table, Td, Th, type Tone} from '../ui/core';
 import {useFeedback} from '../ui/overlay';
 import {Page} from '../ui/page';
+import {LinkButton} from '../ui/link-button';
+import {href} from '../lib/routes';
+import {zoneName} from './settings/general';
 
 export type Schedule = {
   id: string;
@@ -100,7 +103,7 @@ function nextRun(row: Schedule): string {
   return row.next_run_at ? dateTime(row.next_run_at) : '—';
 }
 
-export default function Schedules() {
+export default function Schedules({settingsLink = true}: {settingsLink?: boolean}) {
   // While a run starts or runs, the page follows it every two seconds, so its result shows without a reload.
   const [poll, setPoll] = React.useState(15000);
   const {data, error} = useResource<{schedules: Schedule[]}>('/schedules', poll);
@@ -112,7 +115,7 @@ export default function Schedules() {
       title="Schedules"
       description="Things Nocheh does at a set time. Ask in your private chat to add one. Your private chat's results come with no card; a group's wait for your yes."
     >
-      <OwnerTimeZone />
+      <OwnerTimeZone settingsLink={settingsLink} />
       <Card>
         {error ? (
           <div className="p-5">
@@ -158,71 +161,26 @@ export default function Schedules() {
   );
 }
 
-const knownZones = (): string[] => {
-  try {
-    return (Intl as unknown as {supportedValuesOf(key: string): string[]}).supportedValuesOf('timeZone');
-  } catch {
-    return ['UTC'];
-  }
-};
-
 /**
- * The owner's time zone, the same one as Settings › Tasks (ADR-0282): new schedules set in the owner's private chat run
- * in it, and task dates follow it. Schedules already set keep theirs.
+ * The owner's time zone, read only: it is set once in Settings › General (ADR-0311), and new schedules set in the owner's
+ * private chat run in it. Schedules already set keep theirs. The mini app has no settings, so it names where to change it.
  */
-function OwnerTimeZone() {
-  const feedback = useFeedback();
+function OwnerTimeZone({settingsLink}: {settingsLink: boolean}) {
   const {data} = useResource<{time_zone: string}>('/tasks/settings');
-  const [busy, setBusy] = React.useState(false);
-  const device = Intl.DateTimeFormat().resolvedOptions().timeZone;
   const value = data?.time_zone;
-  const zones = React.useMemo(
-    () => [...new Set(['UTC', ...knownZones(), ...(value ? [value] : []), ...(device ? [device] : [])])].sort(),
-    [value, device],
-  );
   if (!value) return null;
-  const save = async (zone: string) => {
-    setBusy(true);
-    try {
-      await apiPost('/tasks/time-zone', {time_zone: zone});
-      feedback.toast('Time zone saved. New schedules use it.');
-      await refreshResources();
-    } catch (failure) {
-      feedback.toast(problemText(failure), 'bad');
-    } finally {
-      setBusy(false);
-    }
-  };
   return (
-    <Card>
-      <div className="flex flex-wrap items-center gap-2 px-5 py-3">
-        <label htmlFor="owner-time-zone" className="text-sm font-medium">
-          Your time zone
-        </label>
-        <Select
-          id="owner-time-zone"
-          value={value}
-          disabled={busy}
-          className="w-64"
-          onChange={event => void save(event.target.value)}
-        >
-          {zones.map(zone => (
-            <option key={zone} value={zone}>
-              {zone.replace(/_/g, ' ')}
-            </option>
-          ))}
-        </Select>
-        {device && device !== value && (
-          <Button size="sm" variant="ghost" busy={busy} disabled={busy} onClick={() => void save(device)}>
-            Use this device’s ({device.replace(/_/g, ' ')})
-          </Button>
-        )}
-        <span className="w-full text-xs text-muted">
-          New schedules and task dates use it. Schedules already set keep theirs. You can also tell Nocheh in your
-          private chat.
-        </span>
-      </div>
-    </Card>
+    <p className="flex flex-wrap items-center gap-x-2 gap-y-1 text-sm text-muted">
+      <span>
+        New schedules run in your time zone, <span className="font-medium text-fg">{zoneName(value)}</span>.
+        {!settingsLink && ' Change it in the dashboard’s Settings › General, or tell Nocheh in your private chat.'}
+      </span>
+      {settingsLink && (
+        <LinkButton href={href('settings', {view: 'general'})} variant="ghost">
+          Change in Settings › General
+        </LinkButton>
+      )}
+    </p>
   );
 }
 

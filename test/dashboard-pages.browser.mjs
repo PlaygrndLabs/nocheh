@@ -55,7 +55,7 @@ const routes = [
   ['messages?view=import', 'Messages'],
   ...['people', 'projects', 'notes', 'longterm'].map(view => ['memory?view=' + view, 'Memory']),
   ...['work', 'sends', 'machines', 'backups', 'databases'].map(view => ['system?view=' + view, 'System']),
-  ...['telegram', 'models', 'speed', 'privacy', 'assistant', 'tasks', 'machines', 'advanced'].map(view => [
+  ...['general', 'telegram', 'models', 'speed', 'privacy', 'assistant', 'tasks', 'machines', 'advanced'].map(view => [
     'settings?view=' + view,
     'Settings',
   ]),
@@ -230,7 +230,7 @@ test('the sidebar lists the open page’s tabs and opens any page’s tab direct
   const settingsTabs = nav.getByRole('list', {name: 'Settings tabs'});
   assert.deepEqual(
     (await settingsTabs.getByRole('link').allTextContents()).map(text => text.trim()),
-    ['Telegram', 'Models', 'Speed', 'Privacy & data', 'Assistant', 'Tasks', 'Machines', 'Advanced'],
+    ['General', 'Telegram', 'Models', 'Speed', 'Privacy & data', 'Assistant', 'Tasks', 'Machines', 'Advanced'],
   );
   assert.equal(await settingsTabs.getByRole('link', {name: 'Models'}).getAttribute('aria-current'), 'true');
   assert.equal(await nav.getByRole('list', {name: 'Memory tabs'}).count(), 0);
@@ -1019,7 +1019,9 @@ test('task statuses, priorities and columns are edited in Settings', async () =>
   const statuses = page.getByRole('list', {name: 'Statuses'});
   await statuses.getByLabel('Status name 3').fill('On hold');
   // Priorities are on the next sub-tab; the status edit is kept while it is shown.
-  await page.getByRole('tab', {name: 'Priorities and time zone'}).click();
+  await page.getByRole('tab', {name: 'Priorities', exact: true}).click();
+  // The time zone is in Settings › General only.
+  assert.equal(await page.getByLabel('Time zone', {exact: true}).count(), 0);
   await page.getByLabel('Priority name Level 4').fill('Now');
   const bar = page.getByRole('region', {name: 'Save changes'});
   await bar.getByRole('button', {name: 'Save'}).click();
@@ -4111,23 +4113,35 @@ test('the members’ app still removes the member’s own reminders when new one
   await resetMembers();
 });
 
-test('the Schedules page sets the owner’s time zone, the same one as Settings › Tasks', async () => {
-  const {page, problems} = await open('schedules');
+test('the owner’s one time zone is set in Settings › General, and Schedules names it', async () => {
+  const {page, problems} = await open('settings');
+  // General opens first.
+  await page.getByRole('tab', {name: 'General', selected: true}).waitFor();
   const zone = page.locator('#owner-time-zone');
   await zone.waitFor();
   const before = await zone.inputValue();
   const next = before === 'Asia/Tokyo' ? 'Europe/Lisbon' : 'Asia/Tokyo';
   await zone.selectOption(next);
-  await page.getByText('Time zone saved. New schedules use it.').waitFor();
+  const bar = page.getByRole('region', {name: 'Save changes'});
+  await bar.getByText('Your time zone').waitFor();
+  await bar.getByRole('button', {name: 'Save'}).click();
+  await bar.getByText('No unsaved changes').waitFor();
   await page.reload();
   await page.locator('#owner-time-zone').waitFor();
   assert.equal(await page.locator('#owner-time-zone').inputValue(), next);
+  // Schedules shows it, read only, with the way to change it.
+  await page.goto(origin + '/#schedules');
+  await page.getByText('New schedules run in your time zone, ' + next.replace(/_/g, ' ')).waitFor();
+  assert.equal(await page.locator('#owner-time-zone').count(), 0);
+  await page.getByRole('link', {name: 'Change in Settings › General'}).click();
+  await page.locator('#owner-time-zone').waitFor();
+  await page.goto(origin + '/#settings?view=general');
   await page.locator('#owner-time-zone').selectOption(before);
-  await page.getByText('Time zone saved. New schedules use it.').first().waitFor();
+  await bar.getByRole('button', {name: 'Save'}).click();
+  await bar.getByText('No unsaved changes').waitFor();
   assert.deepEqual(problems, []);
   await page.close();
 });
-
 test('the members’ app lists the member’s own schedules in Settings, which they pause, resume, run now and delete', async () => {
   await resetMembers();
   const {page, problems, answers} = await openMember(201);

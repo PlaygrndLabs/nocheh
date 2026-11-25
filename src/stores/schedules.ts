@@ -450,7 +450,7 @@ type TurnSource={channel?:string;kind:string;origin:string;reference:{id:string}
 /**
  * Whether a reply may set the chat's schedules with Hermes's schedule tool: a live reply in the owner's private chat
  * (ownerTurn, which refuses anything else) to the owner's own Telegram message, not a forward. A schedule runs in the
- * owner's time zone (Settings › Tasks). Or a member's live reply in their own private chat (members' schedules), bound
+ * owner's time zone (Settings › General). Or a member's live reply in their own private chat (members' schedules), bound
  * to that chat, while they have Personal assistant on: the same, with how many schedules they may keep (Members ›
  * Schedules per member) and how many that chat keeps now. A member's schedule runs in their own time zone when they set
  * one (members' time zones), else in the owner's, unless they name another for that schedule.
@@ -520,7 +520,7 @@ export async function setMemberTimeZone(db:Pick<pg.Pool,'query'>,member:string,v
 /**
  * Someone sets their own time zone by asking in their own private chat (ADR-0281, ADR-0282): the same live, not
  * forwarded, own message that may set schedules (scheduleTurn). A member's goes to them (null for the owner's); the
- * owner's is the one their new schedules and task dates use (Settings › Tasks), never null. Refused with 403
+ * owner's is the one every part of Nocheh follows (Settings › General), never null. Refused with 403
  * `time_zone_not_here` in any other turn.
  */
 export async function timeZoneTurn(s:ScheduleTurnServices,principal:Reader,value:unknown):Promise<{time_zone:string|null}> {

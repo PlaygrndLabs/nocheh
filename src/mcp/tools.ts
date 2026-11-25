@@ -565,7 +565,7 @@ const day={type:['string','null']},ids={type:'array',items:{type:'string'},maxIt
 /** What a hit's source fields mean (ADR-0261): said once, in archive_search's description, with the usage sentence, and
  *  never inside a tool result, so stored history does not pile it up. */
 const TAGS=' Each hit has tag (who · where · when), by (whose words: owner, person, forward, file, mixed, nocheh, shared or unknown) and at '+
-  '(when, as an ISO time). Times in tags are in the owner\'s Settings › Tasks time zone in the owner\'s own chats and in UTC elsewhere. '+sourceTagUsage;
+  '(when, as an ISO time). Times in tags are in the owner\'s time zone (Settings › General) in the owner\'s own chats and in UTC elsewhere. '+sourceTagUsage;
 /** Nocheh's data tools, as the agent sees them under the MCP server name nocheh (mcp__nocheh__<name>). Arguments and answers are
  * those the agent's own plugin tools had, so a turn reads the same evidence the same way (ADR-0233). */
 export const mcpTools:readonly McpTool[]=[

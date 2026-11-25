@@ -862,7 +862,7 @@ export class TaskRepository {
     return {...value.settings,revision:String(value.revision)};
   }
   /**
-   * Save statuses, priorities, the owner's own columns and the time zone. A
+   * Save statuses, priorities and the owner's own columns (and the time zone, which tools still may send). A
    * removed status sends its tasks to the first status of the same kind; a
    * removed column or choice leaves the tasks that used it.
    */
@@ -898,7 +898,7 @@ export class TaskRepository {
     return this.settings(principal);
   }
 
-  /** Only the owner's time zone, from the Schedules page or the mini app (owner's time zone): the rest stays as saved. */
+  /** Only the owner's time zone, from Settings › General: the rest stays as saved. */
   async saveTimeZone(principal:Reader,input:unknown) {
     admin(principal);const body=object(input);
     if(Object.keys(body).some(key=>key!=='time_zone'))throw new HttpError(400,'unknown_task_setting');
