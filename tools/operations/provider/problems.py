@@ -493,7 +493,7 @@ def _moment(at, zone):
 
 
 def _when(at, since, zone='UTC'):
-    """A time in the notice's words, in the owner's time zone (ADR-0311): the hour on the notice's own day, else with
+    """A time in the notice's words, in the owner's time zone (ADR-0312): the hour on the notice's own day, else with
     the date. UTC is named, since it is nobody's own clock."""
     place = ZoneInfo(zone)
     moment, start = datetime.fromtimestamp(at, place), datetime.fromtimestamp(since, place)
@@ -603,7 +603,7 @@ def check(state, monitoring=None, usage_rows=None, send=None, now=None, enabled=
     if send is None:
         from tools.operations.archive.archive import API
         send = lambda body: API().call('/v1/runtime/owner-notice', body, timeout=60)
-    # The owner's time zone, asked once and only when a notice shows a time (ADR-0311).
+    # The owner's time zone, asked once and only when a notice shows a time (ADR-0312).
     zone = None
     if enabled and (record.get('notices') or report):
         from tools.operations.installation.owner_zone import owner_zone

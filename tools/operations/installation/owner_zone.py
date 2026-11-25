@@ -1,4 +1,4 @@
-"""The owner's time zone (Settings › General, ADR-0311) for the dashboard's own work: daily backups at their set time,
+"""The owner's time zone (Settings › General, ADR-0312) for the dashboard's own work: daily backups at their set time,
 and the times in the owner's problem notices.
 
 Nocheh is asked each time. The last zone it gave is kept here, so while Nocheh restarts nothing moves, and UTC is used
