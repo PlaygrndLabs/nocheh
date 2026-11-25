@@ -7,7 +7,7 @@ from pathlib import Path
 from . import daily_session
 from .daily_session import choose, cursor_value, day_of, zone
 
-DUBAI=zone('Asia/Dubai')
+BAKU=zone('Asia/Baku')
 LOGICAL='a'*64
 
 
@@ -20,41 +20,41 @@ class DayRuleTests(unittest.TestCase):
     """A chat's session lasts one day, which turns at 04:00 in the chat's time zone."""
 
     def test_the_day_turns_at_four_in_the_chats_time_zone(self):
-        # 03:59 and 04:00 in Dubai (UTC+4).
-        self.assertEqual(day_of(at('2026-11-24 23:59'),DUBAI),'2026-11-24')
-        self.assertEqual(day_of(at('2026-11-25 00:00'),DUBAI),'2026-11-25')
+        # 03:59 and 04:00 in Baku (UTC+4).
+        self.assertEqual(day_of(at('2026-11-24 23:59'),BAKU),'2026-11-24')
+        self.assertEqual(day_of(at('2026-11-25 00:00'),BAKU),'2026-11-25')
         self.assertEqual(day_of(at('2026-11-25 03:59'),timezone.utc),'2026-11-24')
 
     def test_an_unknown_or_missing_time_zone_is_utc(self):
         for value in (None,'','Not/AZone',7,'x'*65):self.assertIs(zone(value),timezone.utc)
 
     def test_a_chats_first_session_keeps_its_fixed_id(self):
-        self.assertEqual(choose(None,LOGICAL,at('2026-11-25 06:00'),DUBAI),('nocheh-'+LOGICAL,None,'2026-11-25'))
+        self.assertEqual(choose(None,LOGICAL,at('2026-11-25 06:00'),BAKU),('nocheh-'+LOGICAL,None,'2026-11-25'))
 
     def test_the_same_day_continues_the_session(self):
         cursor={'session_id':'nocheh-x','day':'2026-11-25','last_active':at('2026-11-25 01:00')}
-        self.assertEqual(choose(cursor,LOGICAL,at('2026-11-25 19:00'),DUBAI),('nocheh-x',None,'2026-11-25'))
+        self.assertEqual(choose(cursor,LOGICAL,at('2026-11-25 19:00'),BAKU),('nocheh-x',None,'2026-11-25'))
 
     def test_a_new_day_starts_a_session_named_by_its_day(self):
         cursor={'session_id':'nocheh-x','day':'2026-11-24','last_active':at('2026-11-24 18:00')}
-        self.assertEqual(choose(cursor,LOGICAL,at('2026-11-25 05:00'),DUBAI),('nocheh-'+LOGICAL+'-20261125','nocheh-x','2026-11-25'))
+        self.assertEqual(choose(cursor,LOGICAL,at('2026-11-25 05:00'),BAKU),('nocheh-'+LOGICAL+'-20261125','nocheh-x','2026-11-25'))
 
     def test_a_conversation_going_at_four_waits_for_half_an_hour_of_quiet(self):
         cursor={'session_id':'nocheh-x','day':'2026-11-24','last_active':at('2026-11-25 00:10')}
-        self.assertEqual(choose(cursor,LOGICAL,at('2026-11-25 00:20'),DUBAI)[1],None)
-        self.assertEqual(choose(cursor,LOGICAL,at('2026-11-25 00:40'),DUBAI)[1],'nocheh-x')
+        self.assertEqual(choose(cursor,LOGICAL,at('2026-11-25 00:20'),BAKU)[1],None)
+        self.assertEqual(choose(cursor,LOGICAL,at('2026-11-25 00:40'),BAKU)[1],'nocheh-x')
 
     def test_a_follow_up_after_an_approval_stays_in_the_session_that_asked(self):
         cursor={'session_id':'nocheh-x','day':'2026-11-24','last_active':at('2026-11-24 10:00')}
-        self.assertEqual(choose(cursor,LOGICAL,at('2026-11-25 09:00'),DUBAI,follow_up=True),('nocheh-x',None,'2026-11-24'))
+        self.assertEqual(choose(cursor,LOGICAL,at('2026-11-25 09:00'),BAKU,follow_up=True),('nocheh-x',None,'2026-11-24'))
 
     def test_a_cursor_from_before_daily_sessions_counts_as_todays(self):
         cursor=cursor_value({'session_id':'nocheh-x'})
-        self.assertEqual(choose(cursor,LOGICAL,at('2026-11-25 09:00'),DUBAI),('nocheh-x',None,'2026-11-25'))
+        self.assertEqual(choose(cursor,LOGICAL,at('2026-11-25 09:00'),BAKU),('nocheh-x',None,'2026-11-25'))
 
     def test_a_retried_turn_lands_in_the_same_new_session(self):
         cursor={'session_id':'nocheh-x','day':'2026-11-24','last_active':at('2026-11-24 10:00')}
-        self.assertEqual(choose(cursor,LOGICAL,at('2026-11-25 09:00'),DUBAI),choose(cursor,LOGICAL,at('2026-11-25 09:05'),DUBAI))
+        self.assertEqual(choose(cursor,LOGICAL,at('2026-11-25 09:00'),BAKU),choose(cursor,LOGICAL,at('2026-11-25 09:05'),BAKU))
 
     def test_malformed_cursor_fields_read_as_none(self):
         self.assertIsNone(cursor_value({'day':'2026-11-24'}))
