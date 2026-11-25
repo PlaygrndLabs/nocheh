@@ -6,16 +6,18 @@ NATIVE_ID = re.compile(r'^[A-Za-z0-9_-]{21}$')
 
 
 async def failed_queue_items(workspace_id, db, since=None):
-    """Report only whether current-workspace derivation has terminal failures.
+    """Report only whether current-workspace learning has terminal failures.
 
     ``since`` limits the answer to work queued after Nocheh last saw the queue
     drained. Honcho keeps failed items for 30 days, so without it one old
-    failure would hold the workspace unready for that long."""
+    failure would hold the workspace unready for that long. A failed dream
+    (old-fact retirement) learned nothing new, so it never holds the
+    workspace unready (ADR-0298); it is still counted and retried with the rest."""
     from sqlalchemy import text
     values = {'workspace': workspace_id, **({'since': since} if since is not None else {})}
     result = await db.execute(text('''SELECT EXISTS(
         SELECT 1 FROM queue WHERE workspace_name=:workspace
-        AND task_type IN ('representation','summary','dream')
+        AND task_type IN ('representation','summary')
         AND processed AND error IS NOT NULL''' + (' AND created_at > :since' if since is not None else '') + ')'), values)
     return bool(result.scalar_one())
 
@@ -213,12 +215,14 @@ async def provenance(body, load_documents, load_messages):
 
 
 # How many of a workspace's live explicit conclusions cite their messages, know only their learning batch, or neither.
+# A memory wall's copies (observer scope.<wall>) are not counted again.
 COVERAGE_SQL = '''SELECT count(*) AS explicit,
     count(*) FILTER (WHERE cited) AS cited,
     count(*) FILTER (WHERE NOT cited AND batch) AS batch_only
     FROM (SELECT EXISTS (SELECT 1 FROM conclusion_source_messages s WHERE s.tenant_id=d.tenant_id AND s.conclusion_id=d.id) AS cited,
         (jsonb_typeof(d.internal_metadata->'message_ids')='array' AND jsonb_array_length(d.internal_metadata->'message_ids')>0) AS batch
         FROM documents d WHERE d.workspace_name=:workspace AND d.level='explicit' AND d.deleted_at IS NULL
+        AND d.observer NOT LIKE 'scope.%'
         AND NOT EXISTS (SELECT 1 FROM sessions x WHERE x.tenant_id=d.tenant_id AND x.workspace_name=d.workspace_name
             AND x.name=d.session_name AND x.deleted_at IS NOT NULL)) c'''
 
@@ -251,13 +255,46 @@ MESSAGES_SQL = '''SELECT id,public_id,metadata->>'nocheh_receipt' AS receipt_id
 
 
 SESSION_ID = re.compile(r'^[a-f0-9]{64}$')
+# A hidden conclusion (ADR-0298) is soft-deleted with a far-future time, so Honcho reads skip it and its clean-up, which
+# removes only rows deleted before a few minutes ago, never reaches it. Bringing it back clears the time.
+HIDDEN_AT = "TIMESTAMPTZ '9999-12-31 00:00:00+00'"
+HIDDEN_FLOOR = "TIMESTAMPTZ '9999-01-01 00:00:00+00'"
+
+NOW_TEXT = "to_char(now() AT TIME ZONE 'UTC','YYYY-MM-DD\"T\"HH24:MI:SS.US\"Z\"')"
+
+# A reply read these facts (ADR-0299): their last use, written at most once a day per fact.
+USED_SQL = '''UPDATE documents SET internal_metadata=internal_metadata||jsonb_build_object('nocheh_used_at',''' + NOW_TEXT + ''')
+    WHERE workspace_name=:workspace AND id=ANY(:ids) AND deleted_at IS NULL
+    AND COALESCE(internal_metadata->>'nocheh_used_at','') < to_char((now()-interval '1 day') AT TIME ZONE 'UTC','YYYY-MM-DD"T"HH24:MI:SS.US"Z"')'''
+
+# A fact and its memory wall copies are one family. Its last activity is the newest of: when any of them was learned,
+# when a reply last read any of them, and when a chat last said it (the newest message any of them cites). A family
+# with nothing since `before` is hidden whole, as unused (ADR-0299), a bounded number of families at a time.
+HIDE_UNUSED_SQL = '''WITH family AS (
+    SELECT COALESCE(d.internal_metadata->>'copied_from', d.id) AS family, GREATEST(d.created_at,
+        CASE WHEN d.internal_metadata->>'nocheh_used_at' ~ '^[0-9]{4}-[0-9]{2}-[0-9]{2}T[0-9:.]+Z$'
+            THEN (d.internal_metadata->>'nocheh_used_at')::timestamptz END,
+        (SELECT max(m.created_at) FROM conclusion_source_messages s
+            JOIN messages m ON m.tenant_id=s.tenant_id AND m.public_id=s.message_id
+            WHERE s.tenant_id=d.tenant_id AND s.conclusion_id=d.id)) AS last
+    FROM documents d WHERE d.workspace_name=:workspace AND d.deleted_at IS NULL
+), stale AS (
+    SELECT family FROM family GROUP BY family HAVING max(last) < :before ORDER BY family LIMIT :limit
+)
+UPDATE documents SET deleted_at=''' + HIDDEN_AT + ''', internal_metadata=internal_metadata||jsonb_build_object('nocheh_hidden',
+    jsonb_build_object('reason','unused','at',''' + NOW_TEXT + '''))
+    WHERE workspace_name=:workspace AND deleted_at IS NULL
+    AND (id IN (SELECT family FROM stale) OR internal_metadata->>'copied_from' IN (SELECT family FROM stale)) RETURNING id'''
+
+# Live and hidden conclusions outside the session derived from it; hidden ones are walked through too, so a fact hidden
+# in between still leads to what was derived from it.
 DESCENDANTS_SQL = '''WITH RECURSIVE seed AS (
     SELECT id FROM documents WHERE workspace_name=:workspace AND session_name=:session
 ), messages_seed AS (
     SELECT id FROM messages WHERE workspace_name=:workspace AND session_name=:session
 ), tree(id, depth) AS (
     SELECT d.id, 1 FROM documents d
-    WHERE d.workspace_name=:workspace AND d.deleted_at IS NULL AND d.session_name IS DISTINCT FROM :session
+    WHERE d.workspace_name=:workspace AND (d.deleted_at IS NULL OR d.deleted_at>=''' + HIDDEN_FLOOR + ''') AND d.session_name IS DISTINCT FROM :session
     AND (EXISTS (SELECT 1 FROM document_sources s JOIN seed ON seed.id=s.source_id WHERE s.derived_id=d.id)
         OR (jsonb_typeof(d.internal_metadata->'message_ids')='array' AND EXISTS (
             SELECT 1 FROM jsonb_array_elements(d.internal_metadata->'message_ids') link(value)
@@ -266,22 +303,104 @@ DESCENDANTS_SQL = '''WITH RECURSIVE seed AS (
     SELECT d.id, tree.depth+1 FROM tree
     JOIN document_sources s ON s.source_id=tree.id AND s.workspace_name=:workspace
     JOIN documents d ON d.id=s.derived_id
-    WHERE d.workspace_name=:workspace AND d.deleted_at IS NULL AND d.session_name IS DISTINCT FROM :session AND tree.depth<8
+    WHERE d.workspace_name=:workspace AND (d.deleted_at IS NULL OR d.deleted_at>=''' + HIDDEN_FLOOR + ''') AND d.session_name IS DISTINCT FROM :session AND tree.depth<8
 )
-SELECT DISTINCT id FROM tree ORDER BY id LIMIT :limit'''
+SELECT d.id, d.deleted_at IS NOT NULL AS hidden FROM (SELECT DISTINCT id FROM tree) t JOIN documents d ON d.id=t.id
+    WHERE d.workspace_name=:workspace ORDER BY d.deleted_at IS NOT NULL DESC, d.id LIMIT :limit'''
+
+# A forgotten source takes its hidden descendants with it: they become ordinary deleted rows Honcho removes.
+RELEASE_HIDDEN_SQL = '''UPDATE documents SET deleted_at=now() WHERE workspace_name=:workspace AND id=ANY(:ids)
+    AND deleted_at>=''' + HIDDEN_FLOOR
+
+# Hidden conclusions, newest hidden first: a person's own, or a memory wall's copy (`copied_from` names the person's).
+HIDDEN_LIST_SQL = '''SELECT id, content, level, observer, observed, created_at,
+    COALESCE(internal_metadata->'nocheh_hidden'->>'reason','replaced') AS reason,
+    COALESCE(internal_metadata->'nocheh_hidden'->>'at','') AS hidden_at, internal_metadata->>'copied_from' AS copied_from
+    FROM documents WHERE workspace_name=:workspace AND deleted_at>=''' + HIDDEN_FLOOR + '''
+    AND (CAST(:after_at AS text) IS NULL OR (COALESCE(internal_metadata->'nocheh_hidden'->>'at',''), id) < (:after_at, :after_id))
+    ORDER BY COALESCE(internal_metadata->'nocheh_hidden'->>'at','') DESC, id DESC LIMIT :limit'''
+
+# Bringing a fact back brings back its hidden wall copies too, and counts as a use, so the unused-facts rule waits its
+# full number of days again before it hides the fact.
+RESTORE_HIDDEN_SQL = '''UPDATE documents SET deleted_at=NULL,
+    internal_metadata=(internal_metadata - 'nocheh_hidden')||jsonb_build_object('nocheh_used_at',''' + NOW_TEXT + ''')
+    WHERE workspace_name=:workspace AND deleted_at>=''' + HIDDEN_FLOOR + '''
+    AND (id=ANY(:ids) OR internal_metadata->>'copied_from'=ANY(:ids)) RETURNING id'''
 
 
-async def session_descendants(body, load):
-    """Conclusions outside a session that were derived from it, so deleting the session leaves none behind."""
+async def session_descendants(body, load, release=None):
+    """Conclusions outside a session that were derived from it, so deleting the session leaves none behind. ``load``
+    gives (id, hidden) pairs, hidden first; the hidden ones are handed to ``release`` and only live ones are returned
+    for the caller to delete, so a call that finds only hidden ones returns none and the next finds them gone."""
     if not isinstance(body, dict) or set(body) - {'session_id', 'limit'}:
         raise ValueError('invalid_descendants_request')
     session, limit = body.get('session_id'), body.get('limit', 100)
     if not isinstance(session, str) or not SESSION_ID.fullmatch(session) or isinstance(limit, bool) or not isinstance(limit, int) or not 1 <= limit <= 100:
         raise ValueError('invalid_descendants_request')
-    ids = await load(session, limit + 1)
-    if any(not isinstance(v, str) or not NATIVE_ID.fullmatch(v) for v in ids):
+    rows = await load(session, limit + 1)
+    if any(not isinstance(v, str) or not NATIVE_ID.fullmatch(v) for v, _ in rows):
         raise ValueError('descendant_identity_invalid')
-    return {'ids': ids[:limit], 'truncated': len(ids) > limit}
+    hidden = [v for v, h in rows if h]
+    if hidden:
+        if release is None:
+            raise ValueError('hidden_descendants_unreleased')
+        await release(hidden)
+    ids = [v for v, h in rows if not h]
+    return {'ids': ids[:limit], 'truncated': len(rows) > limit}
+
+
+def hidden_cursor(after):
+    """`after` is a page's `next`: the last row's hidden time and id, joined by a space."""
+    if after in (None, ''):
+        return None, None
+    if not isinstance(after, str) or len(after) > 80 or after.count(' ') != 1:
+        raise ValueError('invalid_hidden_cursor')
+    at, identifier = after.split(' ')
+    if not NATIVE_ID.fullmatch(identifier) or not re.fullmatch(r'[0-9TZ:.+-]{0,40}', at):
+        raise ValueError('invalid_hidden_cursor')
+    return at, identifier
+
+
+def hidden_page(rows, limit):
+    """One page of hidden facts as the owner's dashboard lists them."""
+    items = [{'id': r['id'], 'content': r['content'], 'level': r['level'], 'observer': r['observer'], 'observed': r['observed'],
+              'created_at': r['created_at'].isoformat() if hasattr(r['created_at'], 'isoformat') else str(r['created_at']),
+              'reason': r['reason'] if r['reason'] in ('replaced', 'unused') else 'replaced', 'hidden_at': r['hidden_at'] or None,
+              'copied_from': r['copied_from']} for r in rows[:limit]]
+    last = rows[limit - 1] if len(rows) > limit else None
+    return {'items': items, 'next': (last['hidden_at'] or '') + ' ' + last['id'] if last else None}
+
+
+def used_ids(body):
+    if not isinstance(body, dict) or set(body) != {'ids'} or not isinstance(body['ids'], list) or not 1 <= len(body['ids']) <= 200 \
+            or any(not isinstance(v, str) or not NATIVE_ID.fullmatch(v) for v in body['ids']):
+        raise ValueError('invalid_used_request')
+    return list(dict.fromkeys(body['ids']))
+
+
+UNUSED_MIN_DAYS = 30
+
+
+def hide_unused_request(body, now):
+    """`before`: facts with no activity since then are hidden; never later than 30 days ago. `limit`: families per call."""
+    from datetime import datetime, timedelta
+    if not isinstance(body, dict) or set(body) != {'before', 'limit'} or not isinstance(body['before'], str) \
+            or isinstance(body['limit'], bool) or not isinstance(body['limit'], int) or not 1 <= body['limit'] <= 500:
+        raise ValueError('invalid_hide_unused_request')
+    try: before = datetime.fromisoformat(body['before'])
+    except ValueError: raise ValueError('invalid_hide_unused_request') from None
+    if before.tzinfo is None:
+        raise ValueError('invalid_hide_unused_request')
+    if before > now - timedelta(days=UNUSED_MIN_DAYS):
+        raise ValueError('hide_unused_too_recent')
+    return before, body['limit']
+
+
+def restore_ids(body):
+    if not isinstance(body, dict) or set(body) != {'ids'} or not isinstance(body['ids'], list) or not 1 <= len(body['ids']) <= 50 \
+            or any(not isinstance(v, str) or not NATIVE_ID.fullmatch(v) for v in body['ids']):
+        raise ValueError('invalid_restore_request')
+    return list(dict.fromkeys(body['ids']))
 
 
 def install(app):
@@ -329,14 +448,53 @@ def install(app):
         return await citation_coverage(workspace_id, db)
 
     @router.post('/session-descendants')
-    async def descendants(workspace_id: str, body: dict = Body(...), db: AsyncSession = read_db):
+    async def descendants(workspace_id: str, body: dict = Body(...), db: AsyncSession = write_db):
         async def load(session, limit):
             result = await db.execute(text(DESCENDANTS_SQL), {'workspace': workspace_id, 'session': session, 'limit': limit})
-            return [row[0] for row in result.all()]
+            return [(row[0], bool(row[1])) for row in result.all()]
+
+        async def release(ids):
+            await db.execute(text(RELEASE_HIDDEN_SQL), {'workspace': workspace_id, 'ids': ids})
+            await db.commit()
 
         try:
-            return await session_descendants(body, load)
+            return await session_descendants(body, load, release)
         except ValueError as error:
             raise HTTPException(status_code=400, detail=str(error)) from None
+
+    @router.get('/hidden')
+    async def hidden(workspace_id: str, after: str | None = None, size: int = 25, db: AsyncSession = read_db):
+        try: at, identifier = hidden_cursor(after)
+        except ValueError as error: raise HTTPException(status_code=400, detail=str(error)) from None
+        if not 1 <= size <= 100: raise HTTPException(status_code=400, detail='invalid_hidden_size')
+        result = await db.execute(text(HIDDEN_LIST_SQL), {'workspace': workspace_id, 'after_at': at, 'after_id': identifier, 'limit': size + 1})
+        return hidden_page([dict(row) for row in result.mappings()], size)
+
+    @router.post('/hidden/restore')
+    async def restore(workspace_id: str, body: dict = Body(...), db: AsyncSession = write_db):
+        try: ids = restore_ids(body)
+        except ValueError as error: raise HTTPException(status_code=400, detail=str(error)) from None
+        result = await db.execute(text(RESTORE_HIDDEN_SQL), {'workspace': workspace_id, 'ids': ids})
+        restored = [row[0] for row in result.all()]
+        await db.commit()
+        return {'restored': restored}
+
+    @router.post('/used')
+    async def used(workspace_id: str, body: dict = Body(...), db: AsyncSession = write_db):
+        try: ids = used_ids(body)
+        except ValueError as error: raise HTTPException(status_code=400, detail=str(error)) from None
+        result = await db.execute(text(USED_SQL), {'workspace': workspace_id, 'ids': ids})
+        await db.commit()
+        return {'marked': int(result.rowcount)}
+
+    @router.post('/hide-unused')
+    async def hide_unused(workspace_id: str, body: dict = Body(...), db: AsyncSession = write_db):
+        from datetime import datetime, timezone
+        try: before, limit = hide_unused_request(body, datetime.now(timezone.utc))
+        except ValueError as error: raise HTTPException(status_code=400, detail=str(error)) from None
+        result = await db.execute(text(HIDE_UNUSED_SQL), {'workspace': workspace_id, 'before': before, 'limit': limit})
+        hidden = [row[0] for row in result.all()]
+        await db.commit()
+        return {'hidden': len(hidden)}
 
     app.include_router(router)

@@ -292,15 +292,17 @@ test('without facts, tags or a usable guard result the block keeps the engine\'s
   // An engine without a fact list keeps its prose and its limitation.
   const plain=honchoEngine(async(path:string)=>path.includes('/context?')?{summary:{content:'Summary'},peer_representation:'Prose representation'}:{});
   const noFacts=Object.assign(Object.create(Object.getPrototypeOf(plain)),plain,{facts:undefined}) as MemoryEngine;
-  const prose=await contextFixture(noFacts).read();
-  assert.equal(prose.text,'[conversation summary]\nSummary\n\n[what is known about the speaker]\nProse representation');
+  const prose=await contextFixture(noFacts).read('owner');
+  assert.equal(prose.text,'[conversation summary]\nSummary\n\n[what is known about the owner; it may include conclusions drawn from things the owner forwarded or sent]\nProse representation');
+  // A group's prose can hold a conclusion an old-fact clean-up drew across every chat and filed under the group: only its summary is kept.
+  assert.equal((await contextFixture(noFacts).read()).text,'[conversation summary]\nSummary');
   assert.equal(prose.record,undefined,'prose is named by its session, as before');assert.equal(prose.limitations,undefined);
-  const untagged=await contextFixture(fakeHoncho(state),{tags:null}).read();
+  const untagged=await contextFixture(fakeHoncho(state),{tags:null}).read('owner');
   assert.match(untagged.text,/Prose representation/,'no tag repository: prose');
   // The guard rewrote a fact line: prose, with the reason, counted.
   const fixture=contextFixture(fakeHoncho(state),{receipts:{[m('a')]:{peer:'person_speaker',references:[hex('a')]}},guard:text=>text.replace('1. 14:00','1.')});
   const fallback=await fixture.read();
-  assert.match(fallback.text,/^\[conversation summary\]\nSummary\n\n\[what is known about the speaker\]\n/);
+  assert.equal(fallback.text,'[conversation summary]\nSummary');
   assert.deepEqual(fallback.limitations,['representation_has_no_exact_citations','source_tags_unavailable']);assert.deepEqual(fixture.problems,['source_tags']);
   // The fact list could not be read: prose, counted.
   const down=contextFixture(fakeHoncho({...state,failList:true}));
@@ -363,7 +365,8 @@ test('a failed tag request gives the block in prose, counted once; a block is ex
   const failed=contextFixture(fakeHoncho({facts:[honchoFact(1,[m('ok')])],summary:'Summary'}),{receipts,
     tags:refs=>new Map(refs.map((r:any)=>[r.id,{source:'nocheh:event:'+r.id,tag:'source not available right now',by:'unknown',at:null}]))});
   const prose=await failed.read();
-  assert.match(prose.text,/Prose representation/);assert.ok(prose.limitations.includes('source_tags_unavailable'));
+  assert.match(prose.text,/Summary/);assert.doesNotMatch(prose.text,/Prose representation/,'a group falls back to its summary only');
+  assert.ok(prose.limitations.includes('source_tags_unavailable'));
   assert.deepEqual(failed.problems,[],'the tag request counted its own failure; the block does not count it again');
   const exact=await contextFixture(fakeHoncho({facts:[honchoFact(1,[m('ok')])]}),{receipts}).read();
   assert.deepEqual([exact.exact,exact.limitations],[true,[]]);

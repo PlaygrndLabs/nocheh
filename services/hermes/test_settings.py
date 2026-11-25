@@ -71,7 +71,7 @@ class SettingsTests(unittest.TestCase):
             self.assertEqual(save(state, {'NOCHEH_DASHBOARD_URL': ''}, saved['revision'])['apply_state'], 'current')
 
     def test_a_retired_setting_is_hidden_unsaveable_and_does_not_ask_for_apply_after_an_upgrade(self):
-        from tools.operations.installation.configuration import DEFAULTS
+        from tools.operations.installation.configuration import DEFAULTS, GENERATED
         from tools.operations.installation.settings import LIVE, revision
         # The group list (ADR-0253) and the lists of who may talk in each group, which members replace (step 3): an older
         # .env keeps its line, at the old default or not.
@@ -79,7 +79,8 @@ class SettingsTests(unittest.TestCase):
         for key, default, listed in (('TELEGRAM_GROUP_IDS', '', '-10'), ('TELEGRAM_GROUP_ACCESS', '{}', access)):
             # The revision a build that still had the setting recorded at Apply.
             old = {**DEFAULTS, key: default}
-            before = lambda values: revision({name: value for name, value in values.items() if name not in LIVE and old.get(name) != value})
+            before = lambda values: revision({name: value for name, value in values.items() if name not in LIVE and name not in GENERATED
+                                              and old.get(name) != value})
             for value in (default, listed):
                 with self.subTest(key=key, value=value), tempfile.TemporaryDirectory() as folder:
                     state = Path(folder); values = initialize(state)
@@ -93,6 +94,18 @@ class SettingsTests(unittest.TestCase):
                     self.assertNotIn(key, [field['key'] for field in current['fields']])
                     with self.assertRaisesRegex(ValueError, 'unsupported_setting'): save(state, {key: listed}, current['revision'])
                     self.assertEqual(load(state)[key], value)
+
+    def test_generated_keys_never_ask_for_apply(self):
+        # A cutover or rotate-keys applies them itself (ADR-0295); Settings neither lists nor counts them.
+        from tools.operations.installation.configuration import GENERATED
+        with tempfile.TemporaryDirectory() as folder:
+            state = Path(folder); values = initialize(state)
+            changed = {**values, **{name: values[name][::-1] for name in GENERATED}}
+            self.assertEqual(service_revision(changed), service_revision(values))
+            self.assertNotEqual(service_revision({**values, 'NOCHEH_GUARD_MODE': 'off'}), service_revision(values))
+            for name in ('AGENT_KEY', 'NOCHEH_HERMES_SESSION_TOKEN'):
+                self.assertNotIn(name, [field['key'] for field in view(state)['fields']])
+                self.assertNotIn(values[name], json.dumps(view(state)))
 
     def test_models_are_owner_settings_and_embeddings_never_mix(self):
         import sqlite3

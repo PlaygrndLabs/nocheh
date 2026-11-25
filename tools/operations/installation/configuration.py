@@ -19,7 +19,8 @@ DEFAULTS = {
     'NOCHEH_GUARD_MODE': 'on', 'NOCHEH_SECURITY_RUNTIME': 'isolated', 'NOCHEH_MEMORY_CONTEXT': 'evidence',
     'TELEGRAM_ENABLED': 'false', 'TELEGRAM_BOT_TOKEN': '', 'TELEGRAM_OWNER_ID': '',
     'TELEGRAM_GROUP_REPLIES': 'addressed', 'TELEGRAM_BOT_NAMES': 'Nocheh,نوچه', 'TELEGRAM_TOPIC_MEMORY': 'group', 'TELEGRAM_TYPING': 'true', 'TELEGRAM_REACTIONS': 'true',
-    'TELEGRAM_PROBLEM_NOTICES': 'true', 'NOCHEH_DASHBOARD_URL': '',
+    'TELEGRAM_PROBLEM_NOTICES': 'true', 'NOCHEH_QUIET_HOURS': '', 'NOCHEH_DASHBOARD_URL': '',
+    'NOCHEH_MONTHLY_LIMIT_USD': '',
     'POSTGRES_PASSWORD': '', 'SERVICE_TOKEN': '',
     'NOCHEH_STORAGE_LAYOUT': 'original-only-v1',
     'NOCHEH_ARCHIVE_PASSWORD': '', 'NOCHEH_DERIVED_PASSWORD': '', 'NOCHEH_CONTROL_PASSWORD': '',
@@ -30,7 +31,7 @@ DEFAULTS = {
     'NOCHEH_OFFSITE_ACCESS_KEY_ID': '', 'NOCHEH_OFFSITE_SECRET_ACCESS_KEY': '', 'NOCHEH_OFFSITE_PASSPHRASE': '', 'NOCHEH_OFFSITE_KEEP': '14',
     'NOCHEH_LOG_MAX_SIZE': '10m', 'NOCHEH_LOG_MAX_FILES': '3',
     'NOCHEH_PARALLEL_REPLIES': '3', 'NOCHEH_PARALLEL_RUNS': '4', 'NOCHEH_PARALLEL_GUARD_CHECKS': '3',
-    'NOCHEH_HONCHO_ENABLED': 'true',
+    'NOCHEH_HONCHO_ENABLED': 'true', 'NOCHEH_MEMORY_RETIRE_OLD_FACTS': 'false',
     'NOCHEH_MINI_APP_URL': '', 'CLOUDFLARE_TUNNEL_TOKEN': '',
     'INNGEST_EVENT_KEY': '', 'INNGEST_SIGNING_KEY': '', 'INNGEST_POSTGRES_PASSWORD': '',
     **EMBEDDING_DEFAULTS,
@@ -198,6 +199,7 @@ def validate(values):
     if any(value and not re.fullmatch('[a-f0-9]{64}',value) for value in storage):raise ValueError('Invalid storage credential')
     if layout=='original-only-v1' and (not all(storage) or len(set(storage+[values.get('POSTGRES_PASSWORD'),values.get('INNGEST_POSTGRES_PASSWORD')]))!=5):raise ValueError('Separate storage credentials required')
     if values.get('NOCHEH_HONCHO_ENABLED','false') not in ('true','false'):raise ValueError('Invalid NOCHEH_HONCHO_ENABLED')
+    if values.get('NOCHEH_MEMORY_RETIRE_OLD_FACTS','false') not in ('true','false'):raise ValueError('NOCHEH_MEMORY_RETIRE_OLD_FACTS must be true or false')
     if not str(values.get('NOCHEH_WORKFLOW_UI_PORT','8288')).isdigit() or not 1024<=int(values.get('NOCHEH_WORKFLOW_UI_PORT','8288'))<=65535:raise ValueError('Invalid NOCHEH_WORKFLOW_UI_PORT')
     retention=str(values.get('NOCHEH_WORKFLOW_HISTORY_RETENTION_DAYS','0'))
     if not re.fullmatch(r'\d{1,4}',retention) or int(retention)>3650:raise ValueError('NOCHEH_WORKFLOW_HISTORY_RETENTION_DAYS must be 0 (off) or 1-3650 days')
@@ -225,6 +227,13 @@ def validate(values):
     if values.get('TELEGRAM_TYPING','true') not in ('true','false'):raise ValueError('TELEGRAM_TYPING must be true or false')
     if values.get('TELEGRAM_REACTIONS','true') not in ('true','false'):raise ValueError('TELEGRAM_REACTIONS must be true or false')
     if values.get('TELEGRAM_PROBLEM_NOTICES','true') not in ('true','false'):raise ValueError('TELEGRAM_PROBLEM_NOTICES must be true or false')
+    # Quiet hours: a start and an end in each person's own time zone, such as 23:00-07:00; empty is off.
+    quiet=str(values.get('NOCHEH_QUIET_HOURS',''))
+    if quiet and not (re.fullmatch(r'(?:[01]\d|2[0-3]):[0-5]\d-(?:[01]\d|2[0-3]):[0-5]\d',quiet) and quiet[:5]!=quiet[6:]):
+        raise ValueError('NOCHEH_QUIET_HOURS must be a start and an end such as 23:00-07:00, or empty')
+    # One monthly dollar limit over every model call (ADR-0298); empty is off.
+    if not re.fullmatch(r'(?:[1-9]\d{0,4}|100000)?',str(values.get('NOCHEH_MONTHLY_LIMIT_USD',''))):
+        raise ValueError('NOCHEH_MONTHLY_LIMIT_USD must be whole dollars from 1 to 100000, or empty')
     if values.get('NOCHEH_DASHBOARD_URL') and not re.fullmatch(r'https?://[^\s/?#]+(?:/[^\s?#]*)?',values['NOCHEH_DASHBOARD_URL'][:300]):
         raise ValueError('NOCHEH_DASHBOARD_URL must be an http or https address such as https://nocheh.example.com')
     names=[name.strip() for name in str(values.get('TELEGRAM_BOT_NAMES','')).split(',') if name.strip()]
@@ -245,11 +254,25 @@ def validate(values):
     machine=values.get('NOCHEH_MACHINE_TOKEN')
     if machine and (len(machine)<32 or machine in (values['SERVICE_TOKEN'],box)):
         raise ValueError('NOCHEH_MACHINE_TOKEN must contain at least 32 characters and differ from SERVICE_TOKEN and NOCHEH_BOX_TOKEN')
+    # The agent login (Nocheh and Hermes, both ways) and Hermes's dashboard session token (ADR-0295). Empty passes, so an
+    # older .env still loads before init, up or make dev fills them; Compose and the services refuse to run without them.
+    keys={name:values.get(name) or '' for name in KEYS}
+    for name in ('AGENT_KEY','NOCHEH_HERMES_SESSION_TOKEN','NOCHEH_BOX_TOKEN','NOCHEH_MACHINE_TOKEN'):
+        value=keys[name]
+        if value and (len(value)<32 or value in {v for k,v in keys.items() if k!=name}):
+            raise ValueError(f'{name} must contain at least 32 characters and differ from every other Nocheh key')
     # Every job that may run at once (two) must be able to have its box.
     if not re.fullmatch(r'[2-8]',str(values.get('NOCHEH_BOX_LIMIT','2'))):raise ValueError('NOCHEH_BOX_LIMIT must be 2-8')
 
 
-GENERATED = ('POSTGRES_PASSWORD','SERVICE_TOKEN','NOCHEH_BOX_TOKEN','NOCHEH_MACHINE_TOKEN','INNGEST_EVENT_KEY','INNGEST_SIGNING_KEY','INNGEST_POSTGRES_PASSWORD','NOCHEH_ARCHIVE_PASSWORD','NOCHEH_DERIVED_PASSWORD','NOCHEH_CONTROL_PASSWORD')
+GENERATED = ('POSTGRES_PASSWORD','SERVICE_TOKEN','NOCHEH_BOX_TOKEN','NOCHEH_MACHINE_TOKEN','INNGEST_EVENT_KEY','INNGEST_SIGNING_KEY','INNGEST_POSTGRES_PASSWORD','NOCHEH_ARCHIVE_PASSWORD','NOCHEH_DERIVED_PASSWORD','NOCHEH_CONTROL_PASSWORD',
+             'AGENT_KEY','NOCHEH_HERMES_SESSION_TOKEN')
+# The bearer and signing keys; no two may be equal (ADR-0295).
+KEYS = ('SERVICE_TOKEN','AGENT_KEY','NOCHEH_HERMES_SESSION_TOKEN','NOCHEH_BOX_TOKEN','NOCHEH_MACHINE_TOKEN')
+# What rotate-keys renews, and what a cutover makes anew.
+ROTATED = ('SERVICE_TOKEN','AGENT_KEY','NOCHEH_HERMES_SESSION_TOKEN')
+# Left by a key change: the dashboard and executor keep keys they read once, so the next up or rotate-keys restarts them.
+RESTART_MARKER = 'admin/restart-cached'
 
 
 def generate(values, names=GENERATED):
@@ -257,6 +280,21 @@ def generate(values, names=GENERATED):
     for name in names:
         if not values.get(name): values[name] = secrets.token_hex(32)
     return values
+
+
+def cut_over(values):
+    """Once, on the first run without an agent login: Hermes knew SERVICE_TOKEN until then, so it is made anew with the
+    agent login and the session token (ADR-0295). True when an existing key was dropped; a fresh .env has none."""
+    if values.get('AGENT_KEY'): return False
+    had = bool(values.get('SERVICE_TOKEN'))
+    values['SERVICE_TOKEN'] = ''
+    return had
+
+
+def mark_restart(state):
+    (Path(state) / 'admin').mkdir(exist_ok=True, mode=0o700)
+    marker = Path(state) / RESTART_MARKER
+    marker.touch(mode=0o600); marker.chmod(0o600)
 
 
 def github_folders(state):
@@ -297,6 +335,8 @@ def initialize(state, workspace=None):
                                             f'Rename it with ./bin/nocheh workspace rename {workspace}, or make another one with '
                                             f'./bin/nocheh workspace new {workspace}.')
     runtime_folders(state); github_folders(state); machine_folder(state)
+    try: before = load(state) if existing else None
+    except ValueError: before = None
     values = dict(DEFAULTS)
     values.update(existing)
     if workspace: values['NOCHEH_WORKSPACE'] = workspace
@@ -315,6 +355,7 @@ def initialize(state, workspace=None):
     if 'OPENAI_API_KEY' not in existing and 'NOCHEH_EMBEDDING_API_KEY' in existing:values['OPENAI_API_KEY']=existing['NOCHEH_EMBEDDING_API_KEY']
     if values.get('NOCHEH_GUARD_MODE')=='auto': values['NOCHEH_GUARD_MODE']='on'
     values.setdefault('NOCHEH_UID', str(os.getuid())); values.setdefault('NOCHEH_GID', str(os.getgid()))
+    changed = cut_over(values)
     generate(values)
     if values['NOCHEH_HONCHO_ENABLED']=='true' and owns_project(state):
         # `make dev` reads Honcho's volumes from .env, so setup saves the ones Compose uses. Honcho's
@@ -326,6 +367,11 @@ def initialize(state, workspace=None):
     (state/'workflows/redis').mkdir(parents=True,exist_ok=True,mode=0o700)
     if values != existing: write_env(path, values)
     path.chmod(0o600)
+    if changed:
+        mark_restart(state)
+        from tools.operations.installation.settings import carry_applied, carry_keys
+        carry_keys(state, values)
+        if before is not None: carry_applied(state, before)
     if values['NOCHEH_HONCHO_ENABLED']=='true':
         from tools.operations.memory.honcho_setup import initialize as initialize_honcho, runtime_init
         initialize_honcho(state)

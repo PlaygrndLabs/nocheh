@@ -28,6 +28,7 @@ services:
       PGDATABASE: nocheh
       PGPASSWORD: ${NOCHEH_SOURCE_FIXTURE_PASSWORD}
       SERVICE_TOKEN: source-model-fixture-token-not-a-real-credential
+      AGENT_KEY: source-model-fixture-agent-key-not-a-real-credential
       NOCHEH_DATA_DIR: /tmp/source-model-fixture
       TELEGRAM_ENABLED: "false"
     depends_on:

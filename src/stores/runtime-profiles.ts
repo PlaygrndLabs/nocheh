@@ -1,4 +1,4 @@
-import {admin,type Reader} from '../access.js';
+import {admin,adminOrAgent,type AgentLogin,type Reader} from '../access.js';
 import {digest} from '../archive.js';
 import {HttpError,object,string} from '../http.js';
 import {memberAssistant,validateSpace} from '../spaces.js';
@@ -86,7 +86,7 @@ export class RuntimeProfileRepository {
       const label=[6,12,24].map(size=>'member-'+(readable?readable+'-':'')+code.slice(0,size)).find(value=>!taken.has(value))??'nocheh-'+code.slice(0,24);
       taken.add(label);labels.set(member,{name:label,display_name:person?.name||(person?.username?'@'+person.username:'')});}
   }
-  async list(principal:Reader){admin(principal);const owner=this.owner(),chat=this.ownerChat(),binding=await this.access.guards.state();
+  async list(principal:Reader|AgentLogin){adminOrAgent(principal);const owner=this.owner(),chat=this.ownerChat(),binding=await this.access.guards.state();
     const rows=(await this.control.query("SELECT * FROM runtime_profiles WHERE owner_id=$1 AND state='active' ORDER BY name LIMIT 101",[owner])).rows;
     if(rows.length>100)throw new HttpError(409,'profile_limit');
     const members=this.assistants(),spaces=[...new Set([chat,...this.groups(),...members])],taken=new Set(rows.map(row=>String(row.name).toLowerCase()));
@@ -96,7 +96,7 @@ export class RuntimeProfileRepository {
     profiles.push(...rows.map(row=>this.entry(chat,binding,row)));await this.access.guards.assertCurrent(binding);
     return {profiles,revision:binding.epoch,generation:binding.generation};
   }
-  async resolve(principal:Reader,input:unknown){admin(principal);const body=object(input),selected=string(body.profile??'',64);
+  async resolve(principal:Reader|AgentLogin,input:unknown){adminOrAgent(principal);const body=object(input),selected=string(body.profile??'',64);
     if(Object.keys(body).some(k=>!['profile','space'].includes(k)))throw new HttpError(400,'invalid_profile_request');
     const listed=await this.list(principal),alias=!selected||['default','current'].includes(selected)?listed.profiles.find(p=>p.is_default):
       listed.profiles.find(p=>[p.name,p.logical_profile,p.native_profile].includes(selected));

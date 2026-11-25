@@ -31,6 +31,7 @@ export const telegramKeys = [
   'TELEGRAM_TYPING',
   'TELEGRAM_REACTIONS',
   'TELEGRAM_PROBLEM_NOTICES',
+  'NOCHEH_QUIET_HOURS',
   'NOCHEH_DASHBOARD_URL',
   'NOCHEH_MINI_APP_URL',
   'CLOUDFLARE_TUNNEL_TOKEN',
@@ -40,7 +41,13 @@ export const telegramKeys = [
 const subTabs = ['connection', 'activity', 'groups', 'miniapp'] as const;
 const subTabKeys: Record<(typeof subTabs)[number], string[]> = {
   connection: ['TELEGRAM_ENABLED', 'TELEGRAM_BOT_TOKEN', 'TELEGRAM_OWNER_ID'],
-  activity: ['TELEGRAM_TYPING', 'TELEGRAM_REACTIONS', 'TELEGRAM_PROBLEM_NOTICES', 'NOCHEH_DASHBOARD_URL'],
+  activity: [
+    'TELEGRAM_TYPING',
+    'TELEGRAM_REACTIONS',
+    'TELEGRAM_PROBLEM_NOTICES',
+    'NOCHEH_QUIET_HOURS',
+    'NOCHEH_DASHBOARD_URL',
+  ],
   groups: ['TELEGRAM_GROUP_REPLIES', 'TELEGRAM_BOT_NAMES', 'TELEGRAM_TOPIC_MEMORY'],
   miniapp: ['NOCHEH_MINI_APP_URL', 'CLOUDFLARE_TUNNEL_TOKEN'],
 };
@@ -286,6 +293,7 @@ export function TelegramSettings() {
                 />
               </div>
             </SettingRow>
+            <QuietHoursRow />
             <SettingRow
               title={
                 <>
@@ -491,5 +499,59 @@ export function TelegramSettings() {
         </Card>
       </SubPanel>
     </>
+  );
+}
+
+/** Quiet hours (ADR-0297): messages Nocheh starts on its own arrive without sound in these hours. */
+function QuietHoursRow() {
+  const s = useSettings();
+  const value = s.value('NOCHEH_QUIET_HOURS');
+  const [start, end] = /^\d\d:\d\d-\d\d:\d\d$/.test(value) ? value.split('-') : ['23:00', '07:00'];
+  const on = value !== '';
+  const set = (from: string, to: string) => s.set('NOCHEH_QUIET_HOURS', `${from}-${to}`);
+  return (
+    <SettingRow
+      title={
+        <>
+          Quiet hours
+          <Unsaved show={s.changed('NOCHEH_QUIET_HOURS')} />
+        </>
+      }
+      description="Off by default. When on, notices, cards and job reports that Nocheh starts on its own arrive without sound in these hours, in each person's own time zone. Reminders and schedules set for that time still ring. Groups are not affected."
+      htmlFor="quiet-hours"
+    >
+      <div className="flex flex-wrap items-center gap-2 sm:justify-end">
+        {on && (
+          <>
+            <Input
+              id="quiet-hours-start"
+              type="time"
+              aria-label="Quiet hours start"
+              className="w-28"
+              value={start}
+              disabled={s.busy}
+              onChange={e => e.target.value && set(e.target.value, end!)}
+            />
+            <span className="text-sm text-muted">to</span>
+            <Input
+              id="quiet-hours-end"
+              type="time"
+              aria-label="Quiet hours end"
+              className="w-28"
+              value={end}
+              disabled={s.busy}
+              onChange={e => e.target.value && set(start!, e.target.value)}
+            />
+          </>
+        )}
+        <Switch
+          id="quiet-hours"
+          label="Quiet hours"
+          checked={on}
+          disabled={s.busy}
+          onChange={next => s.set('NOCHEH_QUIET_HOURS', next ? '23:00-07:00' : '')}
+        />
+      </div>
+    </SettingRow>
   );
 }

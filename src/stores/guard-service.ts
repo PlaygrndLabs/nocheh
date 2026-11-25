@@ -1,4 +1,4 @@
-import type {Reader} from '../access.js';
+import {isAgentLogin,type AgentLogin,type Reader} from '../access.js';
 import {canonical,digest} from '../archive.js';
 import {object,HttpError} from '../http.js';
 import {inspectRequest} from '../guard.js';
@@ -13,13 +13,15 @@ export function storageGuardService(services:StorageServices) {
     const reference={store:'control' as const,kind:'operation' as const,id:row.id,generation:row.generation,input_hash:row.input_hash};
     await services.operations.verify(reference);return reference;
   },services.detectorVersion);
-  return async(principal:Reader,input:unknown)=>{
+  // The system guard serves the agent's own model calls without a pass (its login, ADR-0295) and storage's own in-process
+  // calls (the admin form); anyone else is a turn and keeps its pass's checks.
+  return async(principal:Reader|AgentLogin,input:unknown)=>{
     const body=object(input);let destination:URL;
     try{destination=new URL(String(body.destination));}catch{throw new HttpError(400,'invalid_destination');}
     if(!['http:','https:'].includes(destination.protocol)||destination.username||destination.password)throw new HttpError(400,'invalid_destination');
-    const binding=await services.prepared.audience.assert(principal);
+    const binding=isAgentLogin(principal)?await services.guards.state():await services.prepared.audience.assert(principal);
     if(binding.mode==='on')inspectRequest(body.payload);
-    if(principal.admin) {
+    if(isAgentLogin(principal)||principal.admin) {
       const hash=digest(canonical({destination:destination.href,payload:body.payload,binding}));
       const operation=await services.operations.record({key:'service-guard:'+hash,kind:'service_guard',scope:'system',input_hash:hash});
       const actor:Reader={admin:false,scope:'system',space:'system',turnEvent:operation.id,generation:binding.generation,guard_epoch:binding.epoch};

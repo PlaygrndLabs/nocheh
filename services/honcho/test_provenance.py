@@ -17,6 +17,8 @@ class ProvenanceTests(unittest.IsolatedAsyncioTestCase):
         sql,values=db.calls[-1]
         self.assertEqual(values,{'workspace':'owned-workspace'})
         self.assertIn('processed AND error IS NOT NULL',sql)
+        self.assertIn("task_type IN ('representation','summary')",sql)
+        self.assertNotIn('dream',sql,'a failed old-fact clean-up learned nothing new, so it never holds the workspace unready')
         db.failed=False
         self.assertFalse(await failed_queue_items('owned-workspace',db))
         from datetime import datetime, timezone
@@ -259,6 +261,7 @@ class CoverageTests(unittest.IsolatedAsyncioTestCase):
         self.assertIn('AND NOT EXISTS (SELECT 1 FROM sessions x WHERE x.tenant_id=d.tenant_id AND x.workspace_name=d.workspace_name '
                       'AND x.name=d.session_name AND x.deleted_at IS NOT NULL)', sql, 'conclusions of a deleted session are not counted')
         self.assertIn('count(*) FILTER (WHERE NOT cited AND batch) AS batch_only', sql)
+        self.assertIn("AND d.observer NOT LIKE 'scope.%'", sql, 'a memory wall\'s copies are not counted again')
         self.assertNotIn('content', COVERAGE_SQL, 'counts only, never a conclusion\'s text')
 
 
@@ -270,10 +273,63 @@ class SessionDescendantTests(unittest.IsolatedAsyncioTestCase):
         calls = []
         async def load(session, limit):
             calls.append((session, limit))
-            return [str(i).zfill(21) for i in range(limit)]
+            return [(str(i).zfill(21), False) for i in range(limit)]
         result = await session_descendants({'session_id': 'a'*64, 'limit': 2}, load)
         self.assertEqual(calls, [('a'*64, 3)])
         self.assertEqual(result, {'ids': ['0'*21, '0'*20+'1'], 'truncated': True})
+
+    async def test_hidden_descendants_are_released_and_only_live_ones_returned(self):
+        released = []
+        async def load(session, limit): return [('h'*21, True), ('l'*21, False)]
+        async def release(ids): released.append(ids)
+        self.assertEqual(await session_descendants({'session_id': 'a'*64}, load, release), {'ids': ['l'*21], 'truncated': False})
+        self.assertEqual(released, [['h'*21]], 'a forgotten source takes its hidden descendants with it')
+        with self.assertRaises(ValueError):
+            await session_descendants({'session_id': 'a'*64}, load)
+
+    async def test_hidden_pages_cursor_and_restore_requests(self):
+        from .provenance import HIDDEN_AT, HIDDEN_LIST_SQL, RESTORE_HIDDEN_SQL, hidden_cursor, hidden_page, restore_ids
+        from .boundary import HIDE_SQL
+        self.assertIn(HIDDEN_AT.split("'")[1], HIDE_SQL, 'the deriver hides with the same time the routes look for')
+        self.assertEqual(hidden_cursor(''), (None, None))
+        self.assertEqual(hidden_cursor('2026-11-24T17:28:28.750034Z '+'b'*21), ('2026-11-24T17:28:28.750034Z', 'b'*21))
+        for bad in ['x', "2026' OR 1=1 "+'b'*21, '2026 short', 'a b c']:
+            with self.assertRaises(ValueError): hidden_cursor(bad)
+        row = lambda i: {'id': i*21, 'content': 'c', 'level': 'explicit', 'observer': 'p', 'observed': 'p', 'created_at': '2026-01-01',
+                         'reason': 'odd', 'hidden_at': '2026-11-24T00:00:00Z', 'copied_from': None}
+        page = hidden_page([row('a'), row('b')], 1)
+        self.assertEqual([item['id'] for item in page['items']], ['a'*21])
+        self.assertEqual(page['items'][0]['reason'], 'replaced')
+        self.assertEqual(page['next'], '2026-11-24T00:00:00Z '+'a'*21)
+        self.assertEqual(restore_ids({'ids': ['a'*21, 'a'*21]}), ['a'*21])
+        for bad in [{}, {'ids': []}, {'ids': ['x']}, {'ids': ['a'*21]*51}, {'ids': ['a'*21], 'more': 1}]:
+            with self.assertRaises(ValueError): restore_ids(bad)
+        self.assertIn("copied_from'=ANY(:ids)", RESTORE_HIDDEN_SQL, 'bringing a fact back brings back its wall copies')
+        self.assertIn('workspace_name=:workspace', HIDDEN_LIST_SQL)
+        self.assertIn("'nocheh_used_at'", RESTORE_HIDDEN_SQL, 'bringing a fact back counts as a use, so it is not hidden again next day')
+
+    async def test_used_and_hide_unused_requests(self):
+        from datetime import datetime, timedelta, timezone
+        from .provenance import HIDE_UNUSED_SQL, USED_SQL, hide_unused_request, used_ids
+        self.assertEqual(used_ids({'ids': ['a'*21, 'a'*21, 'b'*21]}), ['a'*21, 'b'*21])
+        for bad in [{}, {'ids': []}, {'ids': ['x']}, {'ids': ['a'*21]*201}, {'ids': ['a'*21], 'more': 1}]:
+            with self.assertRaises(ValueError): used_ids(bad)
+        now = datetime(2026, 11, 24, tzinfo=timezone.utc)
+        before = (now - timedelta(days=180)).isoformat()
+        self.assertEqual(hide_unused_request({'before': before, 'limit': 200}, now), (now - timedelta(days=180), 200))
+        for bad in [{'before': before}, {'before': before, 'limit': 0}, {'before': before, 'limit': 501}, {'before': before, 'limit': True},
+                    {'before': '2026-01-01T00:00:00', 'limit': 1}, {'before': 'soon', 'limit': 1}, {'before': before, 'limit': 1, 'x': 1}]:
+            with self.assertRaises(ValueError): hide_unused_request(bad, now)
+        with self.assertRaisesRegex(ValueError, 'hide_unused_too_recent'):
+            hide_unused_request({'before': (now - timedelta(days=29)).isoformat(), 'limit': 1}, now)
+        self.assertIn("now()-interval '1 day'", USED_SQL, 'a fact\'s use is written at most once a day')
+        self.assertIn('deleted_at IS NULL', USED_SQL)
+        # One family: a fact and its wall copies, kept while any of them was learned, read or said again since `before`.
+        self.assertIn("COALESCE(d.internal_metadata->>'copied_from', d.id) AS family", HIDE_UNUSED_SQL)
+        self.assertIn('conclusion_source_messages', HIDE_UNUSED_SQL)
+        self.assertIn("internal_metadata->>'copied_from' IN (SELECT family FROM stale)", HIDE_UNUSED_SQL)
+        self.assertIn("'reason','unused'", HIDE_UNUSED_SQL)
+        self.assertEqual(HIDE_UNUSED_SQL.count('workspace_name=:workspace'), 2)
 
     async def test_invalid_requests_never_reach_the_store(self):
         async def load(session, limit): self.fail('invalid request reached the store')
@@ -284,5 +340,5 @@ class SessionDescendantTests(unittest.IsolatedAsyncioTestCase):
 
     async def test_query_excludes_the_session_itself_and_deleted_conclusions(self):
         self.assertIn('session_name IS DISTINCT FROM :session', DESCENDANTS_SQL)
-        self.assertIn('deleted_at IS NULL', DESCENDANTS_SQL)
+        self.assertIn('deleted_at IS NULL OR d.deleted_at>=', DESCENDANTS_SQL, 'hidden conclusions are walked through too')
         self.assertIn('tree.depth<8', DESCENDANTS_SQL)

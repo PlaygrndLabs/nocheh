@@ -167,14 +167,15 @@ test('recalled facts name their sources per turn: the reader\'s receipts, its zo
     const shown=(await bounded(full.record)).provenance.facts.map((fact:any)=>fact.conclusion);
     assert.equal(shown.length,100);assert.deepEqual(new Set(shown),new Set(represented.at(-1)),'the same fact ids as Honcho\'s representation');
 
-    // A guard that rewrites a fact line: the engine's prose, said and counted.
+    // A guard that rewrites a fact line: a group keeps only its summary (its prose can hold a conclusion drawn across
+    // chats, ADR-0298), said and counted.
     const counted=async()=>(await memoryProblems(stores.control)).find(row=>row.kind==='source_tags')?.failed??0,was=await counted();
     const guards=(s.memory as any).contexts.guards,read=guards.read.bind(guards);
     guards.read=(async(id:string,b:any)=>{const found=await read(id,b);const value=found.value as any;
       return typeof value?.text==='string'?{...found,value:{...value,text:value.text.replace(/^1\. \d\d:\d\d /m,'1. ')}}:found;}) as any;
     try {
       const fallback=await (s.memory as any).sessionContext(current,A,answer,false);
-      assert.match(fallback.text,/\[what is known about the speaker\]\n\[2025-/,'today\'s prose');
+      assert.doesNotMatch(fallback.text,/what is known about the speaker/,'no prose in a group');
       assert.deepEqual(fallback.limitations,['representation_has_no_exact_citations','source_tags_unavailable']);
       assert.equal(await counted(),was+1);
     } finally {guards.read=read;}

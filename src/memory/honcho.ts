@@ -3,7 +3,7 @@ import {canonical} from '../archive.js';
 import {HttpError,string} from '../http.js';
 import {longFetch} from '../long-fetch.js';
 import {engineId,engineInvalid,engineRejected,engineUnavailable,type EngineCoverage,type EngineFact,type EngineFactPage,type EngineTrace,type ParticipantFact,
-  type EngineWrite,type EngineWriteInput,type ForgetStep,type MemoryEngine,type ParticipantRole} from './engine.js';
+  type EngineWrite,type EngineWriteInput,type ForgetStep,type HiddenFact,type MemoryEngine,type ParticipantRole} from './engine.js';
 
 /** GET without a body, POST with one. DELETE treats an already absent resource as deleted. `key` replaces the main key
  *  for this one call: a wall's key (ADR-0286). */
@@ -221,6 +221,32 @@ export class HonchoEngine implements MemoryEngine {
     for(const conclusion of found.ids)await this.call(this.base(space)+'/conclusions/'+conclusion,undefined,'DELETE');
     return {done:false,removed:found.ids.length};
   }
+  async hiddenFacts(space:string,options:{after:string|null;size:number}) {
+    const found=await this.call(this.base(space)+'/nocheh/hidden?'+new URLSearchParams({size:String(options.size),...(options.after?{after:options.after}:{})}));
+    if(!found||!Array.isArray(found.items)||found.items.length>options.size||!(found.next===null||(typeof found.next==='string'&&found.next.length<=80)))throw new HttpError(502,'invalid_honcho_hidden');
+    const facts:HiddenFact[]=found.items.map((item:any)=>{
+      if(!nativeId(item?.id)||typeof item.content!=='string'||item.content.length>65535||typeof item.observed!=='string'||typeof item.observer!=='string'
+        ||!['replaced','unused'].includes(item.reason)||!(item.copied_from===null||nativeId(item.copied_from)))throw new HttpError(502,'invalid_honcho_hidden');
+      return {id:item.id,content:item.content,participant:item.observed,wall:item.observer.startsWith('scope.'),copyOf:item.copied_from??null,
+        reason:item.reason,hiddenAt:typeof item.hidden_at==='string'?item.hidden_at:null,createdAt:String(item.created_at)};
+    });
+    return {facts,next:found.next as string|null};
+  }
+  async restoreFacts(space:string,ids:readonly string[]) {
+    if(!ids.length||ids.length>50||ids.some(id=>!nativeId(id)))throw new HttpError(400,'invalid_restore_request');
+    const found=await this.call(this.base(space)+'/nocheh/hidden/restore',{ids});
+    if(!Array.isArray(found?.restored)||found.restored.some((id:unknown)=>!nativeId(id)))throw new HttpError(502,'invalid_honcho_restore');
+    return found.restored as string[];
+  }
+  async markUsed(space:string,ids:readonly string[]) {
+    const wanted=[...new Set(ids)].filter(nativeId);
+    for(let start=0;start<wanted.length;start+=200)await this.call(this.base(space)+'/nocheh/used',{ids:wanted.slice(start,start+200)});
+  }
+  async hideUnused(space:string,before:Date,limit:number) {
+    const found=await this.call(this.base(space)+'/nocheh/hide-unused',{before:before.toISOString(),limit});
+    if(!Number.isSafeInteger(found?.hidden)||found.hidden<0)throw new HttpError(502,'invalid_honcho_hide_unused');
+    return found.hidden as number;
+  }
   /** Honcho deletes a workspace only once its sessions are gone. */
   async forgetSpace(space:string):Promise<ForgetStep> {
     const found=await this.call(this.base(space)+'/sessions/list?page=1&size=100',{});
@@ -343,6 +369,8 @@ export class HonchoEngine implements MemoryEngine {
     do {
       const page=await this.page(space,options.size,cursor,{...(sessions?{session_id:{in:sessions}}:{}),...(citing?{source_message_ids:{in:citing}}:{})});
       for(const item of page.items) {
+        // A memory wall's copies (observer scope.<wall>, ADR-0286) repeat facts listed under their own participant.
+        if(typeof item?.observer_id==='string'&&item.observer_id.startsWith('scope.')&&wallName.test(item.observer_id.slice(6)))continue;
         if(!engineId(item?.observer_id)||!engineId(item?.observed_id))throw engineInvalid();
         if(item.observer_id!==item.observed_id)continue;
         const found=listed(item,item.observer_id,allowed);

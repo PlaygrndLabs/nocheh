@@ -1,5 +1,6 @@
 """Common isolated Hermes turn bootstrap for Telegram and browser transports."""
 import asyncio
+import contextlib
 import fcntl
 import json
 import math
@@ -32,7 +33,7 @@ def scheduled_preferences(profile,body):
     return values
 
 
-async def run_process(root, scope, body, model, credentials, session_id, emit=None, cancelled=None, prepared_profile=None, progress=None):
+async def run_process(root, scope, body, model, credentials, session_id, emit=None, cancelled=None, prepared_profile=None, progress=None, steering=None):
     from .assistant_gateway import prepare_profile
     from .scopes import Scopes
     import base64
@@ -66,14 +67,22 @@ async def run_process(root, scope, body, model, credentials, session_id, emit=No
             # does a member's private chat (step 4).
             from . import note_sources
             watch=None if scope.answer or scope.member or scope.member_read else await asyncio.to_thread(note_sources.before, profile, scope.space or scope.chat_id, database_path(profile), body.get('event_id'))
-            result=None;memory=[]
+            # What the conversation holds besides the owner's typed words, reported before the model starts, so "Do what
+            # I ask" knows whether a command in this turn may run with no card (ADR-0293). An owner's live turn only; one
+            # left unreported asks first.
+            if scope.owner and not scope.answer and not scope.member_read and body.get('channel','telegram') in ('telegram','browser'):
+                reads=await asyncio.to_thread(note_sources.conversation_reads, database_path(profile), session_id, body, profile)
+                if reads is not None:
+                    from .assistant_gateway import report_conversation_reads
+                    await asyncio.to_thread(report_conversation_reads, body['archive_credential'], reads)
+            result=None;read_back={};memory=[]
             try:
-                result=await _run_process(profile, scope, body, model, credentials, session_id, emit, cancelled, progress, watch and watch['sources'], memory=memory)
+                result=await _run_process(profile, scope, body, model, credentials, session_id, emit, cancelled, progress, watch and watch['sources'], read_back, steering, memory=memory)
                 return result
             finally:
                 # Also after a cancelled or failed turn: its notes may have changed before it stopped. They rest on the
                 # long-term memory it was given too (`memory`, the ids it cited), which stays here.
-                if watch is not None:await asyncio.to_thread(note_sources.after_turn, profile, body, session_id, watch, result, memory)
+                if watch is not None:await asyncio.to_thread(note_sources.after_turn, profile, body, session_id, watch, result, read_back.get('memory_context'), memory)
         finally:
             await asyncio.to_thread((profile/'.foreground').touch)
 
@@ -231,21 +240,9 @@ def job_run(limits):
     return limits
 
 
-async def _run_process(profile, scope, body, model, credentials, session_id, emit, cancelled, progress=None, note_sources=None, memory=None):
-    if cancelled and cancelled.is_set(): return {'state':'cancelled','text':'','session_id':session_id}
-    # A background job run lasts until its job's hard deadline: its box commands end then, and the process a minute
-    # later if nothing stopped it before. Every other turn has the usual reply time.
-    background = job_run(body.get('background')) if body.get('channel')=='background' else None
-    # A private answer's pass and its framed question come together, or the turn does not run.
-    answer = private_answer(body.get('private_answer')) if scope.answer else None
-    if answer is None and body.get('private_answer') is not None: raise ValueError('invalid_private_answer')
-    if answer: answer_receipt(profile, answer)
-    # The owner's ask about a member: its pass and its ask come together, and it is never a private answer too.
-    asked = member_read(body.get('member_read')) if scope.member_read else None
-    if (asked is None) != (body.get('member_read') is None) or asked and (answer or asked['ask'] != scope.member_read): raise ValueError('invalid_member_read')
-    if asked: ask_receipt(profile)
-    if background is not None and background['hard_deadline'] <= time.time():
-        return {'state':'failed','error_code':'managed_execution_failed','text':'','session_id':session_id}
+def message_text(body, scope, answer=None):
+    """The turn's message as the model reads it, with Nocheh's own lines around it, and the text its memory query uses.
+    A message that joins a running turn (steering.py) reaches the agent the same way."""
     text = body.get('text') or ''
     if body.get('transcripts'):
         text += '\n\n[Derived voice transcript; original audio is separately archived]\n' + '\n'.join(body['transcripts'])
@@ -297,6 +294,25 @@ async def _run_process(profile, scope, body, model, credentials, session_id, emi
     text += '\n\n[Archive source: nocheh:event:' + body['event_id'] + ']'
     # The question is a source of a private answer too: retiring it withholds the answer's history.
     if answer: text += '\n[Archive source: nocheh:event:' + answer['question_event'] + ']'
+    return text, memory_query
+
+
+async def _run_process(profile, scope, body, model, credentials, session_id, emit, cancelled, progress=None, note_sources=None, read_back=None, steering=None, memory=None):
+    if cancelled and cancelled.is_set(): return {'state':'cancelled','text':'','session_id':session_id}
+    # A background job run lasts until its job's hard deadline: its box commands end then, and the process a minute
+    # later if nothing stopped it before. Every other turn has the usual reply time.
+    background = job_run(body.get('background')) if body.get('channel')=='background' else None
+    # A private answer's pass and its framed question come together, or the turn does not run.
+    answer = private_answer(body.get('private_answer')) if scope.answer else None
+    if answer is None and body.get('private_answer') is not None: raise ValueError('invalid_private_answer')
+    if answer: answer_receipt(profile, answer)
+    # The owner's ask about a member: its pass and its ask come together, and it is never a private answer too.
+    asked = member_read(body.get('member_read')) if scope.member_read else None
+    if (asked is None) != (body.get('member_read') is None) or asked and (answer or asked['ask'] != scope.member_read): raise ValueError('invalid_member_read')
+    if asked: ask_receipt(profile)
+    if background is not None and background['hard_deadline'] <= time.time():
+        return {'state':'failed','error_code':'managed_execution_failed','text':'','session_id':session_id}
+    text, memory_query = message_text(body, scope, answer)
     transport = credentials.runtime()
     request = {'text':text, 'source_text':body.get('text') or '', 'channel':body.get('channel','telegram'),
                'model':model, 'memory_query':memory_query, 'session_id':session_id, 'owner':scope.owner, 'chat_id':scope.chat_id,
@@ -312,6 +328,9 @@ async def _run_process(profile, scope, body, model, credentials, session_id, emi
                'note_sources':note_sources or {}}
     if body.get('channel')=='scheduler':
         request['preferences']=scheduled_preferences(profile,body)
+    if steering is not None:
+        # Later messages in this chat may join the turn while it runs (steering.py): its stdin stays open for them.
+        request['steer']=True
     if background:
         # A job run: its iteration backstop, its time budget and what its cost notice needs come from the job,
         # and it reports its progress while it works. A box run's tools run in the job's sealed box, a machine run's
@@ -337,9 +356,9 @@ async def _run_process(profile, scope, body, model, credentials, session_id, emi
            'ARCHIVE_URL','GUARD_URL','NOCHEH_REPLY_ROUTE_URL','NOCHEH_GUARD_ROUTE_URL','NOCHEH_INSTALLATION_FIXTURE') if key in os.environ}
     env.update(HERMES_HOME=str(profile), GUARD_MODE=body.get('guard_mode','on'))
     if isolated:
-        from .environment import secret
-        # This short-lived bridge is trusted parent infrastructure, not the model process.
-        env['SERVICE_TOKEN']=secret('SERVICE_TOKEN')
+        from .environment import agent_key
+        # This short-lived bridge is trusted parent infrastructure, not the model process: it alone gets the agent login.
+        env['AGENT_KEY']=agent_key()
     module='services.hermes.security_client' if isolated else 'services.hermes.assistant_turn'
     process = await asyncio.create_subprocess_exec(sys.executable, '-m', module,
         stdin=asyncio.subprocess.PIPE, stdout=asyncio.subprocess.PIPE, stderr=asyncio.subprocess.DEVNULL,
@@ -354,7 +373,11 @@ async def _run_process(profile, scope, body, model, credentials, session_id, emi
             await asyncio.sleep(.1)
     watcher = asyncio.create_task(stop_when_cancelled())
     async def collect():
-        process.stdin.write(canonical(request));await process.stdin.drain();process.stdin.close()
+        if steering is None:
+            process.stdin.write(canonical(request));await process.stdin.drain();process.stdin.close()
+        else:
+            process.stdin.write(canonical(request)+b'\n');await process.stdin.drain()
+            steering.attach(process.stdin.write)
         result = None;size = 0
         async for line in process.stdout:
             size += len(line)
@@ -388,6 +411,9 @@ async def _run_process(profile, scope, body, model, credentials, session_id, emi
             # A turn that could not read long-term memory, or part of it, says so; it is counted for the owner's notice.
             from .usage import note_done, note_failed
             problem=result.pop('memory_problem',None)
+            # The long-term memory context the turn read before it started, for who wrote its notes; never passed on.
+            context=result.pop('memory_context',None)
+            if read_back is not None and isinstance(context,str):read_back['memory_context']=context
             if problem=='memory_read':await asyncio.to_thread(note_failed,'memory_read')
             elif result.get('state')=='done' and not answer and not asked and not scope.member:await asyncio.to_thread(note_done,'memory_read')
             # A job run reports Hermes's own token counts too; Nocheh prices them at the rates frozen on the job's card.
@@ -409,6 +435,9 @@ async def _run_process(profile, scope, body, model, credentials, session_id, emi
         raise
     finally:
         watcher.cancel()
+        if steering is not None:
+            steering.write=None
+            with contextlib.suppress(Exception): process.stdin.close()
         if process.returncode is None: process.kill();await process.wait()
         try: await watcher
         except asyncio.CancelledError: pass

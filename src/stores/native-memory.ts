@@ -677,9 +677,11 @@ export class NativeMemoryRepository {
         const peers=(Array.isArray(row.peer_ids)&&row.peer_ids.length?row.peer_ids:[row.peer_id]).filter((value:unknown)=>typeof value==='string') as string[];
         const role=(peer:string)=>peer===assistantPeer?'silent' as const:peer===row.peer_id?'writer' as const:'subject' as const;
         for(const peer of peers){await this.authorizedReceipt(row);await this.engine.addParticipant(space,peer,role(peer));}
-        // A session joins the walls of its chat before its first write, so what it learns reaches them as it is learned (ADR-0286).
-        const walls=await this.walls.of(space,row.audience);
+        // A session joins the walls of its chat before its first write, so what it learns reaches them as it is learned, and
+        // each wall only once (ADR-0286).
+        const walls=await this.walls.of(space,row.audience,session);
         await this.authorizedReceipt(row);await this.engine.openSession(space,session,Object.fromEntries(peers.map(peer=>[peer,role(peer)])),walls);
+        await this.walls.joined(space,walls,session);
         let remote=this.observed(row,await this.engine.findWrites(space,session,id));
         if(!remote) {
           const createdAt=await this.occurredAt(row);
@@ -1038,8 +1040,10 @@ export class NativeMemoryRepository {
       const facts=options.subject?{subject:options.subject,sessions:options.limitToSession?[session.session_id]:null,profile:false}:null;
       // The fact list is read beside the context, so the turn waits for the slower of the two.
       const listed=this.listFacts(workspace,facts),read=await this.engine.context(workspace,session.session_id,options);
+      // Only the owner's block may fall back to the engine's prose. A chat's own prose can hold a conclusion an old-fact
+      // clean-up drew across every chat of its speaker and filed under this chat (ADR-0298); its listed facts never do.
       return this.contextBlock(current,audience,source,configuration,empty,{title,summaryTitle:headers.summary,summary:read.summary,
-        summaryMessage:read.summaryMessage,representation:read.subject,facts,listed});
+        summaryMessage:read.summaryMessage,representation:owner?read.subject:'',facts,listed});
     }
     if(owner&&known)return this.contextBlock(current,audience,source,{engine:this.engine.id,workspace,audience,peer:speaker,profile:true,...block},empty,
       {title,summaryTitle:headers.summary,summary:'',summaryMessage:null,representation:'',facts:{subject:speaker!,sessions:null,profile:true}});
@@ -1103,6 +1107,13 @@ export class NativeMemoryRepository {
   private sourcesFacts(read:FactRead|null):read is FactRead {
     return !!read&&!!this.engine.facts&&!!this.tags&&!(read.profile&&!this.engine.mostDerived);
   }
+  /** The facts a reply reads, from its context or a recall, are marked used, so the unused-facts rule (ADR-0299) keeps
+   *  them. In the background: a reply never waits for it, and a failure only means a fact may look unused for longer. */
+  private used(workspace:string,ids:readonly string[]) {
+    if(!this.engine.markUsed||!ids.length)return;
+    this.engine.markUsed(workspace,ids).catch(error=>console.warn(JSON.stringify({event:'memory_fact_use_failed',engine:this.engine.id,
+      code:error instanceof HttpError?error.code:'memory_fact_use_error'})));
+  }
   /** The block's facts, started early; a failure is the block's to handle, when it reads them. */
   private listFacts(workspace:string,read:FactRead|null):Promise<FactList>|null {
     if(!this.sourcesFacts(read))return null;
@@ -1157,6 +1168,7 @@ export class NativeMemoryRepository {
     });
     const plan=planFactBlock({title:input.title,summaryTitle:input.summaryTitle,summary:input.summary,
       through:summaryReference?tags.get(summaryReference.id)?.day??null:null,facts});
+    this.used(workspace,plan.facts.map(fact=>fact.conclusion));
     const behind=new Map(sourced.map(item=>[item.fact.id,item]));
     // Honcho's summary cites nothing, so a block that shows one is not exact either.
     const summarized=!!plan.summary.trim(),batch=plan.facts.some(fact=>!fact.exact);
@@ -1395,6 +1407,7 @@ export class NativeMemoryRepository {
       const limitations=[...new Set([...read.flatMap(page=>page.limitations),...over,
         ...ordered.some(({item})=>!item.exact)?['some_facts_cite_only_their_batch']:[]])].sort();
       if(!ordered.length)return {record:null,listed:[],count:0,limitations};
+      this.used(id,ordered.map(({item})=>item.fact.id));
       const stored:StoredFact[]=ordered.map(({n,peer,item})=>({n,conclusion:item.fact.id,peer,exact:item.exact,by:item.by,sources:item.sources,more:item.more,
         complete:item.complete,session:item.fact.session,...item.place?{place:true}:{},...wall?{wall}:{}}));
       // The facts with every source go on a record the guard never reads; only the text lines are guarded (factRecords).

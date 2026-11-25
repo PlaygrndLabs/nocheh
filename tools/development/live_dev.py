@@ -345,6 +345,11 @@ def main(action, rest):
     build_flag = '--build' if build_needed(env) else '--no-build'
     print(f"Live development: http://127.0.0.1:{ports['dashboard']}/", flush=True)
     print(f'Source checkout: {ROOT}\nOperating state: {root / "data/local"}', flush=True)
+    marker = root / 'data/local' / configuration.RESTART_MARKER
+    if marker.exists():
+        # After a key change (ADR-0295): the dashboard and executor keep keys they read once, and up does not recreate them.
+        subprocess.call(cmd + ['stop', 'nocheh-dashboard', 'nocheh-executor'], cwd=root, env=env)
+        marker.unlink(missing_ok=True)
     try:
         services = SERVICES + (mini_app.SERVICES if mini_app.enabled(values) else ())
         return subprocess.call(cmd + ['up', build_flag, *services], cwd=root, env=env)

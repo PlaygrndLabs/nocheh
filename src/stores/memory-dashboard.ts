@@ -20,6 +20,17 @@ import type {Original,OwnerOriginals} from './owner-originals.js';
  */
 export type DashboardFact={id:string;text:string;learned_at:string;exact:boolean;batch:boolean;by:TagBy;label:string|null;at:string|null;
   originals:Original[];more:number};
+/** A hidden fact as the dashboard lists it: whom it is about (null when no People name is known), `group` when it is a
+ *  group memory wall's copy, why and when it was hidden, and when it was first learned. */
+export type HiddenDashboardFact={id:string;text:string;about:string|null;where:'everywhere'|'group';reason:'replaced'|'unused';hidden_at:string|null;learned_at:string};
+/** The unused-facts rule as the dashboard shows it: `hide_unused_days` null when off; `starts_at` is the first day it can
+ *  hide anything (once facts' use has been tracked for its days). */
+export type CleanUp={hide_unused_days:number|null;tracking_since:string;starts_at:string|null;swept_at:string|null;last_hidden:number|null;revision:number};
+const cleanUpView=(row:any):CleanUp=>{
+  const days=row.hide_unused_days===null?null:Number(row.hide_unused_days),since=new Date(row.tracking_since);
+  return {hide_unused_days:days,tracking_since:since.toISOString(),starts_at:days===null?null:new Date(since.getTime()+days*86400000).toISOString(),
+    swept_at:row.swept_at?new Date(row.swept_at).toISOString():null,last_hidden:row.last_hidden===null?null:Number(row.last_hidden),revision:Number(row.revision)};
+};
 /** Why a list is empty without a failure: no memory space to read, an engine that can't list facts, or a message never
  *  learned. `unavailable` is a failure, counted as a `source_tags` problem. */
 export type FactsReason='no_memory'|'not_supported'|'not_learned'|'unavailable';
@@ -130,6 +141,92 @@ export class MemoryDashboard {
         facts:found.facts.map((fact:EngineFact)=>({...fact,participant:participant!}))})):await this.engine.everyFact!(space.id,options);
       return {facts:await this.shaped(principal,space,page.facts,page.limitations),next:page.next};
     }catch(error){return {facts:[],next:null,reason:await this.failed('memory_dashboard_facts_failed',error)};}
+  }
+
+  /**
+   * Hidden facts (ADR-0298), newest hidden first: what a clean-up retired, kept so the owner can bring it back. Each names
+   * whom it is about (the People name, or null) and whether it is a group memory wall's copy.
+   */
+  async hidden(principal:Reader,after:string):Promise<{facts:HiddenDashboardFact[];next:string|null;reason?:FactsReason}> {
+    admin(principal);
+    if(after.length>80)throw new HttpError(400,'invalid_hidden_request');
+    const space=await this.memory.dashboardSpace();
+    if(!space)return {facts:[],next:null,reason:'no_memory'};
+    if(!this.engine.hiddenFacts)return {facts:[],next:null,reason:'not_supported'};
+    try {
+      const page=await this.engine.hiddenFacts(space.id,{after:after||null,size:OWNER_FACT_PAGE});
+      const entities=[...new Set(page.facts.map(fact=>/^(?:person|project)_(.+)$/.exec(fact.participant)?.[1]).filter((id):id is string=>!!id))];
+      const names=new Map<string,string>(entities.length
+        ?(await this.stores.control.query('SELECT id,name FROM memory_entities WHERE id=ANY($1::text[])',[entities])).rows.map(row=>[String(row.id),String(row.name)])
+        :[]);
+      return {facts:page.facts.map(fact=>({id:fact.id,text:fact.content,about:names.get(fact.participant.replace(/^(?:person|project)_/,''))??null,
+        where:fact.wall?'group':'everywhere',reason:fact.reason,hidden_at:fact.hiddenAt,learned_at:fact.createdAt})),next:page.next};
+    } catch(error) {
+      return {facts:[],next:null,reason:await this.failed('memory_dashboard_hidden_failed',error)};
+    }
+  }
+  /** The unused-facts rule (ADR-0299): off or a number of days, when facts' use began to be tracked, and the last sweep. */
+  async cleanUp(principal:Reader):Promise<CleanUp> {
+    admin(principal);
+    return cleanUpView((await this.stores.control.query('SELECT * FROM memory_clean_up WHERE singleton')).rows[0]);
+  }
+  /** Turn the rule off (null) or set its days (30 to 3650). A change sweeps again at the next hourly check. */
+  async saveCleanUp(principal:Reader,body:unknown):Promise<CleanUp> {
+    admin(principal);
+    const days=(body as any)?.hide_unused_days,revision=(body as any)?.expected_revision;
+    if(!body||typeof body!=='object'||Object.keys(body).some(key=>!['hide_unused_days','expected_revision','operation_id'].includes(key))
+      ||!(days===null||Number.isSafeInteger(days)&&days>=30&&days<=3650)||!Number.isSafeInteger(revision))throw new HttpError(400,'invalid_clean_up_request');
+    const row=(await this.stores.control.query(`UPDATE memory_clean_up SET hide_unused_days=$1,swept_at=NULL,revision=revision+1
+      WHERE singleton AND revision=$2 RETURNING *`,[days,revision])).rows[0];
+    if(!row)throw new HttpError(409,'clean_up_revision_conflict');
+    return cleanUpView(row);
+  }
+  /**
+   * One sweep of the unused-facts rule, at most once a day across every process: facts (with their wall copies) that no
+   * reply read, no chat said again and nothing newly learned for the set days are hidden as unused, a bounded number per
+   * call. Until facts' use has been tracked for that long, nothing is hidden. Answers how many it hid, or null when it
+   * did not run.
+   */
+  async sweepUnused(now=new Date()):Promise<number|null> {
+    const claimed=(await this.stores.control.query(`UPDATE memory_clean_up SET swept_at=$1 WHERE singleton AND hide_unused_days IS NOT NULL
+      AND (swept_at IS NULL OR swept_at<$1::timestamptz-interval '20 hours') RETURNING hide_unused_days,tracking_since`,[now])).rows[0];
+    if(!claimed)return null;
+    const before=new Date(now.getTime()-Number(claimed.hide_unused_days)*86400000);
+    const space=await this.memory.dashboardSpace();
+    if(!space||!this.engine.hideUnused||before<new Date(claimed.tracking_since))return null;
+    let hidden=0;
+    try {
+      for(let round=0;round<50;round++) {
+        const step=await this.engine.hideUnused(space.id,before,200);
+        hidden+=step;if(!step)break;
+      }
+    } catch(error) {
+      // Tried again at the next hourly check.
+      await this.stores.control.query(`UPDATE memory_clean_up SET swept_at=$1::timestamptz-interval '20 hours' WHERE singleton AND swept_at=$1`,[now]);
+      console.warn(JSON.stringify({event:'memory_hide_unused_failed',engine:this.engine.id,code:error instanceof HttpError?error.code:'memory_hide_unused_error'}));
+      if(hidden)await this.stores.control.query('UPDATE memory_clean_up SET last_hidden=$1 WHERE singleton',[hidden]);
+      return null;
+    }
+    await this.stores.control.query('UPDATE memory_clean_up SET last_hidden=$1 WHERE singleton',[hidden]);
+    if(hidden)console.log(JSON.stringify({event:'memory_hide_unused',engine:this.engine.id,hidden}));
+    return hidden;
+  }
+  /** Checks hourly, first a minute after start; never keeps the process alive. Answers a stop. */
+  startCleanUp(active:()=>boolean=()=>true):()=>void {
+    const tick=()=>{if(active())void this.sweepUnused().catch(error=>console.warn(JSON.stringify({event:'memory_hide_unused_failed',
+      code:error instanceof HttpError?error.code:'memory_hide_unused_error'})));};
+    const first=setTimeout(tick,60000),timer=setInterval(tick,3600000);first.unref();timer.unref();
+    return ()=>{clearTimeout(first);clearInterval(timer);};
+  }
+  /** Bring hidden facts back, with their group copies. */
+  async restore(principal:Reader,body:unknown):Promise<{restored:string[]}> {
+    admin(principal);
+    const ids=(body as any)?.ids;
+    if(!Array.isArray(ids)||!ids.length||ids.length>50||ids.some(id=>!engineId(id)))throw new HttpError(400,'invalid_restore_request');
+    const space=await this.memory.dashboardSpace();
+    if(!space)throw new HttpError(409,'memory_not_connected');
+    if(!this.engine.restoreFacts)throw new HttpError(409,'memory_restore_not_supported');
+    return {restored:await this.engine.restoreFacts(space.id,ids)};
   }
 
   /** The coverage line: how many live facts cite their messages, know only their learning batch, or neither. */

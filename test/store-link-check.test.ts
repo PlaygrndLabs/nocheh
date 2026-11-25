@@ -10,6 +10,7 @@ import {connectStores,initializeStoreDatabases} from '../src/stores/connections.
 import {fixtureServices} from './fixture-agent.js';
 import {claimHostWorkflow} from '../src/workflows/host-coordinator.js';
 import {honchoEngine} from '../src/memory/honcho.js';
+import {recordTurnReads} from '../src/stores/turn-reads.js';
 
 test('"Do what I ask" opens only addresses no model built, at most ten a message, and rules cover a site, a shared file or a tool',
  {skip:process.env.NOCHEH_STORES_FIXTURE!=='1',timeout:240000},async()=>{
@@ -41,7 +42,10 @@ test('"Do what I ask" opens only addresses no model built, at most ten a message
     message:{message_id:5,date:1700000000,chat:{id:123,type:'private'}}}});
   const actor=async(source:{id:string}):Promise<Reader>=>{
     const binding=await s.guards.state();
-    return {admin:false,scope:null,space:'123',turnEvent:source.id,generation:binding.generation,guard_epoch:binding.epoch,revision:binding.epoch};
+    const turn:Reader={admin:false,scope:null,space:'123',turnEvent:source.id,generation:binding.generation,guard_epoch:binding.epoch,revision:binding.epoch};
+    // The agent's runtime reports a conversation with nothing outside in it (ADR-0293).
+    await recordTurnReads(stores.control,turn,'conversation',[]);
+    return turn;
   };
   const ask=async(source:{id:string},kind:'browser'|'mcp'|'shell',args:Record<string,unknown>)=>{
     const before=cards.length,result=await s.actionCommands.offer('controlled',await s.controlledActions.propose(await actor(source),{kind,arguments:args}));

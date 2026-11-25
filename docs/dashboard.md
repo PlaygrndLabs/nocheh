@@ -195,7 +195,11 @@ from others' words, and one learned from a forward or a file can make its note a
 mix; a review of only your own and Nocheh's messages leaves such rules out. A
 note written in a turn whose message replied to someone else's message, or to
 Nocheh's, reads "after reading the message it replied to" (amber); later in the
-conversation only a note that copies from that message does. A
+conversation only a note that copies from that message does. A note written
+after a long-term memory recall, after reading tasks someone else wrote (in a
+group or the members' app), or that copies from the long-term memory Nocheh read
+before the turn, reads "after reading long-term memory" or "after reading tasks
+other people wrote" (amber), even in your private chat. A
 pin counts as the words of the message it pinned, and a message you sent that
 holds someone else's words, such as a shared checklist, a poll someone else
 added an option to or a service message carrying another's message, reads "a
@@ -223,6 +227,12 @@ messages a review read, first message first, or the message the turn answered.
 A message hidden from the assistant reads **Hidden from assistant** and is never
 linked
 ([ADR-0261](adr/0261-recalled-facts-and-search-hits-name-their-source.md)).
+
+Long-term memory hides facts in two ways, both off by default. Memory ›
+Long-term memory › **Clean up** has **Hide replaced facts**, built into Honcho,
+and **Hidden facts**, which lists what either way hid, each with **Bring back**.
+Memory › Facts has **Hide unused facts**, Nocheh's own rule
+([ADR-0298](adr/0298-retire-old-facts.md), [ADR-0299](adr/0299-hide-unused-facts.md)).
 
 Memory › Long-term memory has a **Facts it learned** card below **Re-run or
 replace**, which is unchanged and still asks before it runs. A line counts the
@@ -380,10 +390,11 @@ Off for every chat; a chat or topic sets its own on its Tools card in Chats
 ./bin/nocheh policy set agent.max_iterations 4 --job JOB_ID
 ```
 
-Pass `--revision REVISION` to conditional CLI writes. Native profiles created here
-are owner-private and do not clone credentials. Their rename and removal controls
-preserve managed Telegram bindings; removal retains their directory under
-`retired-profiles` for recovery. Session inspection and changes stay within the
+Pass `--revision REVISION` to conditional CLI writes. Hermes's own Profiles page
+only reads, like its Cron page: making, renaming or retiring a profile there answers
+`profiles_read_only`, since the agent login cannot save profiles in Nocheh
+([ADR-0295](adr/0295-agent-login-replaces-the-master-key-in-hermes.md)). Its
+listing, the active profile and the preference pages stay. Session inspection and changes stay within the
 selected profile. Native file browsing/uploads are confined to that profile's
 workspace, including symlink checks. These workspace files are not chat imports;
 chat attachment capture is part of P4. Native session imports remain gated: use
@@ -753,6 +764,8 @@ not an overlay for the installation Compose file. Assign a unique project/image,
 an unused localhost port, and new random credentials in a private environment file:
 `NOCHEH_FIXTURE_PROJECT`, `NOCHEH_FIXTURE_IMAGE`, `NOCHEH_DASHBOARD_PORT`,
 `POSTGRES_PASSWORD`, and `SERVICE_TOKEN`. Never copy installation credentials.
+The fixture's `AGENT_KEY` is a fixed synthetic value in its Compose file, and it has
+no `NOCHEH_HERMES_SESSION_TOKEN`, since it runs no Hermes.
 The fixture owns its database volume and internal database network; only its
 HTTP preview bridge publishes the chosen loopback port. It has no poller,
 scheduler, provider credentials, or external-effect executor.

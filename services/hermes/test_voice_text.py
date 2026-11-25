@@ -86,7 +86,7 @@ class VoiceTextTests(unittest.TestCase):
             seen.update(env=options['env'], config=json.loads((home / 'config.yaml').read_text()), timeout=options['timeout'],
                         hint=json.loads(command[-1]))
             return subprocess.CompletedProcess(command, 0, b'Hermes says hello\n{"state": "done", "text": "Synthetic", "seconds": 90.4}', b'')
-        with tempfile.TemporaryDirectory() as state, patch.dict('os.environ', {**ROUTE, 'SERVICE_TOKEN': 'synthetic-service-token'}), \
+        with tempfile.TemporaryDirectory() as state, patch.dict('os.environ', {**ROUTE, 'AGENT_KEY': 'synthetic-agent-key-0123456789abcdef', 'NOCHEH_HERMES_SESSION_TOKEN': 'synthetic-session-token-0123456789ab'}), \
                 patch.object(voice_text.subprocess, 'run', side_effect=run):
             target = Path(state) / 'hermes/usage/usage.sqlite'
             target.parent.mkdir(parents=True)
@@ -94,7 +94,7 @@ class VoiceTextTests(unittest.TestCase):
                 self.assertEqual(voice_text.transcribe(body), {'state': 'done', 'text': 'Synthetic'})
                 self.assertFalse(Path(seen['env']['HERMES_HOME']).exists(), 'the child home is removed')
                 rows = usage.rows('2000-01-01', target)
-        self.assertNotIn('SERVICE_TOKEN', seen['env'])
+        for name in ('SERVICE_TOKEN', 'AGENT_KEY', 'NOCHEH_HERMES_SESSION_TOKEN'): self.assertNotIn(name, seen['env'])
         self.assertEqual(seen['env'][voice_text.KEY], 'synthetic-voice-key')
         self.assertEqual(seen['config']['stt'], {'enabled': True, 'provider': 'openai', 'language': '', 'openai': {
             'model': 'gpt-transcribe', 'base_url': 'https://transcribe.example.test/v1', 'api_key': '${env:' + voice_text.KEY + '}'}},

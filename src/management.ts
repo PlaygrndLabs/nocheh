@@ -331,7 +331,7 @@ export async function startManagement() {
       if(/^\/tools\/actions\/[a-f0-9]{64}$/.test(route) && req.method==='GET')return json(res,200,await python({operation:'tools.manage',action:route.slice(7)}));
       if(req.method==='POST' && ['/tools/decide','/tools/telegram-decision','/tools/resolve','/tools/telegram-resolve','/tools/grant','/tools/revoke'].includes(route))return json(res,200,await python({operation:'tools.manage',action:route.slice(7),request:await readJson(req)}));
       if (req.method === 'GET' && route === '/runtime') return json(res,200,await archive('/v1/runtime'));
-      if(['/memory/longterm','/memory/longterm/rebuild','/memory/longterm/retry-failed','/memory/longterm/fresh-start','/memory/spaces','/memory/shares','/memory/shares/revoke','/memory/reviews','/memory/reviews/control','/memory/recall','/memory/preview','/memory/facts','/memory/longterm/coverage','/memory/originals','/memory/message-facts'].includes(route) && ['GET','POST'].includes(req.method??'')) {
+      if(['/memory/longterm','/memory/longterm/rebuild','/memory/longterm/retry-failed','/memory/longterm/fresh-start','/memory/spaces','/memory/shares','/memory/shares/revoke','/memory/reviews','/memory/reviews/control','/memory/recall','/memory/preview','/memory/facts','/memory/longterm/coverage','/memory/originals','/memory/message-facts','/memory/hidden','/memory/hidden/restore','/memory/clean-up'].includes(route) && ['GET','POST'].includes(req.method??'')) {
         return json(res,200,await python({operation:'memory.api',path:'/v1'+route+url.search,
           ...(req.method==='POST'?{body:object(await readJson(req))}:{})}));
       }
@@ -424,6 +424,7 @@ export async function startManagement() {
       // POST so a key being typed travels in the body, never in a URL or access log.
       if (req.method === 'POST' && route === '/settings/provider-models') return json(res, 200, await python({operation: 'settings.provider_models', request: object(await readJson(req))}));
       if (req.method === 'GET' && route === '/honcho/status') return json(res, 200, await python({operation: 'honcho.status'}));
+      if (req.method === 'GET' && route === '/spending') return json(res, 200, await python({operation: 'spending.view'}));
       if (req.method === 'GET' && route === '/usage') return json(res, 200, await python({operation: 'usage.view', days: Number(url.searchParams.get('days') ?? 30)}));
       if (req.method === 'GET' && route === '/honcho/budget') return json(res, 200, await python({operation: 'honcho.budget'}));
       if (req.method === 'POST' && route === '/honcho/budget') return exclusive('honcho-budget',async()=>

@@ -598,7 +598,7 @@ class RetiredRecordTests(unittest.TestCase):
         for value,valid in ((answer,True),({**answer,'retired_records':[]},True),({**answer,'retired_records':'x'},False)):
             response=unittest.mock.MagicMock();response.read.return_value=json.dumps(value).encode()
             response.__enter__=lambda self:self;response.__exit__=lambda *args:False
-            with patch('urllib.request.urlopen',return_value=response),patch('services.hermes.environment.secret',return_value='token'):
+            with patch('urllib.request.urlopen',return_value=response),patch('services.hermes.environment.agent_key',return_value='t'*40):
                 if valid:self.assertEqual(service_lookup([TURN]),value)
                 else:self.assertRaises(RuntimeError,service_lookup,[TURN])
 

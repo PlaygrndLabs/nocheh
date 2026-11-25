@@ -610,6 +610,12 @@ test('the task tool uses only the owner task routes and explains failures',async
   for(const action of ['list','get'])
     assert.equal((await run('tasks',{action,id:ID},fake(()=>({other_groups:true,tasks:['x'.repeat(30000)]})).context)).other_groups,true,action);
   assert.equal((await run('tasks',{action:'list'},fake(()=>({other_groups:'yes',tasks:['x'.repeat(30000)]})).context)).other_groups,undefined);
+  // And its mark that it shows words someone other than the owner wrote (ADR-0300).
+  for(const action of ['list','get']) {
+    const cut=await run('tasks',{action,id:ID},fake(()=>({others_wrote:true,tasks:['x'.repeat(30000)]})).context);
+    assert.deepEqual([cut.others_wrote,cut.other_groups,cut.truncated],[true,undefined,true],action);
+  }
+  assert.equal((await run('tasks',{action:'list'},fake(()=>({others_wrote:1,tasks:['x'.repeat(30000)]})).context)).others_wrote,undefined);
   assert.deepEqual(await run('tasks',{action:'comment',id:ID,text:'t'},fake(()=>({comment:'x'.repeat(30000)})).context),{id:ID,commented:true});
 });
 

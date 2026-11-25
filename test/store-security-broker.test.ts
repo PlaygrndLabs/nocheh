@@ -20,12 +20,13 @@ test('three-store broker binds original and scheduled turns, isolates generation
   const config:pg.PoolConfig={host:process.env.PGHOST!,user:'nocheh',database:'nocheh',password:process.env.PGPASSWORD!};
   const passwords:StorePasswords={archive:digest('archive-fixture'),derived:digest('derived-fixture'),control:digest('control-fixture')};
   await initializeStoreDatabases(config,passwords);
-  const stores=connectStores(config,passwords),root=await mkdtemp(join(tmpdir(),'nocheh-store-broker-')),key='broker:'+Date.now(),token='synthetic-service-token-only-for-tests';
-  let detectors=0,revocation=false,refuse=(_url:string):Response|null=>null;const calls:{url:string;body:unknown}[]=[];
+  const stores=connectStores(config,passwords),root=await mkdtemp(join(tmpdir(),'nocheh-store-broker-')),key='broker:'+Date.now(),token='synthetic-service-token-only-for-tests',agentKey='synthetic-agent-login-only-for-tests-0001';
+  let detectors=0,revocation=false,refuse=(_url:string):Response|null=>null;const calls:{url:string;body:unknown}[]=[],transports:(string|null)[]=[];
   const services=fixtureServices(stores,{dataDir:root,detectorVersion:'fixture',policy:()=>({enabled:true,owner_id:'123',group_ids:['-321']}),
     runtime:async(_operation,input)=>{detectors++;return {literals:String(input.text).includes('saffronpass')?['saffronpass']:[]};},memoryEngine:honchoEngine(async()=>{throw Error('no native provider');})});
   const mock:typeof fetch=async(url,init)=>{
     calls.push({url:String(url),body:init?.body?JSON.parse(String(init.body)):null});
+    if(String(url).endsWith('/internal/security/transport'))transports.push(new Headers(init?.headers).get('authorization'));
     const refused=refuse(String(url));if(refused)return refused;
     if(String(url).endsWith('/internal/security/transport'))return Response.json({base_url:'https://gateway.example.test/v1',api_mode:'chat_completions',api_key:'synthetic-credential',model_context_length:100000});
     if(revocation)return new Response(new ReadableStream({start(controller){
@@ -34,7 +35,7 @@ test('three-store broker binds original and scheduled turns, isolates generation
     }}),{headers:{'content-type':'text/event-stream'}});
     return Response.json({ok:true});
   };
-  const server=brokerServer({pool:stores.control,storage:services.turns,token,archive:'http://archive',hermes:'http://hermes',model:'fixture-model',prepare:storageGuardService(services),fetch:mock});
+  const server=brokerServer({pool:stores.control,storage:services.turns,token,agentKey,archive:'http://archive',hermes:'http://hermes',model:'fixture-model',prepare:storageGuardService(services),fetch:mock});
   const principal=async(id:string,space='123',scope:string|null=null):Promise<Reader>=>{
     const state=await services.guards.state();return {admin:false,scope,space,turnEvent:id,generation:state.generation,guard_epoch:state.epoch,revision:state.epoch};
   };
@@ -91,7 +92,9 @@ test('three-store broker binds original and scheduled turns, isolates generation
     const payload={model:'fixture-model',input:[{role:'user',content:'Observed words. Password is saffronpass.'}]};
     await services.sources.read(actor,source.reference.id);
     assert.equal((await request('/v1/chat/completions',payload)).status,200);
-    const provider=calls.at(-1)!;assert.ok(!JSON.stringify(provider.body).includes('saffronpass'));assert.ok(JSON.stringify(provider.body).includes('Observed words.'));
+    const provider=calls.at(-1)!;assert.ok(!JSON.stringify(provider.body).includes('saffronpass'));
+    // Hermes is asked for the provider with the agent login, never the master key (ADR-0295).
+    assert.ok(transports.length&&transports.every(authorization=>authorization==='Bearer '+agentKey),JSON.stringify(transports));assert.ok(JSON.stringify(provider.body).includes('Observed words.'));
     assert.equal((await stores.archive.query("SELECT 1 FROM events WHERE kind IN ('runtime_context','guard_result')")).rowCount,0);
     assert.ok((await stores.derived.query("SELECT 1 FROM derived_artifacts WHERE event_id=$1 AND kind='runtime_context'",[source.reference.id])).rowCount!>0);
     assert.ok((await stores.control.query('SELECT 1 FROM security_events WHERE source_event_id=$1',[source.reference.id])).rowCount!>0);
@@ -100,7 +103,16 @@ test('three-store broker binds original and scheduled turns, isolates generation
     const before=calls.length;
     const oldGeneration=credential({...actor,generation:'00000000-0000-0000-0000-000000000000'});
     assert.equal((await request('/v1/chat/completions',payload,oldGeneration)).status,409);assert.equal(calls.length,before);
-    assert.equal((await request('/v1/guard',{destination:'https://fixture.example',payload:{text:'Administrative saffronpass'}},token)).status,200);
+    // The system guard takes the agent login only (ADR-0295): the master key is refused there, and the agent login reaches
+    // nothing else on the broker.
+    const guarded=await request('/v1/guard',{destination:'https://fixture.example',payload:{text:'Administrative saffronpass'}},token);
+    assert.equal(guarded.status,403);assert.equal((await guarded.json() as any).error,'agent_login_required');
+    const system=await request('/v1/guard',{destination:'https://fixture.example',payload:{text:'Administrative saffronpass'}},agentKey);
+    assert.equal(system.status,200);assert.ok(!JSON.stringify(await system.json()).includes('saffronpass'));
+    for(const path of ['/v1/chat/completions','/mcp','/v1/context/prepare','/v1/guard?x=1'])
+      assert.equal((await (await request(path,payload,agentKey)).json() as any).error,'agent_route_not_allowed',path);
+    assert.equal((await (await fetch(base+'/v1/security/binding',{headers:{authorization:'Bearer '+agentKey}})).json() as any).error,'agent_route_not_allowed');
+    assert.equal((await (await fetch(base+'/anthropic/v1/messages',{method:'POST',headers:{'x-api-key':agentKey,'content-type':'application/json'},body:'{}'})).json() as any).error,'agent_route_not_allowed');
     const adminGuard=(await stores.control.query("SELECT id FROM content_operations WHERE kind='service_guard' ORDER BY created_at DESC LIMIT 1")).rows[0];
     assert.ok(adminGuard);assert.ok((await stores.derived.query("SELECT 1 FROM derived_artifacts WHERE operation_reference->>'id'=$1",[adminGuard.id])).rowCount!>0);
     // A message request is told that its chat is not one Nocheh serves, and a task change why a reminder time was not saved

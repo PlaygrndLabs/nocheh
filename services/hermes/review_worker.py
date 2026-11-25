@@ -182,12 +182,12 @@ def _review(profile,policy,model,credentials,body):
     if isolated_enabled():
         from .isolated_profile import prepare
         from .profile_config import inherited_config,read,preferences
-        from .environment import secret
+        from .environment import agent_key
         prepare(profile)
         effective,_=inherited_config(profile,read(profile/'config.yaml'))
         request.update(scoped_transport(body['archive_credential'],transport['api_mode']))
         request['preferences']=preferences(effective)
-        env['SERVICE_TOKEN']=secret('SERVICE_TOKEN');module='services.hermes.security_client'
+        env['AGENT_KEY']=agent_key();module='services.hermes.security_client'
     from .usage import record
     ops=None
     try:

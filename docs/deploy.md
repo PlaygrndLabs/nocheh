@@ -352,7 +352,16 @@ or office network does not use.
 ## Configuration and credentials
 
 Run `./bin/nocheh init`, edit the root `.env`, then run `./bin/nocheh up`.
-Initialization fills missing internal passwords; existing passwords stay unchanged.
+Initialization fills missing internal passwords; existing passwords stay unchanged,
+with one exception: the first `init`, `up` or `make dev` without an `AGENT_KEY` also
+makes `SERVICE_TOKEN` anew, since Hermes knew the old one
+([ADR-0295](adr/0295-agent-login-replaces-the-master-key-in-hermes.md)). The `up` that
+follows recreates the services with the new keys and restarts the dashboard and
+executor, which read keys once; turns in flight at that moment fail, as after
+`rotate-keys` below.
+Most other commands initialize first, so any of them can make the keys; until the
+next `up` or Apply, which also restarts the dashboard and executor then, the running
+services still hold the old ones, so run `up` right after.
 Only variables explicitly listed in Compose enter each service. The wrapper reads
 literal values without shell expansion and gives this file precedence over stale
 shell exports. Keep values on one line; single quotes preserve `$` and `#`.
@@ -380,7 +389,8 @@ groups.
 whose image each workspace builds as `<prefix>-box:local`; see [the security service](security-service.md).
 The generated `NOCHEH_MACHINE_TOKEN` lets `nocheh-app` ask `nocheh-machines` to run
 jobs on the owner's machines; only those two services get it. It has at least 32
-characters and differs from `SERVICE_TOKEN` and `NOCHEH_BOX_TOKEN`. `init`, `up` and
+characters and differs from every other Nocheh key.
+`init`, `up` and
 `make dev` generate it when it is missing. Without it, Settings › Machines says
 machine control is unavailable and nothing else changes. `nocheh-machines` runs
 from the management image, which carries the SSH client and a user for
@@ -408,6 +418,18 @@ Settings › Telegram › Mini app saves the mini app address and tunnel token; 
 `up` also starts `nocheh-miniapp` and `nocheh-tunnel`. See [Telegram](telegram.md#mini-app).
 The API binds only to loopback; PostgreSQL has no host port.
 
+`SERVICE_TOKEN` is Nocheh's master key: the admin bearer of its own services and the
+key that signs every pass. Only `nocheh-app`, `nocheh-security` and, for now,
+`nocheh-telegram` get it. The generated `AGENT_KEY` is the agent login: Nocheh and
+Hermes call each other with it, and on Nocheh's side it reaches only the routes the
+agent needs. `nocheh-app`, `nocheh-security`, `hermes` and `hermes-agent-sb` get it, and
+Hermes refuses to start with `SERVICE_TOKEN` in its environment. The generated
+`NOCHEH_HERMES_SESSION_TOKEN` opens Hermes's own dashboard pages; only `hermes` gets it,
+and the dashboard reads it from `.env`. Both have at least 32 characters, and no two of
+`SERVICE_TOKEN`, `AGENT_KEY`, `NOCHEH_HERMES_SESSION_TOKEN`, `NOCHEH_BOX_TOKEN` and
+`NOCHEH_MACHINE_TOKEN` may be equal. Settings neither shows nor counts them, so a new
+one never asks for Apply. See [ADR-0295](adr/0295-agent-login-replaces-the-master-key-in-hermes.md).
+
 The `.env` is ignored by Git, excluded from image builds and written with mode 0600.
 Environment values are visible to someone who can inspect Docker containers. The
 previous file-based Compose secrets were another storage choice, not encrypted
@@ -430,7 +452,15 @@ apply; until then replies and memory work wait with `provider_not_configured`.
 ./bin/nocheh status
 ./bin/nocheh down
 ./bin/nocheh up
+./bin/nocheh rotate-keys
 ```
+
+`rotate-keys` makes a new `SERVICE_TOKEN`, `AGENT_KEY` and Hermes session token,
+applies them as Settings › Apply does and restarts the dashboard and executor, which
+read keys once. If the services do not come back, the old keys are put back. The box
+and machine tokens stay. It says:
+
+> New SERVICE_TOKEN, AGENT_KEY and Hermes session token are in use. Anything signed with the old key stops working: turns and scheduled or background runs in progress fail, Answer privately buttons on replies still being delivered fail (buttons already sent may too), and replies Nocheh was still delivering are not sent. Ask again where needed.
 
 `down` retains all persistent state. Do not add `--volumes` unless intentionally
 resetting the database. Direct Compose reads the root `.env` too, and a workspace other

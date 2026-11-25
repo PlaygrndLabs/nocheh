@@ -17,6 +17,12 @@ test('controlled arguments reject ambient capabilities and unsafe URL syntax',()
   // A new proposal needs a plain host; a saved one is still read, so its card and its run keep working (ADR-0214).
   assert.throws(()=>actionArguments('browser',{url:'https://api.example.com:443/x'}),{code:'plain_host_required'});
   assert.deepEqual(actionArguments('browser',{url:'https://api.example.com:443/x'},true),{url:'https://api.example.com:443/x'});
+  // A path is checked as it is sent: a parser drops a dot segment with the part before it, so it is refused (ADR-0291).
+  for(const url of ['https://example.com/'+'x'.repeat(300)+'/../p','https://example.com/a/%2E%2e/p','https://example.com/a/.%2e','https://example.com/a/./b',
+    'https://example.com/a\\..\\p','https://example.com/a\\b'])
+    {assert.throws(()=>actionArguments('browser',{url}),{code:'plain_path_required'},url);assert.throws(()=>actionArguments('mcp',{url,operation:'list'}),{code:'plain_path_required'},url);}
+  for(const url of ['https://example.com/','https://example.com','https://example.com/a.b/..c/file.txt?next=../x','https://example.com/v1.2/...'])
+    assert.deepEqual(actionArguments('browser',{url}),{url},url);
 });
 test('real PostgreSQL: exact approvals, owner decisions, bounded/revoked grants and crash receipts',{skip:!process.env.PGHOST},async()=>{
   const connection={host:process.env.PGHOST,user:'nocheh',database:'nocheh',password:settings().databasePassword};

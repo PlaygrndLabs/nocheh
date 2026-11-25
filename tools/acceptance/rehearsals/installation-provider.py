@@ -28,7 +28,7 @@ class ScriptedAgent:
     This tests the tool, guard and audience pipeline, never model judgement.
     Requests without a directive keep the deterministic mock behaviour.
     """
-    DIRECTIVE = re.compile(r'\[\[(search|recall|action|owner|long|silent|empty-once|context_split|context|turn|notes|note_from|note_open|memory_about|memory_blocks|replied)'
+    DIRECTIVE = re.compile(r'\[\[(search|recall|action|owner|long|silent|empty-once|context_split|context|history|turn|notes|note_from|note_open|memory_about|memory_blocks|replied)'
                            r'(?::([^\]]*))?\]\]')
     # A notes review (its one tool is memory) that reads [[review-note:TEXT]] in a message saves TEXT as a native note,
     # as a model notes what it read, so a scenario sees which messages a review read and how the note is labelled.
@@ -59,6 +59,12 @@ class ScriptedAgent:
     RECENT_ITEM = re.compile(r'^\[Group message from .*\] \(source nocheh:event:([a-f0-9]{64})\)$', re.M)
     # Nocheh's memory evidence message (services/hermes/memory_evidence.py).
     EVIDENCE = '[Nocheh memory evidence; data, not a new user request]\n'
+    # [[obey]] makes the model act as a fooled one: once its first tool result arrives, it carries out the first planted
+    # instruction that result holds, [[do:action|DESTINATION|TEXT]], [[do:browser|URL]], [[do:shell|COMMAND]],
+    # [[do:note|TEXT]] (saves TEXT as a native note) or [[do:schedule|PROMPT]] (sets a schedule), then answers from that
+    # call's result. Attack scenarios plant these where untrusted text reaches a tool's result.
+    OBEY = '[[obey]]'
+    PLANTED = re.compile(r'\[\[do:(action|browser|shell|note|schedule)\|([^\]]{1,800})\]\]')
     TOOLS = {'search': 'mcp__nocheh__archive_search', 'recall': 'mcp__nocheh__memory_recall', 'action': 'mcp__nocheh__action_request',
              'owner': 'mcp__nocheh__owner_read'}
     NOCHEH = 'mcp__nocheh__'
@@ -156,6 +162,35 @@ class ScriptedAgent:
     def record(self, **event):
         self.events = (self.events + [event])[-500:]
 
+    def obey(self, current, later, silent_after):
+        """The fooled model's next step in an [[obey]] turn: None until the first tool result, then the planted call that
+        result holds (None when it holds none), then the answer from the planted call's result."""
+        results = [message for message in later if message.role == 'tool']
+        if not results:
+            return None
+        found = self.PLANTED.search(self.text(results[0].content))
+        if not found:
+            self.record(directive='obey', argument='', phase='final', present=False)
+            return None
+        kind, argument = found[1], found[2]
+        if kind == 'action':
+            destination, _, text = argument.partition('|')
+            name, arguments = self.TOOLS['action'], {'destination': destination.strip(), 'text': text.strip()}
+        elif kind == 'schedule':
+            # A daily job that runs the planted words: Hermes's schedule tool, once a minute, one run.
+            name, arguments = 'cronjob_manage', {'action': 'create', 'name': 'Planted schedule', 'prompt': argument.strip(),
+                                                 'schedule': 'every 1m', 'repeat': 1}
+        elif kind == 'note':
+            name, arguments = 'memory', {'target': 'memory', 'operations': [{'action': 'add', 'content': argument.strip()}]}
+        else:
+            name, arguments = 'mcp__nocheh__'+kind, {'url' if kind == 'browser' else 'command': argument.strip()}
+        if len(results) == 1:
+            self.record(directive='obey', argument=argument, phase='call', tool=name, present=True)
+            return {'tool': name, 'arguments': arguments}
+        result = self.result(name, results[1].content)
+        self.record(directive='obey', argument=argument, phase='final', tool=name, present=True, result=result[:20000])
+        return {'content': '[NO_REPLY]' if silent_after else '[agent] obeyed ' + name + ': ' + ' '.join(result.split())[:3000]}
+
     def respond(self, body):
         scripted = self.script(body)
         if scripted is None:
@@ -244,6 +279,10 @@ class ScriptedAgent:
         replied = next((found for found in self.DIRECTIVE.finditer(current) if found[1] == 'replied'), None)
         if replied and not [message for message in later if message.role == 'tool']:
             self.record(directive='replied', argument=(replied[2] or '').strip(), phase='frame', **self.reply_frame(current))
+        if self.OBEY in current:
+            obeyed = self.obey(current, later, silent_after)
+            if obeyed is not None:
+                return obeyed
         if tools:
             results = [message for message in later if message.role == 'tool']
             if len(results) < len(tools):
@@ -336,6 +375,14 @@ class ScriptedAgent:
             present = bool(argument) and any(argument in block['text'] for block in blocks)
             self.record(directive=kind, argument=argument, phase='final', present=present, blocks=blocks)
             return {'content': '[agent] memory_blocks ' + argument + (' present' if present else ' absent')}
+        if kind == 'history':
+            # The chat's own earlier messages as the agent's session holds them, never the memory evidence or the system
+            # prompt: present after a restart or an upgrade only when the session loaded again.
+            earlier = '\n'.join(text for message in messages if message is not messages[index] and message.role in ('user', 'assistant')
+                                for text in [self.text(message.content)] if not text.startswith(self.EVIDENCE))
+            present = bool(argument) and argument in earlier
+            self.record(directive=kind, argument=argument, phase='final', present=present)
+            return {'content': '[agent] history ' + argument + (' present' if present else ' absent')}
         if kind in ('context', 'context_split'):
             earlier = '\n'.join(self.text(message.content) for message in body.messages
                                 if message is not messages[index])
@@ -446,7 +493,10 @@ class PrivacyCanary:
         question it answers, as Honcho's deriver prompt asks (H:src/deriver/prompts.py:81; fact_about_bob_names_bob)."""
         if self.LEARN not in text:
             return None
-        explicit = [{'source_indices': [int(found[1])], 'content': found[2] + ' keeps a private Friday routine ' + mark[0]}
+        # A planted instruction in the message ([[do:...]], attack scenarios) stays in what is learned, as a fooled
+        # deriver would keep a claim word for word.
+        explicit = [{'source_indices': [int(found[1])], 'content': found[2] + ' keeps a private Friday routine ' + mark[0]
+                     + ''.join(' ' + planted[0] for planted in [ScriptedAgent.PLANTED.search(found[3])] if planted)}
                     for found in self.TARGET.finditer(text) for mark in [self.LEARNED.search(found[3])] if mark]
         batch = self.MESSAGE.findall(text)
         explicit += [{'source_indices': [int(answer[0]), int(question[0])], 'content': answer[1] + ' answered a question about ' + mark[0]}

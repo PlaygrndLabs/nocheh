@@ -236,6 +236,9 @@ def install_tool_search_policy():
 RUNS=[]
 # Long-term memory this turn could not read in full, for the parent to count (memory_problem).
 PROBLEMS=[]
+# The long-term memory context a turn read, which its parent compares with the notes the turn wrote (note_sources).
+CONTEXT=[]
+CONTEXT_LIMIT=256*1024
 # The ids the long-term memory this turn was given cites (nocheh:<kind>:<id>), sent to the parent as soon as it is read
 # (a memory_sources line), so the turn's notes rest on them even when the turn stops early (ADR-0292).
 CITED=re.compile(r'nocheh:[a-z_]+:([a-f0-9]{64})(?![a-f0-9])')
@@ -329,7 +332,7 @@ def turn_image(image,credential):
     return data
 
 
-def run(body, emit=None, relay=None):
+def run(body, emit=None, relay=None, feed=None):
     machine=machine_step(body);box=box_step(body)
     if body.get('review') is not True and exact_predecessor_question(body.get('source_text',body.get('text',''))):
         return {'state':'done','text':PREDECESSOR_UNVERIFIED,'session_id':body['session_id']}
@@ -396,6 +399,7 @@ def run(body, emit=None, relay=None):
                 isinstance(part,dict) and isinstance(part.get('limitations'),list) and 'forwards_unavailable' in part['limitations'] for part in parts):
             PROBLEMS.append('memory_read')
         long_term='\nPrimary memory context (derived inferences):\n'+json.dumps(memory,ensure_ascii=False)
+        CONTEXT.append(json.dumps(memory,ensure_ascii=False)[:CONTEXT_LIMIT])
         if SEND:SEND({'event':'memory_sources','ids':list(dict.fromkeys(CITED.findall(json.dumps(memory))))[:500]})
     record('memory_recall',phase);phase=perf_counter()
     session_id=body['session_id']
@@ -417,7 +421,9 @@ def run(body, emit=None, relay=None):
         agent=AIAgent(provider=credentials.provider,api_mode=credentials.api_mode,model=body['model'],
             api_key=credentials.access_token,base_url=credentials.base_url,
             enabled_toolsets=['memory'] if review else MEMBER_READ_TOOLSETS if member_read else (MEMBER_TOOLSETS+['cronjob'] if schedules else MEMBER_TOOLSETS) if member else ANSWER_TOOLSETS if answer else BOX_TOOLSETS if box else MACHINE_TOOLSETS if machine else BACKGROUND_TOOLSETS if background else SCHEDULE_TOOLSETS if schedules else TURN_TOOLSETS,
-            fallback_model=None,
+            # Settings › Models' backup reply model: same provider and broker route, used only when the reply model fails.
+            fallback_model=[{'provider':credentials.provider,'model':body['backup_model'],'base_url':credentials.base_url,
+                             'api_key':credentials.access_token,'api_mode':credentials.api_mode}] if body.get('backup_model') else None,
             session_id=session_id,persistence=database,platform=body.get('channel','telegram'),chat_id=body['chat_id'],
             user_id=body['user_id'],chat_type='dm' if body['owner'] or answer or member or member_read else 'group',
             skip_context_files=True,load_soul_identity=not review,skip_memory=False,skip_background_review=True,
@@ -473,12 +479,22 @@ def run(body, emit=None, relay=None):
                 if not mime: raise ValueError('unsupported_image')
                 message.append({'type':'image_url','image_url':{'url':'data:'+mime+';base64,'+base64.b64encode(data).decode()}})
         from .timing import measure
-        with measure('conversation'):result=agent.run_conversation(message,**options)
+        # Later messages in this chat that join the turn reach the agent as Hermes steers while it works (ADR-0301).
+        steers=None
+        if body.get('steer') is True and feed is not None and body.get('channel','telegram')=='telegram' and not (background or answer or member_read):
+            from .steering import Steers
+            steers=Steers(feed);steers.start(agent)
+        try:
+            with measure('conversation'):result=agent.run_conversation(message,**options)
+        finally:
+            joined=steers.finish() if steers else []
         RUNS.append(result)
         if background:
             job_progress.finish(result)
             return job_result(result,agent.session_id)
-        return conversation_result(result,agent.session_id)
+        result=conversation_result(result,agent.session_id)
+        if joined and result.get('state')=='done':result['joined']=joined
+        return result
     finally:
         agent.close()
         if review:
@@ -497,7 +513,9 @@ def main():
     from time import perf_counter
     reset();started=perf_counter()
     try:
-        body=json.loads(sys.stdin.buffer.read(2*1024*1024))
+        # The request is the first line; messages that join the turn may follow it (steering.py).
+        from .steering import Feed
+        feed=Feed();body=json.loads(feed.line(2*1024*1024))
         if os.environ.get('NOCHEH_ISOLATED_TURN')=='1':
             profile=Path(os.environ['HERMES_HOME'])
             (profile/'plugins').mkdir(exist_ok=True)
@@ -533,7 +551,7 @@ def main():
                 if body.get('heartbeat') is True:threading.Thread(target=heartbeat,daemon=True).start()
                 global SEND
                 SEND=emit
-                try:result=run(body, emit if body.get('stream') else None, emit if body.get('channel')=='background' else None)
+                try:result=run(body, emit if body.get('stream') else None, emit if body.get('channel')=='background' else None, feed)
                 finally:finished.set()
     except Exception as error:
         import traceback
@@ -548,6 +566,7 @@ def main():
     measured=combine(RUNS)
     if measured:result['usage']=measured
     if PROBLEMS:result['memory_problem']=PROBLEMS[0]
+    if CONTEXT:result['memory_context']=CONTEXT[0]
     # Why it failed, as codes for the usage tracker: a run's own reason and the provider's exact error, or the code of
     # Nocheh's own refusal, such as its secret check's; else Nocheh's error.
     if result.get('state')!='done':

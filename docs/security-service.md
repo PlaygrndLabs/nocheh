@@ -70,7 +70,7 @@ API; the service itself serves all but `/preview`. Scoped turn credentials canno
 
 The broker also serves Nocheh's data tools at `/mcp` to isolated turns (`nocheh-app`
 serves them to turns without the isolated runtime). Only a turn's own pass reaches
-`/mcp`; the service token and any request with an `Origin` header are refused. Each
+`/mcp`; the service token, the agent login and any request with an `Origin` header are refused. Each
 tool calls an existing `/v1` route again with the caller's pass, so every check stays
 where it was and `/mcp` itself grants nothing
 ([ADR-0233](adr/0233-data-tools-over-mcp.md)).
@@ -80,6 +80,25 @@ authority. Agent containers do not. It pins the installed image ID at startup,
 disables external DNS, mounts only native data plus read-only configuration, and
 discards the turn filesystem on exit. Replacing it requires a trusted compatible
 implementation; arbitrary plugin installation does not confer privileges.
+
+Neither Hermes nor the launcher holds Nocheh's master key `SERVICE_TOKEN`, which is
+its admin bearer and signs every pass; both refuse to start when it is in their
+environment. They hold the agent login `AGENT_KEY` instead
+([ADR-0295](adr/0295-agent-login-replaces-the-master-key-in-hermes.md)). The launcher
+starts a turn only for a `POST /v1/turn` from Hermes's bridge with that key and
+answers 403 otherwise. Of Hermes's children, its dashboard process keeps it for its
+own calls to Nocheh and drops it from its environment before the upstream dashboard
+runs, the bridge, a short-lived parent-side process, gets it for the launcher, and
+turn containers get no key. Nocheh calls Hermes
+with the same key, and Hermes calls Nocheh with it: on `nocheh-app` it reaches only
+the agent's own routes (the served chat list, note and retired-source lookups,
+runtime profile reads, and the scheduler and background run steps), and on the broker
+only `POST /v1/guard`, Hermes's own model calls with no pass bound; anything else
+answers 403 `agent_route_not_allowed`. The key list is checked in Compose only: the
+launcher runs as root with the Docker socket and could read other containers'
+configuration, so a Docker API proxy for it comes later. In the legacy (non-isolated)
+mode, the model's child process shares a container and user with the process that
+holds `AGENT_KEY`; its environment whitelist is the only separation.
 
 `NOCHEH_MEMORY_CONTEXT=evidence` moves complete native memory blocks and recalled
 objects into a labelled data message on each provider attempt. Hermes reads the
@@ -227,7 +246,11 @@ its own and a bad one drops only itself. A forum topic's opening is never a
 reply target. The `reply` read token makes a turn's notes `turn_read` when the
 replied-to message is not the owner's own typing, Nocheh's own included; earlier
 in the session only when the note copies from the block's text (a run, a
-distinctive token, or a short text held whole). A note's `ref` (the first 12 hex
+distinctive token, or a short text held whole). The `memory` read token counts
+a `memory_recall` result holding `kind: memory_inference`, and the turn's
+long-term memory context (which the turn's process hands back to its parent as
+`memory_context`, never passed on) when a note copies from it; the `tasks` token
+counts a task read storage marks `others_wrote` (ADR-0300). A note's `ref` (the first 12 hex
 of its key) is shown only when storage kept that turn's refs in `note_lookups`
 (pruned after 7 days; a failure is counted as `note_refs`); `archive_read
 {note}` opens a ref's messages only for the turn whose lookup kept it, never for
@@ -266,7 +289,7 @@ with success, the launcher replaces that job's box at its next run.
 | --- | --- |
 | `NOCHEH_BOX_IMAGE` | Box image, set by Compose from the workspace: `nocheh-box:local` for `personal`, `nocheh-<name>-box:local` for another workspace. `./bin/nocheh up`, `./bin/nocheh build` and `make dev` build it; the launcher pins its image ID at every box it makes |
 | `NOCHEH_BOX_LIMIT` | Boxes that may exist at once, 2 to 8, default 2, since two jobs can run at once. The launcher does not start with less |
-| `NOCHEH_BOX_TOKEN` | Lets the launcher ask the broker which boxes may exist and read a box's chat copy. Only `nocheh-security` and `hermes-agent-sb` receive it. `./bin/nocheh init`, `up` and `make dev` generate it when it is missing; it has at least 32 characters, differs from `SERVICE_TOKEN`, and Settings never shows it |
+| `NOCHEH_BOX_TOKEN` | Lets the launcher ask the broker which boxes may exist and read a box's chat copy. Only `nocheh-security` and `hermes-agent-sb` receive it. `./bin/nocheh init`, `up` and `make dev` generate it when it is missing; it has at least 32 characters, differs from every other Nocheh key, and Settings never shows it |
 
 Without the token, no run gets a box and a job that asks for one is refused with
 `job_box_not_allowed`. A box job approved before the token went missing does not
@@ -289,8 +312,8 @@ machine refusal codes, such as `machine_off` or `machine_unreachable`, back to t
 run unchanged. `nocheh-app` checks the job and calls `nocheh-machines`, which
 holds the keys and runs `ssh`. Only `nocheh-app` and `nocheh-machines` receive
 `NOCHEH_MACHINE_TOKEN`; `./bin/nocheh init`, `up` and `make dev` generate it when it
-is missing, it has at least 32 characters, differs from `SERVICE_TOKEN` and
-`NOCHEH_BOX_TOKEN`, and Settings never shows it. The broker, the launcher and turns
+is missing, it has at least 32 characters, differs from every other Nocheh key
+(`SERVICE_TOKEN`, `AGENT_KEY`, `NOCHEH_HERMES_SESSION_TOKEN`, `NOCHEH_BOX_TOKEN`), and Settings never shows it. The broker, the launcher and turns
 never hold it or a key. The run's binding names its machine, and the
 launcher then starts the turn with `TERMINAL_ENV=nocheh_machine`, `TERMINAL_CWD=~`
 and `NOCHEH_MACHINE_RUN=1`, without any extra mount or network. The turn asks no

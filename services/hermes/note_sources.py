@@ -29,7 +29,7 @@ TARGETS=(('memory','MEMORY.md'),('user','USER.md'))
 # A note keeps at most this many origins, its writer first; the rest are counted, and a count reads as unknown.
 ORIGINS=10
 CITES=20
-READS=('forward','file','recent','reply','archive','web','notion','tools','commands','past','other')
+READS=('forward','file','recent','reply','archive','memory','tasks','web','notion','tools','commands','past','other')
 CHANNELS=('telegram','browser','scheduler','background')
 FROM=('owner','nocheh','person','forward','file','mixed','turn','turn_read','unknown','unavailable')
 UNAVAILABLE={'from':'unavailable','label':'source not available right now'}
@@ -49,19 +49,26 @@ REF=re.compile(r'[a-f0-9]{12}')
 TOKENS=(re.compile(r'\d{6,}'),re.compile(r'[^\s@<>()"\']+@[^\s@<>()"\']+\.[^\s@<>()"\']+'),re.compile(r'https?://([^/\s:?#<>"\']+)'),
         re.compile(r'(?<![0-9a-z])(?=[0-9a-z]*[0-9])[0-9a-z]{15,}(?![0-9a-z])'))
 # What a turn's tools read, as read tokens. A search by meaning returns archived messages as they were sent, with no
-# source, so it reads other chats as the archive tools do. Only the notes and long-term memory recall are labelled
-# already, and the project's tasks and a job's own to-do list are Nocheh's own records, so they are not outside reads;
-# any other tool is. A task read storage marks other_groups is the exception (task_read).
+# source, so it reads other chats as the archive tools do. Only the notes are labelled already, and a job's own to-do
+# list is Nocheh's own record, so they are not outside reads; any other tool is. Long-term memory recall and the
+# project's tasks are outside reads only when they hold other people's words (recall_read, task_read).
 TOOL_READS={'mcp__nocheh__archive_search':'archive','mcp__nocheh__archive_read':'archive','mcp__nocheh__archive_page':'archive',
             'mcp__nocheh__memory_search':'archive','mcp__nocheh__browser':'web','mcp__nocheh__notion':'notion','mcp__nocheh__github':'tools','mcp__nocheh__gmail':'tools','mcp__nocheh__mcp':'tools',
             'mcp__nocheh__shell':'commands','session_search':'past'}
-NOT_READS=frozenset({'memory','mcp__nocheh__memory_recall','mcp__nocheh__tasks','todo_list'})
+NOT_READS=frozenset({'memory','todo_list'})
 # Every chat of a project reads its whole task list, but with "Share group chats" off a group does not share what it
 # knows with the project's other groups, so storage marks a read that shows their tasks other_groups (ADR-0276). Such a
 # read is what those chats wrote, so it reads as other chats' messages do. The mark is looked for escaped too, as a
 # result cut to fit or stored inside another holds it; task text cannot hide it, only add a look-alike that counts.
 TASKS='mcp__nocheh__tasks'
 OTHER_GROUPS=re.compile(r'\\*"other_groups\\*"\s*:\s*true')
+# Storage marks a task read others_wrote when a task it shows has a title, notes or comments someone other than the
+# owner wrote, such as a member in a group or in the members' app: their words, not the owner's.
+OTHERS_WROTE=re.compile(r'\\*"others_wrote\\*"\s*:\s*true')
+# A long-term memory recall that answers with memory's own reasoning (memory_inference) or the facts it read reads what
+# everyone in the owner's chats said; one that holds only the owner's corrections, or nothing, reads nothing outside.
+RECALL='mcp__nocheh__memory_recall'
+INFERRED=re.compile(r'\\*"kind\\*"\s*:\s*\\*"memory_inference\\*"')
 # The lines Nocheh puts in a turn's message, which stay in its session until a compaction: what earlier turns read.
 MARKERS=(('[Forwarded: ','forward'),('[Archived attachment: ','file'),('[Recent messages in this group','recent'))
 # The fixed lines src/forwarded.ts forwardLine puts before a forward of the sender's own earlier message, in the owner's
@@ -283,11 +290,11 @@ def record(profile,before,after,origin,ops=None,trusted=frozenset(),now=None):
 
 
 def service_post(body):
-    """Storage's labels for these notes; only the service token may ask."""
+    """Storage's labels for these notes; only the agent login may ask."""
     from urllib.request import Request,urlopen
-    from .environment import secret
+    from .environment import agent_key
     request=Request(os.environ.get('ARCHIVE_URL','http://nocheh-app:8780')+'/internal/notes/sources',data=json.dumps(body).encode(),
-        headers={'Authorization':'Bearer '+secret('SERVICE_TOKEN'),'Content-Type':'application/json'})
+        headers={'Authorization':'Bearer '+agent_key(),'Content-Type':'application/json'})
     with urlopen(request,timeout=15) as response:value=json.loads(response.read(1024*1024))
     labels=value.get('labels') if isinstance(value,dict) else None
     if not isinstance(labels,dict):raise RuntimeError('note_sources_unavailable')
@@ -355,8 +362,15 @@ def _called(row):
 
 
 def task_read(content):
-    """The read token of a task result: other chats' words when storage marked it other_groups, else None."""
-    return 'archive' if isinstance(content,str) and OTHER_GROUPS.search(content) else None
+    """The read token of a task result: other chats' words when storage marked it other_groups, else tasks other people
+    wrote when it marked it others_wrote, else None."""
+    if not isinstance(content,str):return None
+    return 'archive' if OTHER_GROUPS.search(content) else 'tasks' if OTHERS_WROTE.search(content) else None
+
+
+def recall_read(content):
+    """The read token of a long-term memory recall: long-term memory when it holds memory's reasoning, else None."""
+    return 'memory' if isinstance(content,str) and INFERRED.search(content) else None
 
 
 def tool_read(row):
@@ -364,7 +378,134 @@ def tool_read(row):
     without a tool name, as an older schema stores it, is another tool."""
     name=row.get('tool_name')
     if name==TASKS:return task_read(row.get('content'))
+    if name==RECALL:return recall_read(row.get('content'))
     return None if name in NOT_READS else TOOL_READS.get(name,'other')
+
+
+# What "Do what I ask" counts as reaching a turn besides the owner's typed words (ADR-0293): every read token above but a
+# command's own output, and Nocheh's word about a message it was asked to send or a time zone it was asked to set,
+# which says only what became of that request.
+GATE_IGNORED=frozenset({'mcp__nocheh__shell','mcp__nocheh__action_request','mcp__nocheh__my_time_zone'})
+# A voice note's or audio file's transcript in a stored message: words that were not typed.
+TRANSCRIPT='[Derived voice transcript'
+# A message or answer withheld from the session because its source was retired: what the turn read for it is gone.
+RETIRED=('[Retired message: ','[Retired reply: ')
+# What carried messages read in the session they came from, by the session they were carried into (ADR-0293). A carry
+# keeps typed messages and answers but drops tool results, so an answer that repeats a page would read clean without it.
+CARRIED_READS='nocheh-carried-reads.json'
+CARRIED_SESSIONS=200
+
+
+def gate_read(name,content):
+    """The read token a tool result counts as for "Do what I ask" (ADR-0293), or None: tool_read's, except for a
+    command's own output, a long-term memory recall and the tools in GATE_IGNORED. A task list counts whoever's chat it
+    is: in the owner's chat it holds what members and groups wrote too."""
+    if name in GATE_IGNORED:return None
+    if name==TASKS:return 'archive'
+    # A long-term memory recall labels a note it fed (recall_read), but storage's turn reads take no 'memory' token, so
+    # it is not one here: sending it would refuse the tool result and stop the turn.
+    if name==RECALL:return None
+    token=tool_read({'tool_name':name,'content':content})
+    return None if token=='commands' else token
+
+
+def rows_reads(rows):
+    """The read tokens a session's stored rows hold (ADR-0293): the lines Nocheh puts in a message, a transcript, a
+    reply to anything but the owner's own typed message, a retired message, every tool result gate_read counts, and a
+    compaction's summary, which may hold any of them."""
+    from .retired_history import _summary
+    from .turn_process import REPLY_BY
+    reads=[]
+    def add(token):
+        if token not in reads:reads.append(token)
+    for row in rows:
+        content=row.get('content') if isinstance(row.get('content'),str) else None
+        if _summary({**row,'content':row.get('content')}):add('past');continue
+        if content is not None and any(marker in content for marker in RETIRED):add('other')
+        if row.get('role')=='user' and content is not None:
+            for marker,token in MARKERS:
+                if marker in content and (token!='forward' or _forwards(content)):add(token)
+            if TRANSCRIPT in content:add('file')
+            if any(by!='owner' for by in REPLY_BY.findall(content)):add('reply')
+        elif row.get('role')=='tool':
+            token=gate_read(row.get('tool_name'),row.get('content'))
+            if token:add(token)
+    return reads
+
+
+def carried_reads(profile,session):
+    """What the messages carried into `session` read where they came from, or None when the record cannot be read."""
+    path=Path(profile)/CARRIED_READS
+    if not path.exists() and not path.is_symlink():return []
+    try:
+        if path.is_symlink():raise ValueError('carried_reads_path_denied')
+        value=json.loads(path.read_text(encoding='utf-8'))
+        sessions=value.get('sessions') if isinstance(value,dict) and value.get('version')==1 else None
+        if not isinstance(sessions,dict):raise ValueError('carried_reads_invalid')
+        reads=sessions.get(session,[])
+        if not isinstance(reads,list) or not all(token in READS for token in reads):raise ValueError('carried_reads_invalid')
+        return reads
+    except (OSError,ValueError):return None
+
+
+def record_carried(profile,session,reads):
+    """Keep what messages carried into `session` read, added to what it already holds. Raises when it cannot, so the
+    messages are not carried without it."""
+    from .native_memory import save_receipt
+    path=Path(profile)/CARRIED_READS
+    if path.is_symlink():raise ValueError('carried_reads_path_denied')
+    known=[] if not path.exists() else carried_reads(profile,session)
+    if known is None:raise ValueError('carried_reads_invalid')
+    try:sessions=json.loads(path.read_text(encoding='utf-8'))['sessions'] if path.exists() else {}
+    except (OSError,ValueError,KeyError,TypeError) as failure:raise ValueError('carried_reads_invalid') from failure
+    merged=known+[token for token in dict.fromkeys(reads) if token not in known]
+    sessions.pop(session,None);sessions[session]=merged
+    sessions=dict(list(sessions.items())[-CARRIED_SESSIONS:])
+    save_receipt(path,json.dumps({'version':1,'sessions':sessions},ensure_ascii=False,separators=(',',':')))
+
+
+def carry_reads(profile,session,source_profile,previous,rows):
+    """Record what the rows a carry reads from (`rows`, tool results included) and what was carried into `previous`
+    read, for `session` (ADR-0293)."""
+    inherited=carried_reads(source_profile,previous)
+    if inherited is None:inherited=['past']
+    reads=inherited+[token for token in rows_reads(rows) if token not in inherited]
+    if reads:record_carried(profile,session,reads)
+
+
+def conversation_reads(database,session,body,profile=None):
+    """What reaches a turn besides the owner's typed words before its model starts, as read tokens (ADR-0293): in the
+    message it answers, a forward of someone else's, any file, voice note or audio file, other people's recent group
+    messages and a reply to anything but the owner's own typed message; anywhere in the session it runs in, what
+    rows_reads finds; and what messages carried into it read where they came from (`profile`'s record). None when the
+    session or that record could not be read, so the turn stays unreported and a command in it asks first."""
+    from .retired_history import _columns,_read_only
+    from .turn_process import forwarded,recent_group,reply_block
+    reads=[]
+    def add(token):
+        if token not in reads:reads.append(token)
+    if forwarded(body.get('forwarded')) and body['forwarded'] not in OWN_FORWARDS:add('forward')
+    if body.get('files') or body.get('transcripts'):add('file')
+    if recent_group(body.get('recent_group')):add('recent')
+    if reply_block(body.get('reply')) and body['reply']['by']!='owner':add('reply')
+    if profile is not None:
+        carried=carried_reads(profile,session)
+        if carried is None:return None
+        for token in carried:add(token)
+    database=Path(database)
+    if not database.is_file():return reads
+    try:
+        connection=_read_only(database)
+        try:
+            available=_columns(connection,'messages')
+            if not available:return reads
+            selected=['role','content']+[name for name in ('tool_name','_compressed_summary') if name in available]
+            connection.row_factory=sqlite3.Row
+            rows=[dict(row) for row in connection.execute('SELECT '+','.join(selected)+' FROM messages WHERE session_id=? ORDER BY id',(session,))]
+        finally:connection.close()
+    except sqlite3.Error:return None
+    for token in rows_reads(rows):add(token)
+    return reads
 
 
 def _forwards(text):
@@ -420,7 +561,7 @@ def _reply_copied(text,written):
     return SHORT_COPY<=len(plain)<RUN and any(plain in written_plain for written_plain in written[2])
 
 
-def turn_reads(database,session,last,body):
+def turn_reads(database,session,last,body,context=None):
     """What a turn read besides the message it answered, as read tokens, the memory operations it asked for, and whether
     its stored rows could be read: the forward, files and recent group messages it was given; the tools it called
     before its last memory call; the forwards, files and recent group messages earlier in its session since the last
@@ -433,7 +574,11 @@ def turn_reads(database,session,last,body):
     The message the turn's own message replies to is a read too, unless the owner typed it: Nocheh's own message
     counts, since it may carry what others said. Earlier in the session such a block counts only when what the turn
     wrote copies from its text (_replied), as other people's recent messages do, or, for a text shorter than a run,
-    holds it whole (_reply_copied)."""
+    holds it whole (_reply_copied).
+
+    The long-term memory context the turn was given before it started (`context`, as the turn's process read it) holds
+    what memory learned from everyone in the owner's chats, so it is a read too when what the turn wrote copies from it,
+    as earlier reads are."""
     from .retired_history import _columns,_read_only,_summary,memory_ops
     from .turn_process import forwarded,recent_group,reply_block
     reads=[]
@@ -458,6 +603,7 @@ def turn_reads(database,session,last,body):
     except sqlite3.Error:return reads,None,False
     ops=[op for row in new if row['role']=='assistant' for op in memory_ops(row)]
     written=_written(ops)
+    if isinstance(context,str) and _copied(context,written):add('memory')
     start=max((index+1 for index,row in enumerate(earlier) if _summary(row)),default=0)
     for row in earlier[start:]:
         content=row['content'] if isinstance(row['content'],str) else None
@@ -524,14 +670,15 @@ def turn_origin(body,reads,complete,now=None):
             'reads':[read for read in reads if read in READS][:12],'complete':bool(complete)}
 
 
-def after_turn(profile,body,session,watch,result,memory=()):
+def after_turn(profile,body,session,watch,result,context=None,memory=()):
     """Record the notes a turn wrote, with what it read; reads it could not read in full are incomplete. A turn whose
     stored messages could not be read counts once, when it added or changed a note, whose label that made less exact.
-    The notes it wrote also rest on the message it answered and the long-term memory it was given (`memory`, the ids
-    that memory cited), so a later hide of either removes them (retired_history.add_dependencies, ADR-0292)."""
+    `context`: the long-term memory context the turn read before it started. The notes it wrote also rest on the message
+    it answered and the long-term memory it was given (`memory`, the ids that memory cited), so a later hide of either
+    removes them (retired_history.add_dependencies, ADR-0292)."""
     try:
         from .isolated_profile import database_path
-        reads,ops,ok=turn_reads(database_path(profile),session,watch['last'],body)
+        reads,ops,ok=turn_reads(database_path(profile),session,watch['last'],body,context)
     except Exception:
         reads,ops,ok=[],None,False
     complete=ok and isinstance(result,dict) and result.get('state')=='done'

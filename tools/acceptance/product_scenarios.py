@@ -30,7 +30,7 @@ from tools.acceptance.telegram_mock import ANONYMOUS_ADMIN
 from tools.acceptance.telegram_rehearsal import add_card, group_chat, person, sent_buttons
 from tools.acceptance.telegram_scenarios import (GROUP, MENTION, NEW_GROUP, NEW_TOPIC, NOT_ALLOWED, OTHER_GROUP, OWNER, PARTICIPANT, THIRD_GROUP,
                                                 UNSELECTED_GROUP, REFRESHED_GROUP, REFRESHED_SUPERGROUP, UPGRADED_GROUP, UPGRADED_SUPERGROUP, Failed,
-                                                Scenarios, isolated_turns, synthetic_pdf)
+                                                Scenarios, isolated_turns, synthetic_pdf, synthetic_wav)
 from tools.paths import ROOT
 
 # The owner's members, added on the Members page by their Telegram user IDs (group_members): MEMBER (778) with GROUP and
@@ -55,6 +55,9 @@ PRIVATE_DAILY_LIMIT = 'Sorry, you have reached today\'s limit of messages to me,
 # private chat (step 4b), with arguments {member: the name Telegram shows for them, question}.
 PRIVATE_TOPIC = 50
 ASK_TOOL = 'mcp__nocheh__ask_member_chat'
+# The line Honcho's provider gateway logs for each memory-chat answer it refuses for calling get_recent_observations,
+# the tool the fixture's privacy probe asks for (services/honcho/meter.py, ADR-0241).
+GATEWAY_REFUSAL = '"event": "honcho_unoffered_tool_refused", "tools": ["get_recent_observations"]'
 # The made-up machine of the machine job scenarios: an SSH server on the fixture's default network, the network
 # nocheh-machines uses (deploy/acceptance/vm-fixture.Dockerfile). The tester's own image, built like its browser's.
 VM_SERVICE, VM_NAME, VM_LOGIN, VM_HOME = 'vm-fixture', 'build-vm', 'nocheh', '/home/nocheh'
@@ -1825,16 +1828,16 @@ class ProductScenarios(Scenarios):
                                                                     "source_reference->>'id'='"+event_id+"' AND state='done'") != '0', 600)
             self.wait('honcho_queue_drained', lambda: self.honcho('SELECT count(*) FROM queue WHERE NOT processed') == '0', 600)
             self.memory_settled()
-            # Gateway logs survive restarts, so only refusals logged during this turn count.
-            refusal = '"event": "honcho_unoffered_tool_refused", "tools": ["get_recent_observations"]'
-            refusals = lambda: self.f.run('logs', '--no-color', 'honcho-provider-gateway', capture_output=True, text=True).stdout.count(refusal)
-            earlier = refusals()
+            # Probes and refusals are counted over the same questions, from here to the last probe: a group recall that never
+            # reaches Honcho (memory limited) probes nothing, and a later one does.
+            earlier = self.gateway_refusals()
             before = self.f.http('/fixture/stats')
             question = 'What does the owner do on Fridays? '+probe
             _, text = self.turn(self.f.message(GROUP, question+' [[recall:'+question+']]', topic=TEAM_TOPIC), GROUP, TEAM_TOPIC)
             final = [event for event in self.f.agent() if event.get('tool') == 'mcp__nocheh__memory_recall' and event['phase'] == 'final'][-1]
             recall = final['result']
-            refused = refusals()-earlier
+            # Whether this first recall reached Honcho's memory chat: a refused one ends limited too, so the stats tell.
+            first = self.f.http('/fixture/stats')['privacy_probes']-before['privacy_probes']
             # The same questions in the group's topic and in the project's chat, each with the probe mark.
             spare = 'Where does the owner keep the spare key? '+probe
             # Every probe runs before any gate, so a failure shows all that reached the groups at once.
@@ -1849,15 +1852,18 @@ class ProductScenarios(Scenarios):
                     if chat == OTHER_GROUP and tool == 'mcp__nocheh__tasks':
                         board_seen = result
             after = self.f.http('/fixture/stats')
+            probes = after['privacy_probes']-before['privacy_probes']
+            refused = self.refused_since(earlier, probes)
             leaked = after['private_text_in_group']-before['private_text_in_group']
             self.current['observed'] = {'stats': {key: after.get(key) for key in ('privacy_probes', 'private_text_in_group', 'group_text_in_owner_review')}, 'recall': recall[:400],
-                                        'marks': marks, 'held': held}
+                                        'probes': {'first_recall': first, 'all': probes, 'refused': refused}, 'marks': marks, 'held': held}
             self.gate('private_text_never_reached_a_group_read', leaked == 0, count=leaked, seen=after.get('private_text_seen', [])[-leaked:] if leaked else [])
             self.gate('group_answers_withhold_private_marks', not held, held=held)
             self.gate('group_reply_withholds_private_fact', private not in text and private not in recall, excerpt=text[:300])
             self.gate('project_chat_sees_its_board', board in (board_seen or ''), result=(board_seen or '')[:300])
-            self.gate('probe_reached_honcho', after['privacy_probes'] > before['privacy_probes'], probes=after['privacy_probes'])
-            self.gate('gateway_refused_unoffered_tool', refused > 0, refusals=refused)
+            self.gate('probe_reached_honcho', probes > 0, probes=probes)
+            # Each probe is one memory-chat answer naming the unoffered tool, so the gateway refuses each one.
+            self.gate('gateway_refused_unoffered_tool', refused >= probes, refusals=refused, probes=probes)
         except Exception as error:
             failed = error
             raise
@@ -1894,6 +1900,21 @@ class ProductScenarios(Scenarios):
         self.wait('memory_not_correcting', lambda: self.f.query('nocheh_control', "SELECT (SELECT count(*) FROM owner_commands c WHERE c.holds_memory "
             "AND c.epoch>coalesce((SELECT max(guard_epoch) FROM learning_refresh_sweeps WHERE family='honcho' AND stage='done'),0))"
             "+(SELECT count(*) FROM memory_session_deletions WHERE state<>'done')") == '0', 900)
+
+    def gateway_refusals(self):
+        """How many answers naming get_recent_observations Honcho's provider gateway refused, by its log. The log is the
+        gateway container's own, so a recreated gateway starts again from none: count the difference over a window."""
+        return self.f.run('logs', '--no-color', 'honcho-provider-gateway', capture_output=True, text=True).stdout.count(GATEWAY_REFUSAL)
+
+    def refused_since(self, earlier, probes, seconds=30):
+        """The refusals logged since `earlier`, once they cover `probes` or after `seconds`: the fixture counts a probe
+        as it answers, and the gateway's log line for it can come a moment later."""
+        deadline = time.monotonic()+seconds
+        while True:
+            refused = self.gateway_refusals()-earlier
+            if refused >= probes or time.monotonic() >= deadline:
+                return refused
+            time.sleep(1)
 
     def probe_group(self, chat, topic, text, tool, marks):
         """One question in a group with the probe mark: what its tool returned, and the private marks in it or the reply."""
@@ -2593,7 +2614,8 @@ class ProductScenarios(Scenarios):
         with zipfile.ZipFile(buffer, 'w') as archive:
             archive.writestr('ChatExport/result.json', json.dumps(document, ensure_ascii=False, indent=1))
             if voice:
-                archive.writestr('ChatExport/voice_messages/audio_1.ogg', b'OggS\x00\x02synthetic voice note\n\xff'*4+marker.encode())
+                # A real recording: the file reader decodes it before it is transcribed (ADR-0285).
+                archive.writestr('ChatExport/voice_messages/audio_1.ogg', synthetic_wav(2)+marker.encode())
         return buffer.getvalue()
 
     def tool_call(self, name, arguments, chat, topic=None, sender=OWNER):
@@ -4062,8 +4084,10 @@ class ProductScenarios(Scenarios):
                   kinds=[row['kind'] for row in rows])
         stored = json.loads(self.f.query('nocheh_control', "SELECT coalesce(json_agg(json_build_object('kind',kind,'run',run_event_id,'script',script_sha256)),'[]') "
                                          "FROM machine_commands WHERE job_id='%s'" % found['id']))
-        self.gate('every_command_belongs_to_the_run', bool(stored) and all(row['run'] == run_event and re.fullmatch(r'[a-f0-9]{64}', row['script'] or '') for row in stored),
-                  rows=len(stored))
+        # Nocheh's own checks of the machine (ADR-0284) belong to the run too, but run no script of the job's.
+        self.gate('every_command_belongs_to_the_run', bool(stored) and all(row['run'] == run_event and (row['kind'] == 'test' or re.fullmatch(r'[a-f0-9]{64}', row['script'] or ''))
+                  for row in stored), rows=[{key: row[key] for key in ('kind', 'run')} for row in stored if row['run'] != run_event or row['kind'] != 'test' and not row['script']])
+        self.gate('machine_checked_before_the_first_command', any(row['kind'] == 'test' for row in stored), kinds=[row['kind'] for row in stored])
         # Neither the run's turn nor anything the model was sent has the key or the token: the key's lines and the token are
         # looked for in each tool result and answer the model gave, the run's message and every message sent since.
         lines, token = self.machine_secrets(machine)

@@ -246,6 +246,22 @@ class BudgetTests(unittest.TestCase):
                 with self.assertRaisesRegex(Rejected,'invalid_thinking_limit'):
                     ledger.set_thinking_limit(value,3,str(uuid.uuid4()))
 
+    def test_the_monthly_spending_limit_pauses_thinking_but_not_memory_search(self):
+        from datetime import datetime, timezone
+        with tempfile.TemporaryDirectory() as root:
+            ledger=Ledger(Path(root)/'budget.sqlite')
+            ledger.set_spend_pause(datetime.now(timezone.utc).strftime('%Y-%m'))
+            with self.assertRaisesRegex(Rejected,'monthly_spend_limit_reached'):
+                ledger.reserve('/v1/chat/completions',b'paused',model='claude-sonnet-5-5')
+            ledger.reserve('/v1/embeddings',b'search')
+            # A pause from an earlier month has passed.
+            ledger.set_spend_pause('2000-01')
+            ledger.reserve('/v1/chat/completions',b'next-month',model='claude-sonnet-5-5')
+            ledger.set_spend_pause(None)
+            ledger.reserve('/v1/chat/completions',b'resumed',model='claude-sonnet-5-5')
+            with self.assertRaisesRegex(Rejected,'invalid_spending_pause'):
+                ledger.set_spend_pause('soon')
+
     def test_a_thinking_limit_refuses_a_model_without_a_price(self):
         with tempfile.TemporaryDirectory() as root:
             ledger=Ledger(Path(root)/'budget.sqlite')
