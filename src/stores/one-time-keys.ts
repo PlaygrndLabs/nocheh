@@ -28,11 +28,16 @@ CREATE TABLE IF NOT EXISTS one_time_keys (
 CREATE INDEX IF NOT EXISTS one_time_keys_open_person ON one_time_keys(person) WHERE closed_at IS NULL;
 CREATE INDEX IF NOT EXISTS one_time_keys_event ON one_time_keys(event_id);
 CREATE INDEX IF NOT EXISTS one_time_keys_expires ON one_time_keys(expires_at);
+-- When each key was first and last brought to Nocheh and how many requests it made (ADR-0306): the owner's list of keys
+-- shows each person's last use from these.
+ALTER TABLE one_time_keys ADD COLUMN IF NOT EXISTS first_used_at timestamptz;
+ALTER TABLE one_time_keys ADD COLUMN IF NOT EXISTS last_used_at timestamptz;
+ALTER TABLE one_time_keys ADD COLUMN IF NOT EXISTS use_count integer NOT NULL DEFAULT 0;
 `;
 /** Why a key closed: its reply went out or did not, its run ended, its review or filter finished, its schedule or owner
- * changed. `stopped` is kept for the owner's "Stop everything now". */
+ * changed, its member was paused or removed (ADR-0306). `stopped` is kept for the owner's "Stop everything now". */
 export const keyCloseReasons=['delivered','not_delivered','run_finished','run_cancelled','run_interrupted','review_finished','filter_finished',
-  'schedule_changed','owner_changed','stopped'] as const;
+  'schedule_changed','owner_changed','member_paused','member_removed','stopped'] as const;
 export type KeyCloseReason=typeof keyCloseReasons[number];
 /** What one mint names: the key's kind, what it answers (subject and attempt), its person, agent and event, and when it
  * expires (epoch milliseconds). */
@@ -52,6 +57,11 @@ export async function closeSubject(db:Queryable,kind:KeyKind,subject:string,reas
 export async function closeEvent(db:Queryable,event:string,kinds:readonly KeyKind[],reason:KeyCloseReason):Promise<number> {
   return (await db.query(`UPDATE one_time_keys SET closed_at=now(),closed_reason=$3 WHERE event_id=$1 AND kind=ANY($2::text[]) AND closed_at IS NULL`,
     [event,kinds,reason])).rowCount??0;
+}
+
+/** Closes every open key of one person, a members.id or 'owner' (ADR-0306); idempotent. */
+export async function closePerson(db:Queryable,person:string,reason:KeyCloseReason):Promise<number> {
+  return (await db.query(`UPDATE one_time_keys SET closed_at=now(),closed_reason=$2 WHERE person=$1 AND closed_at IS NULL`,[person,reason])).rowCount??0;
 }
 
 export class OneTimeKeyRepository {
@@ -85,6 +95,17 @@ export class OneTimeKeyRepository {
    * The pass's key is open: its row exists with the pass's person, agent, kind and event (401 one_time_key_unknown
    * otherwise), and it has neither closed nor expired (409 one_time_key_closed, which the agent takes as final).
    */
+  /**
+   * One request brought the pass's key (ADR-0306): an open key that matches the pass counts it and its time, in one
+   * statement; any other is refused as assertOpen refuses it. Only a request's first check counts, not its audience checks.
+   */
+  async use(principal:Pick<Reader,'jti'|'person'|'agent'|'keyKind'|'turnEvent'>):Promise<void> {
+    if(typeof principal.jti==='string'&&keyIdPattern.test(principal.jti)&&(await this.control.query(`UPDATE one_time_keys
+      SET use_count=use_count+1,last_used_at=now(),first_used_at=coalesce(first_used_at,now())
+      WHERE jti=$1 AND person=$2 AND agent=$3 AND kind=$4 AND event_id=$5 AND closed_at IS NULL AND expires_at>now()`,
+      [principal.jti,principal.person??null,principal.agent??null,principal.keyKind??null,principal.turnEvent??null])).rowCount)return;
+    await this.assertOpen(principal);
+  }
   async assertOpen(principal:Pick<Reader,'jti'|'person'|'agent'|'keyKind'|'turnEvent'>):Promise<void> {
     if(typeof principal.jti!=='string'||!keyIdPattern.test(principal.jti))throw new HttpError(401,'one_time_key_unknown');
     const row=(await this.control.query(`SELECT kind,person,agent,event_id,closed_at IS NOT NULL OR expires_at<=now() AS ended FROM one_time_keys WHERE jti=$1`,

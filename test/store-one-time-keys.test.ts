@@ -65,6 +65,9 @@ test('a one-time key is minted with its row, reused for the same reply, checked 
     assert.equal((await call('/v1/memory/check',again)).status,200);
     assert.equal((await call('/mcp',again,'POST')).status,200);
     assert.deepEqual(await call('/v1/runtime',again),{status:403,body:{error:'one_time_key_route_denied'}});
+    // Each request that brings the key is counted on its row, refused routes too; never the pass (ADR-0306).
+    const used=await row(claims.jti);
+    assert.equal(used.use_count,3);assert.ok(used.first_used_at&&used.last_used_at>=used.first_used_at);
     // A signed pass whose key was never minted reaches nothing, /mcp included.
     for(const [path,method] of [['/v1/memory/check','GET'],['/mcp','POST'],['/v1/search?q=x','GET']] as const)
       assert.deepEqual(await call(path,keyPass(token,null,later(),event,{space:'123',revision:1}),method),{status:401,body:{error:'one_time_key_unknown'}},path);
@@ -112,6 +115,7 @@ test('a one-time key is minted with its row, reused for the same reply, checked 
     for(const pass of [review,filter])for(const [path,method] of [['/mcp','POST'],['/v1/search?q=x','GET'],['/v1/archive/page','GET'],['/v1/memory/context','GET']] as const)
       assert.deepEqual(await call(path,pass,method),{status:403,body:{error:'one_time_key_route_denied'}},passClaims(pass).key_kind+' '+path);
     assert.equal((await call('/v1/memory/check',review)).status,200,'a review may still ask whether it may deliver');
+
     assert.deepEqual(await call('/v1/memory/check',filter),{status:403,body:{error:'one_time_key_route_denied'}});
 
     // A run's keys close with the run, whichever of its kinds.

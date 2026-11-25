@@ -123,9 +123,15 @@ test('the owner adds, changes and removes members and sets the daily cap: idempo
     assert.equal(members().talks(sam,GP4),false,'a new row switched off needs no Telegram row');
     await assert.rejects(change('sam-private',samId,{groups:{[BOB_CHAT]:false}}),{status:400,code:'member_group_invalid'});
     await assert.rejects(change('nobody',digest('nobody'),{state:'paused'}),{status:404,code:'member_not_found'});
+    // A pause or a removal closes the member's open one-time keys at once (ADR-0306); others' keys stay open.
+    const openKey=async(jti:string,person:string)=>{await db.query(`INSERT INTO one_time_keys(jti,kind,subject,attempt,person,agent,event_id,expires_at)
+      VALUES($1,'turn',$1,'1',$2,'hermes',$3,now()+interval '10 minutes')`,[jti,person,digest(jti)]);};
+    const keyState=async(jti:string)=>(await db.query('SELECT closed_reason FROM one_time_keys WHERE jti=$1',[jti])).rows[0]?.closed_reason??null;
+    await openKey('1'.repeat(32),samId);await openKey('2'.repeat(32),memberIdFor(fresh));await openKey('3'.repeat(32),'owner');
     const paused=await change('sam-pause',samId,{state:'paused',tasks:'read',jobs:false});
     assert.deepEqual([paused.member.state,paused.member.permissions],['paused',{...allOn,jobs:false,tasks:'read'}]);
     assert.deepEqual([members().talks(sam,GP1),members().tasks(sam)],[false,'read'],'paused at once');
+    assert.deepEqual([await keyState('1'.repeat(32)),await keyState('2'.repeat(32)),await keyState('3'.repeat(32))],['member_paused',null,null]);
     assert.deepEqual(await change('sam-pause',samId,{state:'paused',tasks:'read',jobs:false}),paused);
     await assert.rejects(change('sam-pause',samId,{state:'active'}),{status:409,code:'owner_command_conflict'});
     await change('sam-resume',samId,{state:'active'});
@@ -150,6 +156,7 @@ test('the owner adds, changes and removes members and sets the daily cap: idempo
 
     // Remove: the member and its switches go, its account stays and is unlinked, and it talks nowhere at once.
     const removed=await repo.remove(owner,memberIdFor(fresh),{operation_id:'remove-fresh'});
+    assert.deepEqual([await keyState('2'.repeat(32)),await keyState('3'.repeat(32))],['member_removed',null]);
     assert.equal(removed.removed,memberIdFor(fresh));assert.equal(removed.revision,(await state()).revision);
     assert.deepEqual([members().memberOf(fresh),members().talks(fresh,GP3)],[null,false]);
     assert.deepEqual((await db.query('SELECT member_id FROM chat_accounts WHERE id=$1',[fresh])).rows,[{member_id:null}]);

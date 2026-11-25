@@ -327,8 +327,8 @@ test('search by meaning asks Honcho within the audience\'s learned sessions and 
   assert.deepEqual(asked,['who sends the invoice'],'the question is checked for secrets before Honcho sees it');
   // The group is bound as its id and its topics' ids, from the chat rows (ADR-0252).
   const topics=['-100','-100/topic/3'];
-  assert.deepEqual(queries.map(params=>params.slice(1)),[[workspace,'A'.repeat(21),'-100/topic/3',topics,null],[workspace,'B'.repeat(21),'-100/topic/3',topics,null],
-    [workspace,'C'.repeat(21),'-100/topic/3',topics,null]],'a hit counts only with its own receipt, in this audience or its group');
+  assert.deepEqual(queries.map(params=>params.slice(1)),[[workspace,'A'.repeat(21),'-100/topic/3',topics,null,null],[workspace,'B'.repeat(21),'-100/topic/3',topics,null,null],
+    [workspace,'C'.repeat(21),'-100/topic/3',topics,null,null]],'a hit counts only with its own receipt, in this audience or its group');
   assert.deepEqual(readSessions,[],'a group reader searches its own sessions');
   // An answer reader searches the sessions of the groups frozen in its record, inside the wall of exactly those groups
   // (ADR-0286), and a hit counts only with a receipt of one of them; Honcho's context and recall stay closed to it: plain
@@ -341,7 +341,7 @@ test('search by meaning asks Honcho within the audience\'s learned sessions and 
   // The read set reaches the provenance query whole, and SQL takes its ids only as marked read set entries.
   const frozen=['-100','-100/topic/3','-200'].map(id=>'read:'+id);
   assert.deepEqual(readSessions,[[workspace,(answer as any).reads,1000]]);
-  assert.deepEqual(queries.map(params=>params.at(-1)),[frozen,frozen,frozen]);
+  assert.deepEqual(queries.map(params=>params[5]),[frozen,frozen,frozen]);
   const readWall=memoryWallName(workspace,['-100','-100/topic/3','-200']);
   assert.deepEqual(opened.at(-1),['-100','-100/topic/3','-200']);assert.equal(bodies.at(-1)!.body.scope,readWall,'its search stays inside its groups\' wall');
   assert.equal((await memory.context(answer)).limited_memory,true);
@@ -358,6 +358,23 @@ test('search by meaning asks Honcho within the audience\'s learned sessions and 
   await memory.search({admin:false,scope:null,space:'123',turnEvent:digest('turn')} as Reader,'invoice',2);
   assert.deepEqual(bodies[1]!.body,{query:'checked: invoice',limit:6},'the owner searches everything learned');
   assert.equal(opened.length,walls,'the owner opens no wall');
+  // A run of a job on the owner's machine searches only its card's chat, even with the owner's pass (ADR-0306): a group's
+  // wall, the owner's own sessions for the owner's chat, and nothing for any other chat.
+  const run=(chat:string)=>({admin:false,scope:null,space:'123',turnEvent:digest('run'),machineReads:{job:'j',chat,from:null,to:null,until:'9',notion:[]}}) as Reader;
+  queries.length=0;
+  assert.deepEqual(await memory.search(run('-100/topic/3'),'invoice',2),{ids:[digest('first'),digest('second')],learned:true,from:batches});
+  assert.equal(bodies.at(-1)!.body.scope,memoryWallName(workspace,['-100','-100/topic/3']),'a machine run searches inside its card group\'s wall');
+  assert.deepEqual(opened.at(-1),['-100','-100/topic/3']);
+  assert.deepEqual(queries.map(params=>params.slice(3)),Array(3).fill(['-100',['-100/topic/3'],null,['-100','-100/topic/3']]),
+    'a hit counts only with a receipt of the card\'s group, never as the owner\'s');
+  queries.length=0;
+  await memory.search(run('123'),'invoice',2);
+  assert.deepEqual(bodies.at(-1)!.body,{query:'checked: invoice',limit:6,filters:{session_id:{in:learned}}},'the owner\'s chat: its own sessions, no wall');
+  assert.deepEqual(queries.map(params=>params.slice(3)),Array(3).fill(['owner',[],null,['owner']]));
+  const asks=bodies.length;
+  assert.deepEqual(await memory.search(run('456'),'invoice',2),{ids:[],learned:false});
+  assert.equal(bodies.length,asks,'any other chat is never learned, so nothing is searched');
+  bodies.splice(2);
   learned=[];
   assert.deepEqual(await memory.search(group,'invoice',2),{ids:[],learned:false});
   assert.equal(bodies.length,2,'a chat that was not learned is not searched');
