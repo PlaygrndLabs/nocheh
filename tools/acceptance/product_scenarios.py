@@ -16,6 +16,7 @@ import io
 import json
 import os
 import re
+import socket
 import subprocess
 import threading
 import time
@@ -5725,6 +5726,77 @@ class ProductScenarios(Scenarios):
         found = canaries.leaks_reminders(state, set(everything) | {'Synthetic'}, OWNER)
         self.gate('no_mark_or_name_in_a_member_reminder', not found, leaks=found[:10])
 
+    # Backup and restore drill (test plan step 3) ---------------------------------
+
+    def backup_and_restore_drill(self):
+        # The owner's "Back up now" on the full, running copy, then a restore of that backup into a new, separate project
+        # (ADR-0251). The backup stops the services, saves everything and starts them again: each service that ran runs
+        # again and Nocheh answers once. The restore uses the production restore unchanged, with only the images of this
+        # run, and leaves the copy inactive: only its database runs and Telegram is off. Everything the live copy held just
+        # before the backup is there: no store table (Honcho's included), Hermes state.db table or kept file has fewer rows.
+        from tools.acceptance import upgrade_check
+        from tools.operations.installation import operations
+        from tools.operations.installation.configuration import compose_command, compose_environment
+        from unittest.mock import patch
+        state = self.f.directory/'state'
+        running = sorted(subprocess.check_output(self.f.command+['ps', '--services', '--status', 'running'], text=True).split())
+        before = upgrade_check.snapshot(self.f.command, self.f.directory)
+        asked = datetime.now(timezone.utc).isoformat()
+        job = self.dashboard().post('/operations', {'action': 'backup'})
+        self.gate('backup_started', job.get('state') == 'running', job=job)
+        # The fixture's relay and the fake Telegram stop with the rest, so the backup's own record says when it ends.
+        health = lambda: json.loads((state/'admin/backup-health.json').read_text()) if (state/'admin/backup-health.json').exists() else {}
+        record = self.wait('backup_finished', lambda: (lambda value: value if value.get('state') in ('complete', 'failed')
+                                                       and str(value.get('started_at') or '') >= asked else None)(health()), 900, 5)
+        self.gate('backup_complete', record.get('state') == 'complete', record=record)
+        back = self.wait('services_running_again', lambda: (lambda now: now if set(running) <= set(now) else None)(
+            subprocess.check_output(self.f.command+['ps', '--services', '--status', 'running'], text=True).split()), 300, 5)
+        self.gate('every_service_runs_again', set(running) <= set(back), missing=sorted(set(running)-set(back)))
+        finished = self.wait('backup_job_complete', lambda: (lambda value: value if value.get('state') != 'running' else None)(
+            self.dashboard().get('/jobs/'+job['id'])), 300, 5)
+        self.gate('backup_job_says_complete', finished.get('state') == 'complete', state=finished.get('state'), error=finished.get('error'))
+        sent = len(self.f.sent())
+        self.turn(self.f.message(OWNER, 'بعد از پشتیبان‌گیری هستی؟'), OWNER)
+        self.gate('answers_once_after_backup', len(self.replies(sent, OWNER)) == 1, replies=len(self.replies(sent, OWNER)))
+        snapshot = state/'admin/backups'/job['id']
+        images = json.loads((self.f.directory/'fixture.json').read_text())['images']
+        overlay = ROOT/'deploy/acceptance/coordinated-recovery-compose.yml'
+        project = 'nocheh-restore-drill-'+job['id'].replace('-', '')[:8]
+        drill = self.f.directory/'drill'
+        drill.mkdir(mode=0o700, exist_ok=True)
+        target = drill/'state'
+        command = lambda where, name=None: compose_command(where, name or project)+['-f', str(overlay)]
+        environment = lambda where: {**compose_environment(where), 'NOCHEH_RECOVERY_SERVICES_IMAGE': images['services'],
+                                     'NOCHEH_RECOVERY_POSTGRES_IMAGE': images['postgres'], 'NOCHEH_RECOVERY_HONCHO_IMAGE': images['honcho']}
+        try:
+            with patch.object(operations, 'compose', side_effect=command), patch.object(operations, 'environment', side_effect=environment):
+                manifest = operations.validate_snapshot(snapshot)
+                self.gate('backup_holds_stores_workflows_and_memory', manifest['version'] == 6 and bool(manifest.get('workflows'))
+                          and bool(manifest.get('honcho')) and set(manifest['stores']['databases']) == {'archive', 'derived', 'control'},
+                          version=manifest['version'])
+                with socket.socket() as probe:
+                    probe.bind(('127.0.0.1', 0))
+                    port = probe.getsockname()[1]
+                restored = operations.restore(snapshot, target, project, port)
+            self.gate('restored_inactive', restored['status'] == 'restored_inactive' and restored['telegram_enabled'] is False,
+                      status=restored['status'], tables=len(restored['verified_tables']), files=restored['verified_state_files'])
+            restored_command, restored_env = command(target), environment(target)
+            only = subprocess.check_output(restored_command+['ps', '--services', '--status', 'running'], env=restored_env, text=True).split()
+            self.gate('only_the_restored_database_runs', only == ['nocheh-db'], running=only)
+            subprocess.run(restored_command+['--profile', 'honcho', 'up', '-d', '--no-deps', '--no-build', '--wait', 'honcho-postgres'],
+                           env=restored_env, check=True, capture_output=True)
+            after = {**upgrade_check.store_counts(restored_command), **upgrade_check.hermes_counts(drill), **upgrade_check.file_count(drill)}
+            missing = upgrade_check.lost(before, after)
+            self.current['observed'] = {'counted': len(before), 'missing': dict(list(missing.items())[:20])}
+            self.gate('restore_keeps_everything', bool(before) and not missing, missing=len(missing))
+            self.gate('restored_copy_waits_for_the_owner', (target/'spool/.restore-inactive').exists() and (target/'workflows/inactive').exists()
+                      and (target/'hermes/scheduler-inactive').exists())
+        finally:
+            if (target/'.env').exists():
+                subprocess.run(command(target)+['--profile', 'honcho', 'down', '--volumes'], env=environment(target), check=False, capture_output=True)
+            for volume in (project+'_honcho_database', project+'_honcho_redis'):
+                subprocess.run(['docker', 'volume', 'rm', volume], check=False, capture_output=True)
+
     # Owner dashboard session ------------------------------------------------------------------------
 
     def dashboard(self):
@@ -5779,4 +5851,6 @@ PRODUCT_ORDER = ['group_members', 'group_name_addresses', 'unaddressed_messages_
                  # reminders scenario 5 and the app's own sent to members' chats.
                  'owner_mini_app_still_works', 'menu_button_on_apply', 'member_app_tasks', 'member_app_ends_on_removal', 'member_app_drops_a_left_group',
                  'member_app_sees_whole_project', 'member_app_reminder_goes_to_setter', 'member_app_never_leaks',
-                 'private_canaries_never_left_the_owner']
+                 'private_canaries_never_left_the_owner',
+                 # The drill stops and starts every service, so it runs last, on the copy every scenario filled.
+                 'backup_and_restore_drill']

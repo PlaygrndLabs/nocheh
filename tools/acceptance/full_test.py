@@ -178,6 +178,7 @@ TITLES = {
     'memory_search_model_change_rebuilds_memory': 'Changing the memory search model rebuilds memory',
     'member_private_chat_reads_joined_groups': 'In their private chat a member reads the groups they joined and the whole task list of each of their projects, one at a time, and changes nothing',
     'member_private_chat_with_group_talk_off': 'With group talk off, a member is still answered in their private chat',
+    'backup_and_restore_drill': 'Back up now on the full copy keeps Nocheh answering; a restore of it keeps every row and file',
     'schedule_runs_tools_quietly_and_pauses_by_button': 'A schedule set by asking reads tasks quietly; Pause on its notice stops it',
     'member_schedule_runs_in_their_own_chat': "A member's own schedule runs in their chat with no card and stops when Personal assistant is off",
     'member_private_chat_off_or_paused_gets_fixed_reply': 'A paused member, or one whose private chat is off, gets the fixed reply once a day',
