@@ -1,8 +1,7 @@
 # ADR-0311: A member's own schedule results reach their chat
 
 <status>
-Proposed on 2026-11-25, as the recommended option of a choice put to the owner after a tester
-finding: a member with Personal assistant on could set a schedule, which ran, but each result was
+Accepted on 2026-11-25. The owner chose "Yes, send to their chat" after a tester finding: a member with Personal assistant on could set a schedule, which ran, but each result was
 held back when Telegram had not yet seen that member in a served group. Fixes
 [ADR-0277](0277-members-own-schedules.md) D4, which amended
 [ADR-0254](0254-sends-go-only-to-chats-nocheh-serves.md) for a member's own scheduled result;
