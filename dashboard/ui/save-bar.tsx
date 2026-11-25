@@ -33,7 +33,7 @@ const applySteps: Record<string, string> = {
   telegram: 'Updating Telegram',
 };
 /** Minutes and seconds since `started`, like 1:05. */
-function elapsed(started: number): string {
+export function elapsed(started: number): string {
   const seconds = Math.max(0, Math.floor((Date.now() - started) / 1000));
   return `${Math.floor(seconds / 60)}:${String(seconds % 60).padStart(2, '0')}`;
 }

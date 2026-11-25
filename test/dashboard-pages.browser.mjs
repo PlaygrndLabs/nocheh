@@ -32,6 +32,7 @@ const pages = [
   ['schedules', 'Schedules'],
   ['chats', 'Chats'],
   ['members', 'Members'],
+  ['keys', 'Keys'],
   ['messages', 'Messages'],
   ['memory', 'Memory'],
   ['usage', 'Usage'],
@@ -2982,6 +2983,156 @@ test('Members lists each member by name with their groups, and a carried member 
   assert.equal(await aurora.getByRole('link', {name: 'Aurora planning'}).getAttribute('href'), '#chats?chat=-10042');
   // A page with no setting has no Save bar.
   assert.equal(await page.getByRole('region', {name: 'Save changes'}).count(), 0);
+  assert.deepEqual(problems, []);
+  await page.close();
+});
+
+test('Keys lists each person’s keys, and Stop everything now ends them first, then gives the agent a new login', async () => {
+  const {page, problems} = await open('keys');
+  const posts = [];
+  page.on('request', request => {
+    if (request.method() === 'POST' && new URL(request.url()).pathname.startsWith('/api/nocheh/keys'))
+      posts.push({path: new URL(request.url()).pathname.replace('/api/nocheh', ''), body: request.postDataJSON()});
+  });
+  const table = page.getByRole('table', {name: 'People and their keys'});
+  await table.waitFor();
+  assert.deepEqual(
+    (await table.getByRole('columnheader').allInnerTexts()).map(text => text.trim()),
+    ['Person', 'State', 'Open keys', 'Last used'],
+  );
+  const rows = async () =>
+    table.locator('tbody tr').evaluateAll(found => found.map(row => [...row.cells].map(cell => cell.innerText.trim())));
+  const before = await rows();
+  // The owner first, as You, then each member; Mira's name opens her on the Members page.
+  assert.deepEqual(before[0].slice(0, 3), ['You', 'On', '2']);
+  assert.match(before[0][3], / ago$/);
+  const mira = before.find(row => row[0] === 'Mira Chen');
+  assert.deepEqual(mira.slice(1, 3), ['On', '1']);
+  assert.equal(await table.getByRole('link', {name: 'Mira Chen'}).getAttribute('href'), '#members?member=' + MIRA);
+  assert.deepEqual(
+    before.find(row => row[0] === 'Devon'),
+    ['Devon', 'Paused', '0', 'Not in 30 days'],
+  );
+  // A member with no name or username is "Member".
+  assert.ok(before.some(row => row[0] === 'Member'));
+  assert.equal(await page.getByTestId('keys-last-stop').count(), 0);
+  const stop = page.getByRole('button', {name: 'Stop everything now'});
+  const confirmStop = async () => {
+    await stop.click();
+    const dialog = page.getByRole('dialog', {name: 'Stop everything now?'});
+    await dialog.getByRole('button', {name: 'Cancel'}).waitFor();
+    await dialog.getByRole('button', {name: 'Stop everything'}).click();
+  };
+  // Cancel sends nothing.
+  await stop.click();
+  await page.getByRole('dialog', {name: 'Stop everything now?'}).getByRole('button', {name: 'Cancel'}).click();
+  assert.deepEqual(posts, []);
+  // The services don't start with the new login: the old one is back, and the keys stay ended.
+  writeFileSync('/tmp/nocheh-ui-scenario', 'login-rollback');
+  try {
+    await confirmStop();
+    await page.getByText(/^Restarting services… \d+:\d\d$/).waitFor();
+    assert.equal(await stop.isDisabled(), true);
+    await page
+      .getByRole('alert')
+      .filter({
+        hasText:
+          'Keys were ended, but the services didn’t start with the new login, so the old login is back. Try again.',
+      })
+      .waitFor();
+  } finally {
+    rmSync('/tmp/nocheh-ui-scenario', {force: true});
+  }
+  assert.deepEqual(
+    posts.map(post => post.path),
+    ['/keys/stop', '/keys/agent-login'],
+  );
+  assert.equal(typeof posts[0].body.operation_id, 'string');
+  assert.deepEqual(posts[1].body, {});
+  await page.getByTestId('keys-last-stop').getByText('Last stopped just now: 3 keys, 1 card, 1 run ended.').waitFor();
+  assert.deepEqual(
+    (await rows()).map(row => row[2]),
+    before.map(() => '0'),
+  );
+  // Another task is running: keys end, the login waits.
+  writeFileSync('/tmp/nocheh-ui-scenario', 'login-busy');
+  try {
+    await confirmStop();
+    await page
+      .getByRole('alert')
+      .filter({hasText: 'Keys were ended, but another task, such as a backup, is running. Try again when it finishes.'})
+      .waitFor();
+  } finally {
+    rmSync('/tmp/nocheh-ui-scenario', {force: true});
+  }
+  // The new login starts but its answer is lost: the page finds it in the job list and follows it to the end.
+  writeFileSync('/tmp/nocheh-ui-scenario', 'login-lost');
+  try {
+    await confirmStop();
+    await page.getByText(/^Restarting services… \d+:\d\d$/).waitFor();
+  } finally {
+    rmSync('/tmp/nocheh-ui-scenario', {force: true});
+  }
+  await page.getByRole('status').filter({hasText: 'Everything stopped. The agent has a new login.'}).last().waitFor();
+  assert.equal(await page.getByRole('alert').count(), 0);
+  // Saved settings wait to be applied: the login does not change, and the page says how to go on.
+  writeFileSync('/tmp/nocheh-ui-scenario', 'login-pending');
+  try {
+    await confirmStop();
+    await page
+      .getByRole('alert')
+      .filter({
+        hasText:
+          'Keys were ended, but saved settings are waiting to be applied, so the agent login didn’t change. Apply or discard them in Settings, then stop again.',
+      })
+      .waitFor();
+  } finally {
+    rmSync('/tmp/nocheh-ui-scenario', {force: true});
+  }
+  // Keys can't be ended again after the restart: said, so the owner stops again.
+  writeFileSync('/tmp/nocheh-ui-scenario', 'login-unclosed');
+  try {
+    await confirmStop();
+    await page
+      .getByRole('alert')
+      .filter({
+        hasText:
+          'The agent has a new login, but ending the keys again after the restart didn’t go through. Stop again to be sure.',
+      })
+      .waitFor();
+  } finally {
+    rmSync('/tmp/nocheh-ui-scenario', {force: true});
+  }
+  // Leaving Keys during the login and coming back still shows it, with the button off, and how it ended.
+  writeFileSync('/tmp/nocheh-ui-scenario', 'login-rollback');
+  try {
+    await confirmStop();
+    await page.getByText(/^Restarting services… \d+:\d\d$/).waitFor();
+    await page.evaluate(() => (location.hash = '#members'));
+    await page.getByRole('heading', {name: 'Members', level: 1}).waitFor();
+    await page.evaluate(() => (location.hash = '#keys'));
+    await page.getByText(/^(Restarting services|Going back to the old login)… \d+:\d\d$/).waitFor();
+    assert.equal(await stop.isDisabled(), true);
+    await page.getByRole('alert').filter({hasText: 'so the old login is back'}).waitFor();
+  } finally {
+    rmSync('/tmp/nocheh-ui-scenario', {force: true});
+  }
+  // Pressed again, it is a new stop with a new operation id, and this time the new login works.
+  await confirmStop();
+  await page.getByText(/^Restarting services… \d+:\d\d$/).waitFor();
+  // A reload while it runs still shows it, with the button off, until it ends.
+  await page.reload();
+  await page.getByText(/^Restarting services… \d+:\d\d$/).waitFor();
+  assert.equal(await stop.isDisabled(), true);
+  await page.getByRole('status').filter({hasText: 'Everything stopped. The agent has a new login.'}).last().waitFor();
+  assert.deepEqual(
+    posts.map(post => post.path),
+    Array.from({length: 7}, () => ['/keys/stop', '/keys/agent-login']).flat(),
+  );
+  assert.equal(new Set(posts.filter(post => post.path === '/keys/stop').map(post => post.body.operation_id)).size, 7);
+  assert.equal(await page.getByRole('alert').count(), 0);
+  await page.getByTestId('keys-last-stop').getByText('Last stopped just now: 0 keys, 1 card, 1 run ended.').waitFor();
+  assert.equal(await stop.isEnabled(), true);
   assert.deepEqual(problems, []);
   await page.close();
 });

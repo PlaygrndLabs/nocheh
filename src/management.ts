@@ -92,7 +92,7 @@ function python(body: unknown, progress?: (value: Record<string, unknown>) => vo
     started?.(child);
     let buffer = '', result: unknown, failure: string | undefined;
     // Lifecycle operations must finish their cleanup; do not kill a backup with writers paused.
-    const lifecycle = object(body).operation === 'operations.run' || object(body).operation === 'settings.apply';
+    const lifecycle = object(body).operation === 'operations.run' || object(body).operation === 'settings.apply' || object(body).operation === 'settings.agent_login';
     const timer = lifecycle ? undefined : setTimeout(() => child.kill('SIGKILL'), 15 * 60 * 1000);
     child.stdout.setEncoding('utf8');
     child.stdout.on('data', (chunk: string) => {
@@ -145,7 +145,7 @@ function launch(job: Job, body: Record<string, unknown>, coordinator?:string) {
   }).catch(async error => {
     await writes.catch(() => {});
     if (job.state !== 'cancelled') { job.state = 'failed'; job.error = error instanceof HttpError ? error.code : 'operation_failed'; }
-  }).finally(async () => {try{await putJob(job);}finally{active.delete(job.id); activeJobs.delete(job.id); if(job.kind.startsWith('operations.')||job.kind==='settings.apply') operationBusy=false;if(coordinator)maintenance.end(coordinator);} });
+  }).finally(async () => {try{await putJob(job);}finally{active.delete(job.id); activeJobs.delete(job.id); if(job.kind.startsWith('operations.')||job.kind==='settings.apply'||job.kind==='settings.agent_login') operationBusy=false;if(coordinator)maintenance.end(coordinator);} });
   runningTasks.add(task); void task.finally(()=>runningTasks.delete(task)).catch(()=>{});
   activeJobs.set(job.id, job);
 }
@@ -464,6 +464,18 @@ export async function startManagement() {
         const body = object(await readJson(req));
         return json(res, 200, await python({operation: 'settings.save', changes: body.changes, revision: body.revision, rebuild_memory: body.rebuild_memory===true}));
       });
+      // "Stop everything now" (ADR-0307): after storage ended every key, a new agent login, applied as Apply is. The browser
+      // alone may ask, never the mini app or a token.
+      if (req.method === 'POST' && route === '/keys/agent-login') {
+        if(caller!=='browser')throw new HttpError(403,'browser_session_required');
+        return exclusive('writer-start', async () => {
+          if(operationBusy||active.size)throw new HttpError(409,'wait_for_active_jobs');
+          operationBusy=true;
+          try {const job = await newJob('settings.agent_login'); job.state = 'running'; await putJob(job);
+            launch(job, {operation: 'settings.agent_login'}); return json(res, 202, job);
+          }catch(error){operationBusy=false;throw error;}
+        });
+      }
       if (req.method === 'POST' && route === '/settings/apply') return exclusive('writer-start', async () => {
         if(operationBusy||active.size)throw new HttpError(409,'wait_for_active_jobs');
         operationBusy=true;

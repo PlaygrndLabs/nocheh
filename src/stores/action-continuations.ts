@@ -47,12 +47,16 @@ CREATE TRIGGER action_continuation_requested AFTER UPDATE OF state ON controlled
 `;
 
 const protocol='action-continuation-v1';
-const maxAttempts=3,chainLimit=3,askingWaitMs=600000,receiptWaitMs=120000,siblingWaitMs=120000;
+/** A follow-up runs at most this many times; a failed one under it waits to run again ("Stop everything now" reads it). */
+export const continuationMaxAttempts=3;
+const maxAttempts=continuationMaxAttempts,chainLimit=3,askingWaitMs=600000,receiptWaitMs=120000,siblingWaitMs=120000;
 const closedRows=new Set(['done','ambiguous','suppressed','cancelled','skipped']);
 const renewedCodes=['guard_context_changed','audience_context_changed','guard_transition_pending'];
 const withdrawnCodes=[...renewedCodes,'conversation_not_selected','source_retired',
   // The asker can no longer be named (they stopped being a member): no key, so the follow-up is withdrawn (ADR-0305).
-  'one_time_key_person_required'];
+  'one_time_key_person_required',
+  // Its key was closed (a member paused or removed, or "Stop everything now"): it is not sent and not run again (ADR-0307).
+  'one_time_key_closed'];
 /** Names the continuation in AsyncRuns, the gateway receipt and the archived result; never an integer, so it cannot meet a message turn's. */
 export const continuationAttempt=(leader:string,attempts:number)=>'c'+attempts+'-'+leader.slice(0,40);
 /** A leader counts once it started, or from its claim while it has yet to start. */
@@ -166,6 +170,8 @@ export class ActionContinuationRepository {
       if(!(error instanceof HttpError)||!withdrawnCodes.includes(error.code))throw error;
       withdrawn=error.code;
     }
+    // A turn whose key was closed ends here, however it ended: it is not sent and not run again under a new key (ADR-0307).
+    if(withdrawn==='one_time_key_closed'&&state!=='done')return await this.storeResult(row,{state:'cancelled'});
     if(state!=='done') {
       if(credential)await finishPresence(this.call,replyTarget(input,attempt,credential),unansweredFinish(state));
       return await this.storeResult(row,state==='ambiguous'?{...receipt,state:'failed',error_code:'assistant_runtime_unavailable'}:receipt);
@@ -232,7 +238,8 @@ export class ActionContinuationRepository {
           }
           if(renewed)return await this.receive(row,observed);
           if(observed.state==='not_found')return await this.storeResult(row,{state:'cancelled'});
-          try{return await this.receive(row,await this.agent.cancelTurn({channel:'telegram',event_id:row.event_id,attempt}));}
+          try{const cancelled=await this.agent.cancelTurn({channel:'telegram',event_id:row.event_id,attempt});
+            return await this.receive(row,error.code==='one_time_key_closed'&&['failed','ambiguous'].includes(String(cancelled.state))?{state:'cancelled'}:cancelled);}
           catch{return await this.receive(row,{state:'running'});}
         }
         if(!['not_found','queued'].includes(String(observed.state))) {

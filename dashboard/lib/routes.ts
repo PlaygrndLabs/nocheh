@@ -10,6 +10,7 @@ export const pageIds = [
   'schedules',
   'chats',
   'members',
+  'keys',
   'messages',
   'memory',
   'usage',

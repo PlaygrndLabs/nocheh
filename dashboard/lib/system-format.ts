@@ -271,6 +271,7 @@ export const routeName = (part: string, label?: string): string => routeParts[pa
 
 const jobs: Record<string, string> = {
   'settings.apply': 'Apply settings',
+  'settings.agent_login': 'New agent login',
   'operations.diagnose': 'Service check',
   'operations.export': 'Archive export',
   'operations.portable-export': 'Archive and memory export',

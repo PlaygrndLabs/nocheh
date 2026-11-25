@@ -191,6 +191,10 @@ def dispatch(body):
         if operation == 'settings.apply':
             # Each step is one progress line; only the last line carries the result.
             return apply(state, lambda step: print(json.dumps({'step': step}), flush=True))
+        if operation == 'settings.agent_login':
+            # "Stop everything now" (ADR-0307): a new agent login, applied as Apply is, with the same progress lines.
+            from tools.operations.installation.settings import rotate_agent_login
+            return rotate_agent_login(state, lambda step: print(json.dumps({'step': step}), flush=True))
     if operation.startswith('notion.'):
         # The owner's Notion sign-in; no answer ever carries a token.
         from tools.operations.connections import notion
