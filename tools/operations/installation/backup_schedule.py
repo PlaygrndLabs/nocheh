@@ -8,7 +8,7 @@ Every backup, from the dashboard or the command line, records how it ended in HE
 reads it, with the schedule's and the off-site copy's records, for System › Health and the
 owner's Telegram notice (ADR-0251).
 
-The set time is in the owner's time zone (Settings › General), the one every part of Nocheh follows."""
+The set time is in the owner's time zone (Settings › General), the one every part of Nocheh follows (owner_zone.py)."""
 import json
 import os
 import shutil
@@ -20,6 +20,7 @@ from pathlib import Path
 from zoneinfo import ZoneInfo
 from tools.operations.installation.admin_operations import identifier
 from tools.operations.installation.configuration import load
+from tools.operations.installation.owner_zone import owner_zone
 
 RECORD = 'admin/backup-schedule.json'
 # Outside the folders a backup copies, so a restored copy never inherits the record of the backup that made it.
@@ -34,28 +35,6 @@ def settings(values, zone='UTC'):
     return {'enabled': values['NOCHEH_BACKUP_SCHEDULE'] == 'daily', 'time': values['NOCHEH_BACKUP_TIME'],
             'hour': hour, 'minute': minute, 'time_zone': zone,
             'keep': int(values['NOCHEH_BACKUP_KEEP'])}
-
-
-def _known(zone):
-    try: return isinstance(zone, str) and 0 < len(zone) <= 64 and ZoneInfo(zone) is not None
-    except Exception: return False
-
-
-def _ask_owner_zone():
-    """The owner's time zone as Nocheh has it now; raises when Nocheh can't answer."""
-    from tools.operations.archive.archive import API
-    return API().call('/internal/owner-time-zone', timeout=5).get('time_zone')
-
-
-def owner_zone(record):
-    """The owner's time zone, and whether it was read just now. While Nocheh can't answer, such as during a
-    restart, the one the schedule last read is used, else UTC, so a short outage never moves a backup."""
-    try:
-        zone = _ask_owner_zone()
-        if _known(zone): return zone, True
-    except Exception: pass
-    saved = (record or {}).get('time_zone')
-    return (saved if _known(saved) else 'UTC'), False
 
 
 def _now(now):
@@ -147,9 +126,7 @@ def _free(state):
 
 
 def due(state, now=None):
-    now = _now(now); record = _record(state, now); zone, fresh = owner_zone(record)
-    if fresh and record.get('time_zone') != zone: record['time_zone'] = zone; _write(state, record)
-    schedule = settings(load(state), zone); record = prune(state, record, schedule['keep'], now)
+    now = _now(now); schedule = settings(load(state), owner_zone(state)); record = prune(state, _record(state, now), schedule['keep'], now)
     if not schedule['enabled'] or datetime.fromisoformat(record['last_attempt']) >= last_moment(now, schedule):
         return {'due': False}
     root = Path(state) / 'admin/backups'; root.mkdir(parents=True, exist_ok=True, mode=0o700)
@@ -251,7 +228,7 @@ def health(state, values=None, now=None, details=False):
 
 def status(state, now=None):
     """What System › Backups shows about the schedule."""
-    now = _now(now); record = _read(state) or {'automatic': []}; schedule = settings(load(state), owner_zone(record)[0])
+    now = _now(now); schedule = settings(load(state), owner_zone(state)); record = _read(state) or {'automatic': []}
     upcoming = last_moment(now, schedule) + timedelta(days=1)
     if record.get('last_attempt') and datetime.fromisoformat(record['last_attempt']) < last_moment(now, schedule):
         upcoming = now

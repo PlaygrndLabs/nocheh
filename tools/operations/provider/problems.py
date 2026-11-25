@@ -16,6 +16,7 @@ import re
 import tempfile
 from datetime import datetime, timezone
 from pathlib import Path
+from zoneinfo import ZoneInfo
 
 RECORD = 'admin/problem-notices.json'
 QUIET_SECONDS = 3600
@@ -259,8 +260,9 @@ def why(problem):
     return ', '.join(f'{count} {words}' for words, (count, _) in ordered)
 
 
-def text(problem, new):
-    """One plain line for the owner. `new` is how much the count grew since the last notice."""
+def text(problem, new, zone='UTC'):
+    """One plain line for the owner, its times in the owner's time zone. `new` is how much the count grew since the
+    last notice."""
     kind, count = problem['kind'], problem['count']
     if kind == 'application':
         return 'Nocheh’s main service isn’t answering. Messages may not be saved or answered.'
@@ -283,7 +285,7 @@ def text(problem, new):
         return f"{_plural(count, 'send to a chat app', 'sends to chat apps')} failed in the last day."
     if kind == 'telegram':
         reason = TELEGRAM_REASONS.get(problem.get('reason'), 'the connection failed')
-        return f"Telegram stopped working at {problem['at'][:16].replace('T', ' ')} UTC: {reason}."
+        return f"Telegram stopped working at {_moment(problem['at'], zone)}: {reason}."
     if kind == 'github':
         return 'GitHub refused Nocheh’s app. Jobs keep the copies they have; connect GitHub again in Connections › GitHub app.'
     if kind == 'reader':
@@ -481,21 +483,33 @@ def cleared(watch, current, seen, totals=None):
     return kind == 'telegram' or problem is None
 
 
-def _when(at, since):
-    """A time in the notice's words: the hour on the notice's own day, else with the date."""
-    moment, start = datetime.fromtimestamp(at, timezone.utc), datetime.fromtimestamp(since, timezone.utc)
-    return moment.strftime('%H:%M UTC' if moment.date() == start.date() else '%Y-%m-%d %H:%M UTC')
+def _moment(at, zone):
+    """An ISO time as a date and minute in the owner's time zone; UTC is named, since it is nobody's own clock."""
+    try: moment = datetime.fromisoformat(at.replace('Z', '+00:00'))
+    except (AttributeError, ValueError): return str(at)[:16].replace('T', ' ') + ' UTC'
+    if moment.tzinfo is None: moment = moment.replace(tzinfo=timezone.utc)
+    shown = moment.astimezone(ZoneInfo(zone)).strftime('%Y-%m-%d %H:%M')
+    return shown + ' UTC' if zone == 'UTC' else shown
 
 
-def resolution(line, since):
+def _when(at, since, zone='UTC'):
+    """A time in the notice's words, in the owner's time zone (ADR-0311): the hour on the notice's own day, else with
+    the date. UTC is named, since it is nobody's own clock."""
+    place = ZoneInfo(zone)
+    moment, start = datetime.fromtimestamp(at, place), datetime.fromtimestamp(since, place)
+    shown = moment.strftime('%H:%M' if moment.date() == start.date() else '%Y-%m-%d %H:%M')
+    return shown + ' UTC' if zone == 'UTC' else shown
+
+
+def resolution(line, since, zone='UTC'):
     """The short status shown on its own line under a notice line whose problem cleared, or None while it is open."""
     if line.get('done') is None:
         return None
     worked = all(watch['kind'] in COUNTED_TODAY for watch in line['watch'])
-    return f"{'Working again since' if worked else 'Fixed at'} {_when(line['done'], since)}"
+    return f"{'Working again since' if worked else 'Fixed at'} {_when(line['done'], since, zone)}"
 
 
-def follow_up(record, current, seen, now, values, send):
+def follow_up(record, current, seen, now, values, send, zone='UTC'):
     """Marks ✅ the lines of sent notices whose problem cleared, by editing each notice in place, and takes the ✅
     back when the problem returns before a new notice may tell about it. A notice whose lines have all cleared
     loses its buttons, and is followed until its quiet hour is over. An edit that does not go through is tried
@@ -514,7 +528,7 @@ def follow_up(record, current, seen, now, values, send):
             elif line.get('done') is None and all([cleared(watch, found, seen, totals) for watch in line['watch']]):
                 line['done'] = now
         texts = [line['text'] for line in notice['lines']]
-        statuses = [resolution(line, notice['at']) for line in notice['lines']]
+        statuses = [resolution(line, notice['at'], zone) for line in notice['lines']]
         # Each line as the owner sees it: the problem as sent, and under it how it cleared.
         lines = [[text, mark] for text, mark in zip(texts, statuses)]
         done = [mark is not None for mark in statuses]
@@ -589,10 +603,15 @@ def check(state, monitoring=None, usage_rows=None, send=None, now=None, enabled=
     if send is None:
         from tools.operations.archive.archive import API
         send = lambda body: API().call('/v1/runtime/owner-notice', body, timeout=60)
+    # The owner's time zone, asked once and only when a notice shows a time (ADR-0311).
+    zone = None
+    if enabled and (record.get('notices') or report):
+        from tools.operations.installation.owner_zone import owner_zone
+        zone = owner_zone(state)
     if enabled:
-        result['edited'] = follow_up(record, current, seen, now, values, send)
+        result['edited'] = follow_up(record, current, seen, now, values, send, zone or 'UTC')
     if report and enabled:
-        lines = [text(problem, new) for problem, new in report][:MAX_LINES]
+        lines = [text(problem, new, zone or 'UTC') for problem, new in report][:MAX_LINES]
         # Each line and the problems it tells about; the last line may stand for the rest.
         groups = [[item] for item in report[:MAX_LINES]]
         if len(report) > MAX_LINES:
