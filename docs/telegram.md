@@ -556,8 +556,10 @@ record of its own from the app (`reminder_refused`, `reminder_unconfirmed`), so
 it shows on Health too ([ADR-0255](adr/0255-reminders-say-who-set-them.md)). A failed or uncertain try followed within 15
 minutes by a sent one with the same chat, method and dispatch key, such as a
 plain-text resend or a retry after a rate limit, shows as sent on a retry. It,
-an unchanged edit, an expired button answer and a reaction the chat does not
-allow are listed but never counted as problems. So is a leave Telegram answers
+an unchanged edit, an expired button answer, a reaction the chat does not
+allow and a reaction to a message that is gone, such as one its sender deleted
+([ADR-0310](adr/0310-a-reaction-to-a-gone-message-is-not-a-problem.md)), are
+listed but never counted as problems. So is a leave Telegram answers
 as gone (any 403, or "chat not found", "not a member" and the like): it reads
 "Nocheh was no longer in the chat", and it also clears an earlier failed or
 uncertain try of the same leave within 15 minutes. A failed or uncertain leave

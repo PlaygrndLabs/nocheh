@@ -4,6 +4,23 @@
  */
 import {href, type PageId} from './routes';
 
+/** Each page's name, as the sidebar and the search show it. */
+export const pageTitles: Record<PageId, string> = {
+  home: 'Home',
+  inbox: 'Inbox',
+  tasks: 'Tasks',
+  schedules: 'Schedules',
+  chats: 'Chats',
+  members: 'Members',
+  keys: 'Keys',
+  messages: 'Messages',
+  memory: 'Memory',
+  usage: 'Usage',
+  system: 'System',
+  connections: 'Connections',
+  settings: 'Settings',
+};
+
 export const pageTabs = {
   inbox: {waiting: 'Waiting', allowed: 'Allowed actions', history: 'History'},
   tasks: {

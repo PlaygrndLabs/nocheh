@@ -13,6 +13,7 @@ import {existsSync, rmSync, writeFileSync} from 'node:fs';
 import {chromium} from 'playwright-core';
 import {accountIdFor, chatIdFor, chatShortId} from '../dist/src/chats.js';
 import {memberIdFor} from '../dist/src/members.js';
+import {build} from 'esbuild';
 
 const port = Number(process.env.NOCHEH_DASHBOARD_PORT || 18900 + Math.floor(Math.random() * 500));
 const origin = `http://127.0.0.1:${port}`;
@@ -4749,6 +4750,113 @@ test('a note Nocheh wrote while answering names its day once, in its own words',
     new Date(2026, 10, 12).toLocaleDateString(undefined, {day: 'numeric', month: 'short', year: 'numeric'}),
   );
   assert.equal(await turn.getByText(day, {exact: true}).count(), 0);
+  assert.deepEqual(problems, []);
+  await page.close();
+});
+
+/** The search's own list of pages and settings (dashboard/lib/search.ts). */
+async function searchItems() {
+  const compiled = await build({
+    entryPoints: ['dashboard/lib/search.ts'],
+    bundle: true,
+    write: false,
+    format: 'esm',
+    platform: 'node',
+  });
+  const {staticItems} = await import(
+    'data:text/javascript;base64,' + Buffer.from(compiled.outputFiles[0].text).toString('base64')
+  );
+  return staticItems();
+}
+/** Opens the search with the keyboard and types into it. */
+async function search(page, text) {
+  await page.keyboard.press('Control+k');
+  const box = page.getByRole('combobox', {name: 'Search the dashboard'});
+  await box.fill(text);
+  return box;
+}
+const results = (page, group) => page.getByRole('listbox', {name: 'Results'}).getByRole('group', {name: group});
+
+test('Cmd+K search finds pages, settings, chats, members, people, projects, tasks and schedules and opens them', async () => {
+  const {page, problems} = await open('home');
+  // Before anything is typed it lists every page; Escape closes it, and the sidebar button opens it too.
+  await page.keyboard.press('Control+k');
+  assert.equal(await page.getByRole('option').count(), pages.length);
+  await page.keyboard.press('Escape');
+  await page.getByRole('dialog').waitFor({state: 'detached'});
+  await page.getByRole('button', {name: /^Search/}).click();
+  await page.keyboard.press('Escape');
+  const cases = [
+    ['mira', 'Chats', 'Mira Chen', /#chats\?chat=73$/],
+    ['mira', 'Members', 'Mira Chen', new RegExp('#members\\?member=' + MIRA + '$')],
+    ['mira', 'People', 'Mira Chen', /#memory\?view=people&person=\w+$/],
+    ['aurora', 'Projects', 'Aurora field guide', /#memory\?view=projects&project=\w+$/],
+    ['rent', 'Tasks', 'Pay the rent', /#tasks\?task=\w+$/],
+    ['brief', 'Schedules', 'Morning brief', /#schedules$/],
+    ['backups', 'Pages', 'Backups', /#system\?view=backups$/],
+    ['aurora', 'Messages', 'Search messages for “aurora”', /#messages\?q=aurora$/],
+  ];
+  for (const [text, group, title, address] of cases) {
+    await search(page, text);
+    const option = results(page, group).getByRole('option').filter({hasText: title}).first();
+    await option.waitFor();
+    await option.click();
+    await page.getByRole('dialog', {name: 'Search the dashboard'}).waitFor({state: 'detached'});
+    assert.match(page.url(), address, `${group}: ${title}`);
+    // A schedule has no page of its own: its row is shown.
+    if (group === 'Schedules') await page.locator('tr[data-search-found]', {hasText: title}).waitFor();
+  }
+  // The arrow keys and Enter pick a result.
+  const box = await search(page, 'speed');
+  await results(page, 'Settings').getByRole('option').first().waitFor();
+  await box.press('ArrowDown');
+  assert.match(await page.getByRole('option', {selected: true}).textContent(), /^Chats answered at once/);
+  await box.press('Enter');
+  await page.waitForFunction(() => document.activeElement?.id === 'NOCHEH_PARALLEL_REPLIES');
+  assert.match(page.url(), /#settings\?view=speed$/);
+  assert.deepEqual(problems, []);
+  await page.close();
+});
+
+test('every setting the search lists opens its tab and shows that setting', async () => {
+  // Off-site and backup settings show only when the installation has them; the preview has no backup schedule.
+  const notInPreview = ['Automatic backups'];
+  const settings = (await searchItems()).filter(item => item.group === 'Settings');
+  const {page, problems} = await open('home');
+  for (const item of settings) {
+    await search(page, item.title);
+    const first = page.getByRole('option').first();
+    await first.waitFor();
+    assert.equal((await first.locator('span').first().textContent()).trim(), item.title, 'best match: ' + item.title);
+    await page.keyboard.press('Enter');
+    assert.ok(page.url().endsWith(item.href), item.title);
+    if (notInPreview.includes(item.title)) continue;
+    const shown = await page.waitForFunction(
+      target => {
+        const found = document.querySelector('main [data-search-found]');
+        if (!found) return false;
+        return 'id' in target
+          ? found.id === target.id || !!found.querySelector('[id="' + CSS.escape(target.id) + '"]')
+          : found.textContent.includes(target.text);
+      },
+      item.target,
+      {timeout: 5000},
+    );
+    assert.ok(await shown.jsonValue(), item.title);
+  }
+  assert.deepEqual(problems, []);
+  await page.close();
+});
+
+test('the search opens from the phone header', async () => {
+  const {page, problems} = await open('home', {width: 390, height: 844});
+  await page.getByRole('banner').getByRole('button', {name: 'Search'}).click();
+  await page.getByRole('combobox', {name: 'Search the dashboard'}).fill('quiet');
+  await results(page, 'Settings')
+    .getByRole('option', {name: /Quiet hours/})
+    .click();
+  await page.waitForFunction(() => document.activeElement?.id === 'quiet-hours');
+  assert.match(page.url(), /#settings\?view=telegram&tab=activity$/);
   assert.deepEqual(problems, []);
   await page.close();
 });

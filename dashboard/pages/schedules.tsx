@@ -8,6 +8,7 @@ import {CalendarClock, History, Pause, Play, PlayCircle, Trash2} from 'lucide-re
 import {apiPost} from '../lib/api';
 import {problemText} from '../lib/messages-format';
 import {refreshResources, useResource} from '../lib/resource';
+import {scheduleRowId} from '../lib/search';
 import {ago, dateTime, duration} from '../lib/system-format';
 import {Badge, Button, Card, Empty, LoadError, LoadingRows, Table, Td, Th, type Tone} from '../ui/core';
 import {useFeedback} from '../ui/overlay';
@@ -222,7 +223,7 @@ function ScheduleRow({row}: {row: Schedule}) {
   };
   return (
     <>
-      <tr>
+      <tr id={scheduleRowId(row)}>
         <Td>
           <div className="font-medium" dir="auto">
             {row.name || 'Unnamed schedule'}

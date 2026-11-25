@@ -519,7 +519,7 @@ const chatSends:any[]=[];
  send(12,'reaction','setMessageReaction','42',{detail:'👀'});
  send(11,'reply','sendMessage','42');
  send(10,'reaction','setMessageReaction','42',{detail:'clear'});}
-const sendProblem=(row:any)=>['failed','uncertain'].includes(row.state)&&!harmlessSends.includes(row.error_code)&&!row.recovered;
+const sendProblem=(row:any)=>['failed','uncertain'].includes(row.state)&&!harmlessSends.includes(row.error_code)&&!(row.kind==='reaction'&&row.error_code==='message_not_found')&&!row.recovered;
 for(const row of chatSends)Object.assign(row,{problem:sendProblem(row),recovered:row.recovered===true});
 /** Storage's /v1/status chat_sends: the last day's outcomes; the newest problem is any age. */
 function chatSendSummary(){const since=Date.now()-864e5,day=chatSends.filter(row=>Date.parse(row.at)>since),problems=day.filter(sendProblem),n=(state:string)=>day.filter(row=>row.state===state).length;
