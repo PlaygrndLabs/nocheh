@@ -68,6 +68,9 @@ OTHERS_WROTE=re.compile(r'\\*"others_wrote\\*"\s*:\s*true')
 # A long-term memory recall that answers with memory's own reasoning (memory_inference) or the facts it read reads what
 # everyone in the owner's chats said; one that holds only the owner's corrections, or nothing, reads nothing outside.
 RECALL='mcp__nocheh__memory_recall'
+# Hermes's own schedule tool (schedule_gate.TOOL) and the key its list result holds every schedule under (schedule_gate.KEPT).
+SCHEDULES='cronjob_manage'
+LISTED=re.compile(r'\\*"jobs\\*"\s*:')
 INFERRED=re.compile(r'\\*"kind\\*"\s*:\s*\\*"memory_inference\\*"')
 # The lines Nocheh puts in a turn's message, which stay in its session until a compaction: what earlier turns read.
 MARKERS=(('[Forwarded: ','forward'),('[Archived attachment: ','file'),('[Recent messages in this group','recent'))
@@ -373,12 +376,20 @@ def recall_read(content):
     return 'memory' if isinstance(content,str) and INFERRED.search(content) else None
 
 
+def schedule_read(content):
+    """The read token of Hermes's own schedule tool's result: none for what it set, changed or removed, which is this
+    turn's own doing, but other for a list. A list shows every schedule's prompt, and a schedule saved paused had its
+    prompt shaped by outside content (ADR-0294). A result that is not text counts as other."""
+    return None if isinstance(content,str) and not LISTED.search(content) else 'other'
+
+
 def tool_read(row):
     """The read token of a stored tool result, by its tool's name, or None for a tool that is not an outside read. A row
     without a tool name, as an older schema stores it, is another tool."""
     name=row.get('tool_name')
     if name==TASKS:return task_read(row.get('content'))
     if name==RECALL:return recall_read(row.get('content'))
+    if name==SCHEDULES:return schedule_read(row.get('content'))
     return None if name in NOT_READS else TOOL_READS.get(name,'other')
 
 

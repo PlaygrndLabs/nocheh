@@ -547,6 +547,20 @@ class GateTests(unittest.TestCase):
         # In the owner's chat a task list holds what members and groups wrote, so it counts whoever's it is.
         self.assertEqual(sources.gate_read('mcp__nocheh__tasks','{"other_groups": true}'),'archive')
 
+    def test_a_schedule_the_turn_set_is_not_a_read_but_a_list_of_schedules_is(self):
+        # Setting a schedule leaves its result in the session; a later "remind me" there must not be saved paused for it.
+        # A list shows the prompts of schedules that outside content may have shaped, so it still counts.
+        created=json.dumps({'success':True,'job_id':'a'*12,'name':'Water','schedule':'every 1m','job':{'prompt':'Drink water'}})
+        self.assertIsNone(sources.gate_read('cronjob_manage',created))
+        self.assertIsNone(sources.gate_read('cronjob_manage','{"success": true, "removed_job": {"name": "Water"}}'))
+        self.assertEqual(sources.gate_read('cronjob_manage',json.dumps({'success':True,'count':1,'jobs':[{'prompt':'x'}]})),'other')
+        self.assertEqual(sources.gate_read('cronjob_manage','{\\"jobs\\": []}'),'other','escaped, as a stored result holds it')
+        self.assertEqual(sources.gate_read('cronjob_manage',None),'other')
+        with tempfile.TemporaryDirectory() as folder:
+            path=self.database(folder,[{'role':'user','content':'Remind me every morning'},
+                                       {'role':'tool','content':created,'tool_name':'cronjob_manage'}])
+            self.assertEqual(sources.conversation_reads(path,'s',{}),[])
+
     def test_every_token_is_one_storage_takes(self):
         # Storage refuses a turn read it does not know with 400, which stops the turn (src/stores/turn-reads.ts). A recall
         # that holds memory's reasoning labels notes 'memory', but is no turn read.
@@ -555,7 +569,7 @@ class GateTests(unittest.TestCase):
         recall='{"sources":[{"kind":"memory_inference","text":"likes tea"}]}'
         self.assertEqual(sources.recall_read(recall),'memory')
         self.assertIsNone(sources.gate_read('mcp__nocheh__memory_recall',recall))
-        for name in [*sources.TOOL_READS,*sources.NOT_READS,*sources.GATE_IGNORED,'mcp__nocheh__tasks','mcp__nocheh__memory_recall','some_new_tool']:
+        for name in [*sources.TOOL_READS,*sources.NOT_READS,*sources.GATE_IGNORED,'mcp__nocheh__tasks','mcp__nocheh__memory_recall','cronjob_manage','some_new_tool']:
             for content in ('result',recall,'{"others_wrote": true}','{"other_groups": true}'):
                 token=sources.gate_read(name,content)
                 with self.subTest(name=name,content=content):self.assertTrue(token is None or token in known,token)

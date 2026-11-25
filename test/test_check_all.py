@@ -123,6 +123,9 @@ class HealthTests(unittest.TestCase):
         text = '\n'.join(full_test.health_lines(row))
         for part in ('hermes restarted 4 times', 'Python traceback: hermes 2', 'memory_review running: 1', '3 failed'):
             self.assertIn(part, text)
+        # Work still going when the last scenario ended got time to finish; the report says how long.
+        waited = '\n'.join(full_test.health_lines({**row, 'observed': {**row['observed'], 'waited_seconds': 300}}))
+        self.assertIn('Work left in Nocheh (after waiting 300 s for work still going to finish): memory_review running: 1', waited)
 
 
 if __name__ == '__main__':

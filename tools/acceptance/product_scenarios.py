@@ -16,6 +16,7 @@ import io
 import json
 import os
 import re
+import socket
 import subprocess
 import threading
 import time
@@ -4751,6 +4752,125 @@ class ProductScenarios(Scenarios):
             for item in items:
                 self.remove_member(item)
 
+    # Schedules set by asking (test plan step 3) ---------------------------------
+
+    @staticmethod
+    def schedule_request(arguments):
+        """A cronjob_manage directive whose prompt may itself hold directives: they are written as JSON escapes, so the
+        scripted model reads them only in the schedule's own run, never in the turn that sets it."""
+        body = json.dumps(arguments, ensure_ascii=False).replace('[', '\\u005b').replace(']', '\\u005d')
+        return '[[tool:cronjob_manage '+body+']]'
+
+    def schedules_listed(self):
+        return self.f.app('/v1/agent/manage', {'action': 'schedules', 'operation': 'list'})['schedules']
+
+    def scheduler_runs(self, scope, started, done_only=True):
+        """The scheduler's runs in `scope` since `started`, oldest first: [{id, state}]."""
+        found = self.f.query('nocheh_control', "SELECT coalesce(json_agg(json_build_object('id',event_id,'state',state,'error',error_code) ORDER BY created_at),'[]') "
+                             "FROM managed_runs WHERE channel='scheduler' AND scope='"+scope+"' AND created_at>='"+started+"'"
+                             + (" AND state='done'" if done_only else ''))
+        return json.loads(found or '[]')
+
+    def schedule_notice(self, before, chat, job, kind):
+        """The notice about `job` sent to `chat` since `before` with the button of `kind` (p pause, s start, d delete)."""
+        return next((row for row in self.f.sent()[before:] if row['message']['chat']['id'] == chat
+                     and any(str(button.get('callback_data') or '').startswith('nk'+kind) and str(button['callback_data']).endswith(job)
+                             for button in self.buttons(row))), None)
+
+    def schedule_runs_tools_quietly_and_pauses_by_button(self):
+        # The owner asks in their private chat for a schedule whose run reads their tasks and conversations and has nothing to
+        # send. Each tool answers through the whole chain (Hermes, broker, storage) with no error, the run answers
+        # [NO_REPLY], nothing is sent, and the run log says nothing new (ADR-0266). Pause on the schedule's notice in
+        # Telegram stops it: no later run, and the notice loses its buttons. The owner then deletes it as the Schedules
+        # page does.
+        number = str(self.f.ids())
+        mark, name = 'QUIETSCHED'+number, 'Quiet check '+number
+        prompt = ('[[tool:mcp__nocheh__tasks '+json.dumps({'action': 'list', 'q': mark})+']] '
+                  '[[tool:mcp__nocheh__owner_read {"view":"conversations"}]] [[after:silent]]')
+        started = self.f.query('nocheh_control', 'SELECT now()')
+        before, events = len(self.f.sent()), len(self.f.agent())
+        self.turn(self.f.message(OWNER, 'هر دقیقه چک کن '+self.schedule_request({'action': 'create', 'name': name, 'prompt': prompt,
+                                                                             'schedule': 'every 1m', 'repeat': 3})), OWNER)
+        job = next((row for row in self.schedules_listed() if row['name'] == name), None)
+        self.gate('schedule_created', job is not None and job.get('enabled') is not False, job=job and job['id'])
+        notice = self.schedule_notice(before, OWNER, job['id'], 'p')
+        self.gate('notice_has_pause_and_delete', notice is not None
+                  and [button['callback_data'][:3] for button in self.buttons(notice)] == ['nkp', 'nkd'])
+        try:
+            after_notice = len(self.f.sent())
+            runs = self.wait('scheduled_run_done', lambda: self.scheduler_runs(job['scope'], started), 300)
+            calls = [event for event in self.f.agent()[events:] if event.get('phase') == 'final'
+                     and (event.get('tool') == 'mcp__nocheh__tasks' and mark in str(event.get('argument'))
+                          or event.get('tool') == 'mcp__nocheh__owner_read')]
+            self.current['observed'] = {'calls': [{'tool': event['tool'], 'result': str(event.get('result'))[:300]} for event in calls]}
+            self.gate('run_called_both_tools', {event['tool'] for event in calls} == {'mcp__nocheh__tasks', 'mcp__nocheh__owner_read'},
+                      tools=sorted({event['tool'] for event in calls}))
+            self.gate('tools_answered_without_error', all('"error"' not in str(event.get('result')) for event in calls))
+            sends = self.f.query('nocheh_control', "SELECT count(*) FROM telegram_action_requests WHERE source_reference->>'id'='"+runs[0]['id']+"'")
+            self.gate('silent_run_sends_nothing', sends == '0' and not self.replies(after_notice, OWNER), sends=sends)
+            log = self.f.app('/v1/schedules/runs?scope='+urllib.parse.quote(job['scope'])+'&job_id='+job['id'])['runs']
+            self.gate('run_log_says_nothing_new', bool(log) and log[0]['result'] == 'nothing_new', log=log[:2])
+            answer = self.tap(notice, next(button['callback_data'] for button in self.buttons(notice) if button['callback_data'].startswith('nkp')))
+            now = next((row for row in self.schedules_listed() if row['id'] == job['id']), {})
+            self.gate('pause_press_pauses', now.get('enabled') is False, answer=answer.get('text'), enabled=now.get('enabled'))
+            self.gate('notice_loses_its_buttons', not self.buttons(self.card_message(notice)))
+            time.sleep(80)
+            self.gate('paused_schedule_does_not_run', len(self.scheduler_runs(job['scope'], started, done_only=False)) == 1)
+        finally:
+            removed = self.f.app('/v1/agent/manage', {'action': 'schedules', 'operation': 'delete', 'profile': job['profile'], 'job_id': job['id'],
+                                                      'request_id': 'scenario-delete-'+job['id']})
+            self.gate('schedule_removed', removed == {'ok': True} and all(row['id'] != job['id'] for row in self.schedules_listed()))
+
+    def member_schedule_runs_in_their_own_chat(self):
+        # A member with Personal assistant on asks in their own private chat for a schedule (ADR-0277, ADR-0305). It is set
+        # as theirs, its notice goes to them, and its run's result goes to their chat with no card, for nobody else. With
+        # Personal assistant off it does not run. The member deletes it with the Delete button on its notice.
+        person, number = self.fresh_person(), str(self.f.ids())
+        mark, name = 'MEMBERSCHED'+number, 'Member reminder '+number
+        item = self.add_member(person, (GROUP,))
+        job = None
+        try:
+            item = self.change_member(item, assistant=True)
+            self.gate('personal_assistant_on', item['permissions'].get('assistant') is True, member=item)
+            started = self.f.query('nocheh_control', 'SELECT now()')
+            known, before = {row['id'] for row in self.proposals()}, len(self.f.sent())
+            self.private_turn(person, 'هر دقیقه یادم بنداز '+self.schedule_request({'action': 'create', 'name': name, 'prompt': 'یادآوری '+mark,
+                                                                                    'schedule': 'every 1m', 'repeat': 3}))
+            # Their private chat is in Nocheh's chat list once they wrote to it.
+            chat = self.f.chat(person)
+            job = next((row for row in self.schedules_listed() if row['name'] == name), None)
+            self.gate('schedule_set_in_member_chat', job is not None and job['scope'] == chat and job['deliver'] == 'telegram',
+                      job=job and {key: job.get(key) for key in ('id', 'scope', 'deliver')})
+            set_by = self.f.query('nocheh_control', "SELECT created_by FROM workflow_schedules WHERE logical_profile='"+job['profile']+"' AND job_id='"+job['id']+"'")
+            self.gate('schedule_set_by_the_member', set_by == item['id'], set_by=set_by)
+            notice = self.schedule_notice(before, person, job['id'], 'd')
+            self.gate('notice_goes_to_the_member', notice is not None and not self.schedule_notice(before, OWNER, job['id'], 'd'))
+            after_notice = len(self.f.sent())
+            self.wait('scheduled_run_done', lambda: self.scheduler_runs(chat, started), 300)
+            result = self.wait('result_staged', lambda: next((row for row in self.proposals() if row['id'] not in known
+                                                              and row['arguments']['destination'] == chat), None), 120)
+            self.wait('result_delivered', lambda: next(row for row in self.proposals() if row['id'] == result['id'])['state'] in ('done', 'ambiguous'), 240)
+            final = next(row for row in self.proposals() if row['id'] == result['id'])
+            self.gate('result_sent_to_member_without_card', final['state'] == 'done' and not self.cards_since(after_notice, person)
+                      and not self.cards_since(after_notice, OWNER), state=final['state'], error=final.get('error_code'))
+            self.gate('result_reaches_only_the_member', any(row['message']['text'] == final['arguments']['text'] for row in self.replies(after_notice, person))
+                      and not [row for row in self.f.sent()[after_notice:] if mark in str(row['message'].get('text')) and row['message']['chat']['id'] != person])
+            item = self.change_member(self.member_item(person), assistant=False)
+            done, sent = len(self.scheduler_runs(chat, started)), len(self.f.sent())
+            time.sleep(80)
+            self.gate('assistant_off_stops_the_schedule', len(self.scheduler_runs(chat, started)) == done and not self.replies(sent, person),
+                      runs=len(self.scheduler_runs(chat, started)), before=done)
+            item = self.change_member(self.member_item(person), assistant=True)
+            answer = self.tap(self.card_message(notice), next(button['callback_data'] for button in self.buttons(notice)
+                                                               if button['callback_data'].startswith('nkd')), presser=person)
+            self.gate('member_deletes_by_button', all(row['id'] != job['id'] for row in self.schedules_listed()), answer=answer.get('text'))
+            job = None
+        finally:
+            if job:
+                self.f.app('/v1/agent/manage', {'action': 'schedules', 'operation': 'delete', 'profile': job['profile'], 'job_id': job['id'],
+                                                'request_id': 'scenario-delete-'+job['id']}, allow_error=True)
+            self.remove_member(item)
+
     def member_private_over_the_daily_cap(self):
         # The daily message cap counts a member's group and private turns together: with the cap at 1, a member answered
         # in GROUP gets the private limit text, once a UTC day, and no model turn when they then write privately.
@@ -5607,6 +5727,90 @@ class ProductScenarios(Scenarios):
         found = canaries.leaks_reminders(state, set(everything) | {'Synthetic'}, OWNER)
         self.gate('no_mark_or_name_in_a_member_reminder', not found, leaks=found[:10])
 
+    # Backup and restore drill (test plan step 3) ---------------------------------
+
+    def backup_and_restore_drill(self):
+        # The owner's "Back up now" on the full, running copy, then a restore of that backup into a new, separate project
+        # (ADR-0251). The backup stops the services, saves everything and starts them again: each service that ran runs
+        # again and Nocheh answers once. The restore uses the production restore unchanged, with only the images of this
+        # run, and leaves the copy inactive: only its database runs and Telegram is off. Everything the live copy held just
+        # before the backup is there: no store table (Honcho's included), Hermes state.db table or kept file has fewer rows.
+        from tools.acceptance import upgrade_check
+        from tools.operations.installation import operations
+        from tools.operations.installation.configuration import compose_command, compose_environment
+        from unittest.mock import patch
+        state = self.f.directory/'state'
+        running = sorted(subprocess.check_output(self.f.command+['ps', '--services', '--status', 'running'], text=True).split())
+        before = upgrade_check.snapshot(self.f.command, self.f.directory)
+        asked = datetime.now(timezone.utc).isoformat()
+        job = self.dashboard().post('/operations', {'action': 'backup'})
+        self.gate('backup_started', job.get('state') == 'running', job=job)
+        # The fixture's relay and the fake Telegram stop with the rest, so the backup's own record says when it ends.
+        health = lambda: json.loads((state/'admin/backup-health.json').read_text()) if (state/'admin/backup-health.json').exists() else {}
+        record = self.wait('backup_finished', lambda: (lambda value: value if value.get('state') in ('complete', 'failed')
+                                                       and str(value.get('started_at') or '') >= asked else None)(health()), 900, 5)
+        self.gate('backup_complete', record.get('state') == 'complete', record=record)
+        back = self.wait('services_running_again', lambda: (lambda now: now if set(running) <= set(now) else None)(
+            subprocess.check_output(self.f.command+['ps', '--services', '--status', 'running'], text=True).split()), 300, 5)
+        self.gate('every_service_runs_again', set(running) <= set(back), missing=sorted(set(running)-set(back)))
+        finished = self.wait('backup_job_complete', lambda: (lambda value: value if value.get('state') != 'running' else None)(
+            self.dashboard().get('/jobs/'+job['id'])), 300, 5)
+        self.gate('backup_job_says_complete', finished.get('state') == 'complete', state=finished.get('state'), error=finished.get('error'))
+        sent = len(self.f.sent())
+        self.turn(self.f.message(OWNER, 'بعد از پشتیبان‌گیری هستی؟'), OWNER)
+        self.gate('answers_once_after_backup', len(self.replies(sent, OWNER)) == 1, replies=len(self.replies(sent, OWNER)))
+        snapshot = state/'admin/backups'/job['id']
+        images = json.loads((self.f.directory/'fixture.json').read_text())['images']
+        overlay = ROOT/'deploy/acceptance/coordinated-recovery-compose.yml'
+        project = 'nocheh-restore-drill-'+job['id'].replace('-', '')[:8]
+        drill = self.f.directory/'drill'
+        drill.mkdir(mode=0o700, exist_ok=True)
+        target = drill/'state'
+        command = lambda where, name=None: compose_command(where, name or project)+['-f', str(overlay)]
+        environment = lambda where: {**compose_environment(where), 'NOCHEH_RECOVERY_SERVICES_IMAGE': images['services'],
+                                     'NOCHEH_RECOVERY_POSTGRES_IMAGE': images['postgres'], 'NOCHEH_RECOVERY_HONCHO_IMAGE': images['honcho']}
+        # The copy's settings name the fixture's model at its plain-http address, which settings accept only inside an
+        # installation fixture, as installation-rehearsal.py runs.
+        fixture = patch.dict(os.environ, {'NOCHEH_INSTALLATION_FIXTURE': '1'})
+        fixture.start()
+        try:
+            with patch.object(operations, 'compose', side_effect=command), patch.object(operations, 'environment', side_effect=environment):
+                manifest = operations.validate_snapshot(snapshot)
+                self.gate('backup_holds_stores_workflows_and_memory', manifest['version'] == 6 and bool(manifest.get('workflows'))
+                          and bool(manifest.get('honcho')) and set(manifest['stores']['databases']) == {'archive', 'derived', 'control'},
+                          version=manifest['version'])
+                with socket.socket() as probe:
+                    probe.bind(('127.0.0.1', 0))
+                    port = probe.getsockname()[1]
+                restored = operations.restore(snapshot, target, project, port)
+            self.gate('restored_inactive', restored['status'] == 'restored_inactive' and restored['telegram_enabled'] is False,
+                      status=restored['status'], tables=len(restored['verified_tables']), files=restored['verified_state_files'])
+            restored_command, restored_env = command(target), environment(target)
+            only = subprocess.check_output(restored_command+['ps', '--services', '--status', 'running'], env=restored_env, text=True).split()
+            self.gate('only_the_restored_database_runs', only == ['nocheh-db'], running=only)
+            subprocess.run(restored_command+['--profile', 'honcho', 'up', '-d', '--no-deps', '--no-build', '--wait', 'honcho-postgres'],
+                           env=restored_env, check=True, capture_output=True)
+            after = {**upgrade_check.store_counts(restored_command), **upgrade_check.hermes_counts(drill), **upgrade_check.file_count(drill)}
+            missing = upgrade_check.lost(before, after)
+            self.current['observed'] = {'counted': len(before), 'missing': dict(list(missing.items())[:20])}
+            self.gate('restore_keeps_everything', bool(before) and not missing, missing=len(missing))
+            self.gate('restored_copy_waits_for_the_owner', (target/'spool/.restore-inactive').exists() and (target/'workflows/inactive').exists()
+                      and (target/'hermes/scheduler-inactive').exists())
+        finally:
+            try:
+                if (target/'.env').exists():
+                    subprocess.run(command(target)+['--profile', 'honcho', 'down', '--volumes'], env=environment(target), check=False, capture_output=True)
+            finally:
+                fixture.stop()
+                # Whatever the restore left behind, by its project's label, so a failure above never leaves it running.
+                for kind in ('container', 'volume', 'network'):
+                    found = subprocess.run(['docker', kind, 'ls', '-q', *(['-a'] if kind == 'container' else []),
+                                            '--filter', 'label=com.docker.compose.project='+project], capture_output=True, text=True).stdout.split()
+                    if found:
+                        subprocess.run(['docker', kind, 'rm', *(['-f'] if kind == 'container' else []), *found], check=False, capture_output=True)
+                for volume in (project+'_honcho_database', project+'_honcho_redis', project+'_postgres_data'):
+                    subprocess.run(['docker', 'volume', 'rm', volume], check=False, capture_output=True)
+
     # Owner dashboard session ------------------------------------------------------------------------
 
     def dashboard(self):
@@ -5653,10 +5857,14 @@ PRODUCT_ORDER = ['group_members', 'group_name_addresses', 'unaddressed_messages_
                  # A member's own private chat (step 4) and the owner's ask about it (step 4b), ADR-0262; the ask needs the marks
                  # the scenario before it planted, and the sweep after them reads both.
                  'member_private_chat_reads_joined_groups', 'member_private_chat_with_group_talk_off', 'member_private_chat_off_or_paused_gets_fixed_reply',
+                 # Schedules set by asking (test plan step 3): the owner's quiet run and Pause, a member's own schedule.
+                 'schedule_runs_tools_quietly_and_pauses_by_button', 'member_schedule_runs_in_their_own_chat',
                  'member_private_over_the_daily_cap', 'owner_and_member_never_swap_profiles', 'member_chat_is_never_a_sharing_source',
                  'member_private_chat_rechecks_old_presence', 'member_private_chat_stays_with_the_member', 'owner_asks_about_a_member',
                  # The members' app (step 5), ADR-0265; its sweep reads every answer the scenarios before it got, and the
                  # reminders scenario 5 and the app's own sent to members' chats.
                  'owner_mini_app_still_works', 'menu_button_on_apply', 'member_app_tasks', 'member_app_ends_on_removal', 'member_app_drops_a_left_group',
                  'member_app_sees_whole_project', 'member_app_reminder_goes_to_setter', 'member_app_never_leaks',
-                 'private_canaries_never_left_the_owner']
+                 'private_canaries_never_left_the_owner',
+                 # The drill stops and starts every service, so it runs last, on the copy every scenario filled.
+                 'backup_and_restore_drill']
