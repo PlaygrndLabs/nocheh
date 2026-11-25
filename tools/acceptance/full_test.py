@@ -122,6 +122,7 @@ TITLES = {
     'owner_from_group_to_own_private_chat': 'From a group to your private chat, no approval',
     'owner_from_group_to_other_group': 'From one group to another, card in your private chat',
     'hidden_message_keeps_the_chat': 'Hide and unhide keep the conversation',
+    'notes_survive_a_hide': 'Hermes\'s notes survive a hide; only a note written in the hidden message\'s turn leaves',
     'native_notes_reach_later_turns': 'A saved note reaches the chat\'s later messages, recall names the chat it came from, and a reviewed note names its day and opens what it came from, also on the Notes page', 'reaction_keeps_group_name': 'A reaction keeps the group name',
     'learning_reaches_honcho': 'Learning reaches Honcho',
     'not_allowed_group_text_stays_out_of_owner_notes': 'What someone not allowed says in a group stays out of your notes, and group replies still see it',

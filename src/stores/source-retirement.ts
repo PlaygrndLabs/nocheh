@@ -96,43 +96,47 @@ export class SourceRetirementRepository {
    * Of these memory sessions, those that hold a write of a retired message (or of a reaction to one), whether or not that
    * write has been retired since. A fact the engine learned in such a session from messages it did not all name (an
    * uncited fact names at most a few of its batch, ADR-0261) may rest on the retired one, so it counts as retired too.
-   * Starts from the owner's retirements, which are few: their messages' events, then the sessions' writes of them.
+   * Starts from the owner's retirements, which are few: their messages' events, then the sessions' writes of them. Each
+   * session comes with when its first such write was made: a fact learned before that cannot rest on the message.
    */
-  async retiredSessions(sessions:readonly string[]):Promise<Set<string>> {
+  async retiredSessions(sessions:readonly string[]):Promise<Map<string,Date>> {
     const wanted=[...new Set(sessions)];
-    if(!wanted.length)return new Set();
+    if(!wanted.length)return new Map();
     const objects=(await this.stores.control.query('SELECT object_id FROM source_retirements WHERE retired=true')).rows.map(row=>row.object_id as string);
-    if(!objects.length)return new Set();
+    if(!objects.length)return new Map();
     const events=(await this.archive.pool.query(`SELECT o.event_id FROM source_observations o JOIN source_revisions r ON r.id=o.revision_id
       WHERE r.object_id=ANY($1::text[]) UNION SELECT event_id FROM source_relations WHERE kind='reaction_to' AND target_id=ANY($1::text[])`,[objects])).rows.map(row=>row.event_id as string);
-    if(!events.length)return new Set();
-    return new Set((await this.stores.control.query(`SELECT DISTINCT r.session_id FROM memory_ingestion_receipts r
+    if(!events.length)return new Map();
+    return new Map((await this.stores.control.query(`SELECT r.session_id,min(r.created_at) AS first FROM memory_ingestion_receipts r
       WHERE r.session_id=ANY($1::text[]) AND EXISTS (SELECT 1 FROM jsonb_array_elements(CASE WHEN jsonb_array_length(r.source_references)>0
-        THEN r.source_references ELSE jsonb_build_array(r.source_reference) END) evidence(value) WHERE evidence.value->>'id'=ANY($2::text[]))`,
-      [wanted,events])).rows.map(row=>row.session_id as string));
+        THEN r.source_references ELSE jsonb_build_array(r.source_reference) END) evidence(value) WHERE evidence.value->>'id'=ANY($2::text[]))
+      GROUP BY r.session_id`,[wanted,events])).rows.map(row=>[row.session_id as string,new Date(row.first)]));
   }
   /**
    * Of these ids, the records of long-term memory a turn read (a per-turn block or a recall's answer or facts, ADR-0261)
    * that rest on a retired message: any message their stored evidence names (`evidence[].id`, every source of every
-   * fact), by retiredAmong, or for a fact that names only some of its messages, its session (retiredSessions). Retire
-   * means forget, so a stored row that cites such a record is withheld as one that cites the message would be (B6.2).
+   * fact), by retiredAmong, or for a fact that names only some of its messages, its session (retiredSessions) when the
+   * retired message was written to it before the record was made: a later message cannot be what the record rests on,
+   * so hiding one does not drop the notes of every turn that read the chat's memory earlier (ADR-0292). Retire means
+   * forget, so a stored row that cites such a record is withheld as one that cites the message would be (B6.2).
    */
   async retiredRecords(ids:readonly string[]):Promise<Set<string>> {
     if(!ids.length)return new Set();
     const hex=(value:unknown):value is string=>typeof value==='string'&&/^[a-f0-9]{64}$/.test(value);
     // A recall's answer names its evidence itself; a record of facts keeps them on its unguarded parent (factRecords).
-    const [rows,facts]=await Promise.all([this.stores.derived.query(`SELECT id,provenance FROM derived_artifacts WHERE id=ANY($1::text[])
+    const [rows,facts]=await Promise.all([this.stores.derived.query(`SELECT id,provenance,created_at FROM derived_artifacts WHERE id=ANY($1::text[])
       AND kind IN ('memory_context','memory_result')`,[[...new Set(ids)]]),factRecords(this.stores.derived,ids)]);
     const records=rows.rows.map(row=>{
       const provenance=row.provenance??{},stored=facts.get(row.id)?.facts??[];
       const evidence=[...Array.isArray(provenance.evidence)?provenance.evidence.map((item:any)=>item?.id):[],
         ...stored.flatMap((fact:any)=>Array.isArray(fact?.sources)?fact.sources:[])].filter(hex);
       const sessions=stored.filter((fact:any)=>fact?.complete!==true&&typeof fact?.session==='string').map((fact:any)=>fact.session as string);
-      return {id:row.id as string,evidence,sessions};
+      return {id:row.id as string,evidence,sessions,made:new Date(row.created_at)};
     }).filter(record=>record.evidence.length||record.sessions.length);
     if(!records.length)return new Set();
     const [retired,sessions]=await Promise.all([this.retiredAmong(records.flatMap(record=>record.evidence)),this.retiredSessions(records.flatMap(record=>record.sessions))]);
-    return new Set(records.filter(record=>record.evidence.some((id:string)=>retired.has(id))||record.sessions.some((id:string)=>sessions.has(id))).map(record=>record.id));
+    const before=(record:{sessions:string[];made:Date})=>record.sessions.some(id=>{const first=sessions.get(id);return first!==undefined&&first<=record.made;});
+    return new Set(records.filter(record=>record.evidence.some((id:string)=>retired.has(id))||before(record)).map(record=>record.id));
   }
   async isRetired(reference:SourceReference):Promise<boolean> {
     const rows=(await this.archive.pool.query(`SELECT r.object_id FROM source_observations o
