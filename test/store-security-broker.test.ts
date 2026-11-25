@@ -137,7 +137,7 @@ test('three-store broker binds original and scheduled turns, isolates generation
     }
     // A schedule set by asking (ADR-0290): the turn hears why Nocheh did not save it; any other code stays opaque.
     const definition={scope:'123',profile:'nocheh-'+'0'.repeat(24),job_id:'a1b2c3d4e5f6',definition:{},workflow_cursor:'0'.repeat(64),workflow_sequence:1};
-    for(const [status,error] of [[403,'schedule_limit_reached'],[403,'schedule_turn_not_allowed'],[400,'schedule_cron_unsupported'],[409,'schedule_sequence_conflict']] as const) {
+    for(const [status,error] of [[403,'schedule_limit_reached'],[403,'schedule_turn_not_allowed'],[400,'schedule_cron_unsupported'],[409,'schedule_sequence_conflict'],[409,'schedule_start_needed']] as const) {
       answering('/v1/schedules/turn/definition',status,error);
       assert.deepEqual(await relayed('/v1/schedules/turn/definition',definition),{status,body:{error}},error);
     }
