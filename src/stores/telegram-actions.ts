@@ -5,7 +5,7 @@ import {admin,type Reader} from '../access.js';
 import {activeAgent} from '../agent/agents.js';
 import {canonical,digest} from '../archive.js';
 import {HttpError,object,string} from '../http.js';
-import {assertActingReader,conversationScope,ownerChat,readOnlyReader,telegramAccount} from '../assistant-policy.js';
+import {assertActingReader,conversationScope,ownerChat,readOnlyReader,telegramAccount,type AssistantPolicy} from '../assistant-policy.js';
 import {chats,type ChatDirectory} from '../chats.js';
 import {freshMembers,members} from '../members.js';
 import {telegramDestination} from '../chats-telegram.js';
@@ -52,6 +52,15 @@ const otherGroup=(scope:string,destination:string,directory:ChatDirectory=chats(
 /** A scheduled run's answer that says there is nothing to send: Hermes's [SILENT] marker, or Nocheh's [NO_REPLY]. */
 export const silentResult=(text:string)=>/^\s*\[(SILENT|NO_REPLY)\]\s*$/i.test(text);
 export type ActionSendClass=Extract<SendClass,'approved_post'|'job_report'|'scheduled_run'|'notice'>;
+/**
+ * Whether Nocheh sends a request's message to its chat (ADR-0254, ADR-0311): a chat it serves, or a member's own private
+ * chat for a scheduled result of that same chat while it is still theirs with Personal assistant on, also before Telegram
+ * has seen them in a served group. Every other send to such a chat still needs a served group.
+ */
+export function sendsTo(policy:Pick<AssistantPolicy,'owner_id'>,request:{destination:string;scope:string|null;send_class:string|null},directory:ChatDirectory):boolean {
+  return servedDestination(policy,request.destination,directory)!==null||
+    request.send_class==='scheduled_run'&&request.destination===request.scope&&memberAssistant(request.destination,directory);
+}
 type PreparedSystemAction={id:string;source:SourceReference;proposal:DerivativeReference;binding:GuardBinding;
   scope:string|null;space:string;profile:string;destination:string;fingerprint:string;text_hash:string;guard_revision:number|null;send_class:ActionSendClass};
 /** A trusted send's identity: its workflow key, source, authorization, destination and exact text. */
@@ -151,7 +160,7 @@ export class TelegramActionRepository {
     const telegram=version?.configuration?.deliver==='telegram';
     const untold=(reason:ApprovalText)=>telegram?this.ownerNotice(digest(canonical(['schedule-result-not-sent-v1',id])),'schedule_not_sent',{chat:row.scope,reason}):undefined;
     // Checked before the guard and the profile, which would refuse first and silently: a chat Nocheh no longer serves.
-    if(telegram&&!servedDestination(this.access.policy(),row.scope,await currentChats())){await untold('reason_not_served');return {state:'withheld',reason:'destination_not_served'};}
+    if(telegram&&!sendsTo(this.access.policy(),{destination:row.scope,scope:row.scope,send_class:'scheduled_run'},await currentChats())){await untold('reason_not_served');return {state:'withheld',reason:'destination_not_served'};}
     try{await this.guards.assertCurrent(row.binding);}catch(error){if(!(error instanceof HttpError)||error.status>=500)throw error;
       await untold('reason_settings_changed');return {state:'withheld',reason:'guard_context_changed'};}
     if(!version||version.execution_version!==version.active_execution||version.active_configuration.removed)return {state:'withheld',reason:'schedule_definition_changed'};
@@ -269,7 +278,7 @@ export class TelegramActionRepository {
     const requested=string(input.destination,200),text=string(input.text,3500),directory=await currentChats();
     if(!text.trim()||requested==='current'&&channel!=='telegram')throw new HttpError(400,'invalid_action');
     const destination=requested==='current'?principal.space??turn.scope:telegramDestination(requested,directory);
-    if(!destination||!servedDestination(this.access.policy(),destination,directory))throw new HttpError(403,'destination_not_served');
+    if(!destination||!sendsTo(this.access.policy(),{destination,scope:principal.scope,send_class:sendClass},directory))throw new HttpError(403,'destination_not_served');
     // The member whose live group turn asked, kept on the request and checked again before it is sent (step 3); never the
     // owner, who is asked about first. Their post into another group needs their permission to post there, refused here
     // before anything is recorded; a post in the same group is part of talking.
@@ -432,7 +441,7 @@ export class TelegramActionRepository {
       String(body.chat_id)!==target.chat_id||(body.topic==null?undefined:String(body.topic))!==(target.topic===undefined?undefined:String(target.topic))||
       // The last word, asked by the bot before each message it sends: a chat Nocheh no longer serves gets nothing, and
       // neither does a send whose member was paused, removed or switched off since they asked (step 3).
-      !servedDestination(this.access.policy(),row.destination,directory)||!await this.askerCurrent(row,directory))
+      !sendsTo(this.access.policy(),row,directory)||!await this.askerCurrent(row,directory))
       throw new HttpError(403,'action_delivery_denied');
     await this.text(row);
     if((await evaluate(this.stores.control,this.effect(row),row.authority??'exact_owner_approval')).outcome!=='allow')
@@ -463,7 +472,7 @@ export class TelegramActionRepository {
         // buttons that fail on every press (ADR-0254). An unserved chat is asked first: the settings change that deselects a
         // group also moves the epoch. A pending publication passes, so it stays an error.
         const directory=await currentChats();
-        let closed:string|null=!servedDestination(this.access.policy(),current.destination,directory)?'destination_not_served':
+        let closed:string|null=!sendsTo(this.access.policy(),current,directory)?'destination_not_served':
           // A send a member asked for, approved after they were paused, removed or switched off, is closed the same way (step 3).
           !await this.askerCurrent(current,directory)?'member_changed':null;
         if(!closed)try{await this.fence(db,current.binding);await this.text(current);}catch(error){
@@ -544,7 +553,7 @@ export class TelegramActionRepository {
       const refused=async(state:string)=>{
         if(state!=='denied')return undefined;
         const directory=await currentChats();
-        return !servedDestination(this.access.policy(),row.destination,directory)?'destination_not_served':!await this.askerCurrent(row,directory)?'member_changed':undefined;
+        return !sendsTo(this.access.policy(),row,directory)?'destination_not_served':!await this.askerCurrent(row,directory)?'member_changed':undefined;
       };
       const durable=await this.derived.checkpoint('telegram-action-result:'+id+':done')??await this.derived.checkpoint('telegram-action-result:'+id+':denied');
       if(durable) {
@@ -569,7 +578,7 @@ export class TelegramActionRepository {
         // A chat Nocheh stopped serving after the approval, or one the directory no longer knows, gets nothing: the send is
         // closed with its reason instead of waiting for a chat that never comes back (ADR-0254).
         const directory=await currentChats();
-        if(!servedDestination(this.access.policy(),row.destination,directory)) {
+        if(!sendsTo(this.access.policy(),row,directory)) {
           await db.query("UPDATE telegram_action_requests SET state='cancelled',error_code='destination_not_served',revision=revision+1,updated_at=now() WHERE id=$1 AND state='approved'",[id]);
           return observation('cancelled','action',0,Date.now(),'superseded');
         }

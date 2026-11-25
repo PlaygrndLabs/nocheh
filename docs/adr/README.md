@@ -189,6 +189,7 @@ Nocheh is a personal AI brain. It owns the original archive, the rules, the secr
 - Embeddings have explicit provider, model and key settings, and a provider failure starts a durable cooldown ([0034](0034-explicit-embedding-environment.md), [0100](0100-durable-embedding-egress-cooldown.md)).
 - Anthropic replies use the Messages API for prompt caching ([0199](0199-anthropic-replies-use-the-messages-api-for-prompt-caching.md)).
 - Replies keep their prompt cache layout: memory evidence first, five-minute cache life, schedule tool per message; moving the evidence saves nothing on replies that use tools ([0309](0309-replies-keep-their-prompt-cache-layout.md)).
+- A member's own schedule results go to their private chat while Personal assistant is on, also before they reach a served group; every other send there still needs one ([0311](0311-a-members-own-schedule-results-reach-their-chat.md)).
 
 ### Health and usage
 
