@@ -75,13 +75,14 @@ async def run_process(root, scope, body, model, credentials, session_id, emit=No
                 if reads is not None:
                     from .assistant_gateway import report_conversation_reads
                     await asyncio.to_thread(report_conversation_reads, body['archive_credential'], reads)
-            result=None;read_back={}
+            result=None;read_back={};memory=[]
             try:
-                result=await _run_process(profile, scope, body, model, credentials, session_id, emit, cancelled, progress, watch and watch['sources'], read_back, steering)
+                result=await _run_process(profile, scope, body, model, credentials, session_id, emit, cancelled, progress, watch and watch['sources'], read_back, steering, memory=memory)
                 return result
             finally:
-                # Also after a cancelled or failed turn: its notes may have changed before it stopped.
-                if watch is not None:await asyncio.to_thread(note_sources.after_turn, profile, body, session_id, watch, result, read_back.get('memory_context'))
+                # Also after a cancelled or failed turn: its notes may have changed before it stopped. They rest on the
+                # long-term memory it was given too (`memory`, the ids it cited), which stays here.
+                if watch is not None:await asyncio.to_thread(note_sources.after_turn, profile, body, session_id, watch, result, read_back.get('memory_context'), memory)
         finally:
             await asyncio.to_thread((profile/'.foreground').touch)
 
@@ -296,7 +297,7 @@ def message_text(body, scope, answer=None):
     return text, memory_query
 
 
-async def _run_process(profile, scope, body, model, credentials, session_id, emit, cancelled, progress=None, note_sources=None, read_back=None, steering=None):
+async def _run_process(profile, scope, body, model, credentials, session_id, emit, cancelled, progress=None, note_sources=None, read_back=None, steering=None, memory=None):
     if cancelled and cancelled.is_set(): return {'state':'cancelled','text':'','session_id':session_id}
     # A background job run lasts until its job's hard deadline: its box commands end then, and the process a minute
     # later if nothing stopped it before. Every other turn has the usual reply time.
@@ -388,6 +389,10 @@ async def _run_process(profile, scope, body, model, credentials, session_id, emi
                 if isinstance(value.get('text'),str): emit(value['text'])
             elif isinstance(value,dict) and value.get('event') == 'heartbeat':
                 continue
+            elif isinstance(value,dict) and value.get('event') == 'memory_sources':
+                # The ids the turn's long-term memory cited, kept for its notes (ADR-0292); only well-formed ones.
+                ids=value.get('ids')
+                if memory is not None and isinstance(ids,list):memory[:]=[one for one in ids[:500] if isinstance(one,str) and re.fullmatch(r'[a-f0-9]{64}',one)]
             elif isinstance(value,dict) and value.get('event') == 'progress' and background:
                 # A job run's counts and to-do list so far, for its heartbeat; checked, since the turn runs the model's tools.
                 from .job_progress import progress_line

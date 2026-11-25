@@ -25,6 +25,7 @@ import {ownerChat} from '../assistant-policy.js';
 import {foregroundReplyActive} from './automatic-publication.js';
 import {knowledgeId as id,knowledgeRevision as revision,knowledgeObject as exact,parseKnowledgeProposal,learnedOrganization,organizationIdentity,proposalPrivateChats,
  type KnowledgeProposal,type OrganizationProposal,type ReviewProposal} from './knowledge-contract.js';
+import {keepNotes} from './notes-epochs.js';
 
 const protocol='knowledge-management-v1';
 const owner:Reader={admin:true,scope:null};
@@ -493,7 +494,9 @@ export class KnowledgeManagementRepository {
  }
 
  private async invalidate(db:pg.PoolClient){const epoch=Number((await db.query('UPDATE guard_state SET epoch=epoch+1 WHERE singleton RETURNING epoch')).rows[0].epoch);
-  await requestWorkflow(db,'honcho','refresh',epoch);await requestWorkflow(db,'memory_review','refresh',epoch);return epoch;}
+  await requestWorkflow(db,'honcho','refresh',epoch);await requestWorkflow(db,'memory_review','refresh',epoch);
+  // Organizing moves groups between projects, so only the owner's chat keeps its Hermes notes (ADR-0292).
+  await keepNotes(db,epoch,'owner');return epoch;}
 
  private async applyOrganization(db:pg.PoolClient,row:ProposalRow,proposal:OrganizationProposal,permission:OrganizationDelegation|null,binding:GuardBinding){
   const created:any[]=[],assignments:{before:Assignment|null;after:Assignment}[]=[],keys=new Map<string,string>();

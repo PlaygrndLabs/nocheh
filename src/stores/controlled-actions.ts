@@ -131,6 +131,9 @@ export class ControlledActionRepository {
     const memberRead=boundReader(principal)==='member'&&memberConnectorCall(value);
     if(!memberRead)assertActingReader(principal);
     const body=exact(value,['kind','arguments','summary']),note=summaryOf(body.summary);let raw=actionArguments(body.kind,body.arguments);
+    // A machine job's run proposes only what its card allows, a Notion read of its pages (machine jobs' reads): no command,
+    // browser or other service, so it makes no card the job's card did not show (ADR-0306).
+    if(principal.machineReads&&!(body.kind==='mcp'&&'connection' in raw&&raw.connection==='notion'))throw new HttpError(403,'machine_job_reads_card_only');
     const turn=await this.turns.binding(principal),current=await this.guards.state(),owner=ownerChat(this.access.policy());
     // A tool the owner turned off for this chat or topic is refused before anything is recorded or checked for secrets.
     // Its switch is the chat's, never the asking turn's: a job or a scheduled task follows the chat it belongs to.

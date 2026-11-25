@@ -247,7 +247,7 @@ class RetiredHistoryTests(unittest.TestCase):
         from .turn_process import run_process
         with tempfile.TemporaryDirectory() as folder:
             profile=Path(folder);database=self.history(folder)
-            async def child(*args):
+            async def child(*args,**kwargs):
                 self.assertEqual(self.leaks(database),([],0,0));return {'state':'done'}
             with patch('services.hermes.retired_history.service_lookup',Lookup()),\
                  patch('services.hermes.assistant_gateway.prepare_profile',return_value=profile),\

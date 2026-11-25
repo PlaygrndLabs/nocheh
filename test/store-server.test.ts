@@ -119,8 +119,16 @@ test('separated application captures through control outages, exposes owner repo
     assert.deepEqual((await request('/v1/prompts',{texts:{'reply.owner':null},revision:saved.revision})).texts,{});
     assert.equal((await request('/v1/security/policy')).source,'owner security policy');
     await request('/v1/security/preview',{action_id:digest(key)},404);
+    const unchanged=await services.guards.state();
     const project=await request('/v1/projects',{name:key,description:'HTTP rehearsal',state:'active',expected_revision:0,operation_id:key+':project'});
     assert.equal(project.name,key);
+    // Hermes asks whether a chat's notes cross the epochs since; a project change keeps only the owner's chat's (ADR-0292).
+    const across={generation:unchanged.generation,from:unchanged.epoch,to:(await services.guards.state()).epoch};
+    assert.deepEqual(await request('/internal/notes/carry',{...across,owner:true}),{carry:true});
+    assert.deepEqual(await request('/internal/notes/carry',{...across,owner:false}),{carry:false});
+    assert.deepEqual(await request('/internal/notes/carry',{...across,owner:true},200,settings.agentKey),{carry:true},'Hermes asks with the agent login');
+    await request('/internal/notes/carry',{...across,owner:true},401,keyPass(token,'123',Date.now()+60000));
+    await request('/internal/notes/carry',{...across,owner:'yes'},400);
     const event:Envelope={version:1,key,origin:'live',bot_id:'fixture',kind:'telegram_update',scope:'123',source_id:String(Date.now()),revision:'1',occurred_at:null,text:'Original HTTP observation',
       payload:{message:{message_id:Date.now(),chat:{id:123,type:'private'},from:{id:123},text:'Original HTTP observation'}}};
     controlDown=true;archiveDown=true;
