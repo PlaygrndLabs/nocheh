@@ -69,7 +69,7 @@ Nocheh is in development mode and not yet released. Everything below is built an
   reply or run, naming its person and the agent plugged in now, written as a row and closed once the reply is delivered or
   the run ends; each kind of key reaches only its own routes, review and filter keys no data tool, and Hermes keeps no pass on
   disk ([ADR-0305](docs/adr/0305-one-time-keys-per-reply.md)). Part C: machine runs search and are offered only their
-  card's chat and tools, review and filter keys read nothing, each key's use is counted and logged with its person, and a
+  card's chat and tools, each key's use is counted and logged with its person, and a
   paused member's keys close ([ADR-0306](docs/adr/0306-close-key-read-gaps-and-log-key-use.md)). Next: the Keys list and
   "Stop everything now". A group's
   tools permission runs only what carries no data, within ten reads a message; the rest asks

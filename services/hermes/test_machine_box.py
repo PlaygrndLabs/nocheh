@@ -464,9 +464,10 @@ class MachineStepTests(unittest.TestCase):
         from services.hermes.profile_config import atomic_yaml,resolved
         self.assertNotIn('memory',MACHINE_TOOLSETS);self.assertEqual(MACHINE_TOOLS-BACKGROUND_TOOLS,job_box.TOOLS-{'execute_code'})
         self.assertEqual(MACHINE_TOOLS,JOB_MACHINE_TOOLS)
-        # A machine step reads only what its card showed: no notes recall, owner views, tasks, GitHub, Gmail or member asks.
+        # A machine step reads only what its card showed: no notes recall, owner views, tasks, GitHub, Gmail, member asks or
+        # outside MCP endpoints (ADR-0306).
         self.assertEqual(BOX_TOOLS-MACHINE_TOOLS,{'execute_code',*('mcp__nocheh__'+name for name in ('memory_recall','telegram_destinations','owner_read','tasks',
-            'github','gmail','knowledge_inspect','knowledge_propose','knowledge_status','ask_member_chat'))})
+            'github','gmail','knowledge_inspect','knowledge_propose','knowledge_status','ask_member_chat','mcp'))})
         with tempfile.TemporaryDirectory() as folder,machine_env():
             profile=Path(folder);atomic_yaml(profile/'config.yaml',resolved({},'synthetic'))
             (profile/'plugins').mkdir();(profile/'plugins'/'nocheh').symlink_to(Path(job_box.__file__).parent,target_is_directory=True)

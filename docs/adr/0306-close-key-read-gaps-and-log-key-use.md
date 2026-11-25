@@ -9,7 +9,7 @@ Accepted on 2026-11-25 as step 1, part C (first half), of the owner-approved key
 
 ## Context
 
-After ADR-0305 every pass is a one-time key with a row, but three gaps were left and nothing recorded a key's use.
+After ADR-0305 every pass is a one-time key with a row, but two read gaps were left and nothing recorded a key's use.
 
 - **A machine job's memory search.** A run of a job on the owner's machine usually carries the owner's pass. Its archive
   reads keep to its card's chat, period and approval cutoff, but `NativeMemoryRepository.search` never looked at
@@ -21,8 +21,6 @@ After ADR-0305 every pass is a one-time key with a row, but three gaps were left
   not its card's eight (ADR-0283 decision 6). Each call still met storage's machine route list, but a `shell` or `browser`
   call reached `/v1/tools/propose`, which is on that list, and a refused read route left proposed and allowed rows in the
   security log before storage refused it.
-- **Review and filter keys.** Their routes reach no data tool and no read route (ADR-0305), but `canRead` still let any
-  non-admin reader with no scope read as the owner, whatever its key.
 - **No record of use.** `assertOpen` only read the key's row. The security log named the agent of a broker effect, not its
   person or key.
 
@@ -40,9 +38,11 @@ After ADR-0305 every pass is a one-time key with a row, but three gaps were left
    turn-file routes are not relayed routes and are unchanged.
 3. **A machine run proposes only a Notion read.** `ControlledActionRepository.propose` refuses a reader with `machineReads`
    any proposal but an `mcp` call to the Notion connection (403 `machine_job_reads_card_only`); which pages it may read is
-   checked as before.
-4. **A review's or a filter's key reads nothing.** `canRead` answers false first for a reader with a key (`jti`) whose kind
-   is `review` or `filter`. Nocheh's own review and filter readers, built in process, carry no key and are unchanged.
+   checked as before. The `mcp` tool for outside MCP endpoints leaves `machineRunTools` and Hermes's `MACHINE_DATA_TOOLS`,
+   so a machine run is offered seven tools, not eight.
+4. **Review and filter keys stay as ADR-0305 left them.** Their routes reach no data tool and no read route, at storage and
+   at the broker. `canRead` is not changed for them: their own binding, guard and model calls read their turn's source
+   through it, so refusing them there would end every review and filter.
 5. **Each request counts on its key's row.** `one_time_keys` gains `first_used_at`, `last_used_at` and `use_count`.
    `RuntimeTurnRepository.assertKey`, the first check of every request at storage and the broker, now runs
    `OneTimeKeyRepository.use`: one UPDATE that counts an open key matching the pass, or refuses as `assertOpen` does. Audience

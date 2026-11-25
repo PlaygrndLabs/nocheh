@@ -115,9 +115,7 @@ test('a one-time key is minted with its row, reused for the same reply, checked 
     for(const pass of [review,filter])for(const [path,method] of [['/mcp','POST'],['/v1/search?q=x','GET'],['/v1/archive/page','GET'],['/v1/memory/context','GET']] as const)
       assert.deepEqual(await call(path,pass,method),{status:403,body:{error:'one_time_key_route_denied'}},passClaims(pass).key_kind+' '+path);
     assert.equal((await call('/v1/memory/check',review)).status,200,'a review may still ask whether it may deliver');
-    // Whatever route it came through, a review's or a filter's key reads nothing as the owner (ADR-0306).
-    for(const pass of [review,filter])
-      assert.equal(await services.turns.access.canRead(reader({headers:{authorization:'Bearer '+pass}} as IncomingMessage,token),{store:'archive',kind:'event',id:event,revision:'1',input_hash:event} as any,{} as any),false);
+
     assert.deepEqual(await call('/v1/memory/check',filter),{status:403,body:{error:'one_time_key_route_denied'}});
 
     // A run's keys close with the run, whichever of its kinds.
