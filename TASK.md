@@ -78,7 +78,7 @@ Nocheh is in development mode and not yet released. Everything below is built an
   tools permission runs only what carries no data, within ten reads a message; the rest asks
   ([ADR-0291](docs/adr/0291-group-tools-run-only-what-carries-no-data.md)).
 - Dashboard: compact tables and sub-tabs on every page (table-first plan, steps 1 to 5);
-  Connections, Members and Sent to apps pages.
+  Connections, Members and Sent to apps pages; a Cmd+K search for pages, settings and the owner's data.
 - Operations: daily backups, export and import, an encrypted off-site copy (off until the owner
   turns it on), problem notices in the owner's private chat, and a Usage page.
 
