@@ -1,7 +1,7 @@
 /**
  * Settings › Tasks: the statuses tasks move through, the names of the five
- * priorities, the owner's own columns, and the time zone task times and
- * reminders mean. Saved with the Save button at the top, like other settings.
+ * priorities and the owner's own columns. Task times follow the owner's time
+ * zone in Settings › General. Saved with the Save button at the top, like other settings.
  */
 import {useState} from 'react';
 import {ArrowDown, ArrowUp, Plus, Trash2, X} from 'lucide-react';
@@ -75,14 +75,6 @@ export function shareNotice(name: string, scopes: Scope[], groupName: (space: st
     : `No chat sees a project’s list yet. Chats added to a project later will see ${name} on its tasks, ${values}. It applies when you save.`;
 }
 
-function zones(): string[] {
-  try {
-    return (Intl as any).supportedValuesOf('timeZone') as string[];
-  } catch {
-    return ['UTC'];
-  }
-}
-
 const subTabs = ['statuses', 'priorities', 'columns'] as const;
 
 export function TaskSettingsPanel() {
@@ -117,13 +109,11 @@ export function TaskSettingsPanel() {
       statuses: draft.statuses,
       priorities: draft.priorities,
       properties: draft.properties,
-      time_zone: draft.time_zone,
     }) !==
       JSON.stringify({
         statuses: data.statuses,
         priorities: data.priorities,
         properties: data.properties,
-        time_zone: data.time_zone,
       });
   useDraftSource({
     id: 'task-settings',
@@ -144,7 +134,6 @@ export function TaskSettingsPanel() {
               .filter(option => option.name.trim())
               .map(option => ({...option, name: option.name.trim()})),
           })),
-          time_zone: draft.time_zone,
         });
         reset();
         await refreshResources();
@@ -165,8 +154,6 @@ export function TaskSettingsPanel() {
         <LoadingRows rows={4} />
       </Card>
     );
-  const device = Intl.DateTimeFormat().resolvedOptions().timeZone;
-  const allZones = zones();
   const statusIds = value.statuses.map(item => item.id);
   const move = <T,>(items: T[], index: number, by: number) => {
     const next = [...items];
@@ -182,7 +169,7 @@ export function TaskSettingsPanel() {
         onChange={setTab}
         tabs={[
           {id: 'statuses', label: 'Statuses'},
-          {id: 'priorities', label: 'Priorities and time zone'},
+          {id: 'priorities', label: 'Priorities'},
           {id: 'columns', label: 'Your columns'},
         ]}
       />
@@ -354,32 +341,6 @@ export function TaskSettingsPanel() {
               </li>
             ))}
           </ul>
-        </Card>
-
-        <Card>
-          <CardHeader
-            title="Time zone"
-            description="Task times, Today and Upcoming, and reminders follow this time zone, in the dashboard and in chat."
-          />
-          <div className="flex flex-wrap items-center gap-2 border-t border-line px-5 py-4">
-            <Select
-              aria-label="Time zone"
-              value={value.time_zone}
-              className="w-64"
-              onChange={event => edit({...value, time_zone: event.target.value})}
-            >
-              {[...new Set(['UTC', value.time_zone, ...allZones])].map(zone => (
-                <option key={zone} value={zone}>
-                  {zone.replace(/_/g, ' ')}
-                </option>
-              ))}
-            </Select>
-            {device && device !== value.time_zone && (
-              <Button size="sm" onClick={() => edit({...value, time_zone: device})}>
-                Use this device’s ({device.replace(/_/g, ' ')})
-              </Button>
-            )}
-          </div>
         </Card>
       </SubPanel>
 

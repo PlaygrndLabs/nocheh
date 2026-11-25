@@ -207,9 +207,12 @@ test('tasks carry statuses, priority, dates, repeats, subtasks, links, columns, 
         {id:'link',name:'Link',type:'url'}],time_zone:'Asia/Kolkata'});
     await assert.rejects(s.tasks.saveSettings(owner,{revision:'0',time_zone:'UTC'}),{code:'configuration_conflict'});
     await assert.rejects(s.tasks.saveSettings(owner,{revision:settings.revision,time_zone:'Mars/Base'}),{code:'invalid_task_time_zone'});
-    // The time zone alone, from the Schedules page or the phone (ADR-0282): everything else stays as saved.
+    // The time zone alone, from Settings › General (ADR-0312): everything else stays as saved, the revision too, so an
+    // edit open in Settings › Tasks still saves, and it keeps the time zone.
     const zoned=await s.tasks.saveTimeZone(owner,{time_zone:'Europe/Lisbon'});
-    assert.equal(zoned.time_zone,'Europe/Lisbon');assert.deepEqual(zoned.statuses,settings.statuses);assert.notEqual(zoned.revision,settings.revision);
+    assert.equal(zoned.time_zone,'Europe/Lisbon');assert.deepEqual(zoned.statuses,settings.statuses);assert.equal(zoned.revision,settings.revision);
+    const kept=await s.tasks.saveSettings(owner,{revision:settings.revision,priorities:settings.priorities});
+    assert.equal(kept.time_zone,'Europe/Lisbon');
     await assert.rejects(s.tasks.saveTimeZone(owner,{time_zone:'Mars/Base'}),{code:'invalid_task_time_zone'});
     await assert.rejects(s.tasks.saveTimeZone(owner,{time_zone:'UTC',statuses:[]}),{code:'unknown_task_setting'});
     settings=await s.tasks.saveTimeZone(owner,{time_zone:'Asia/Kolkata'});

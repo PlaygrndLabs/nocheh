@@ -52,6 +52,7 @@ export const pageTabs = {
   },
   connections: {yours: 'Yours', projects: 'Projects', github: 'GitHub app'},
   settings: {
+    general: 'General',
     telegram: 'Telegram',
     models: 'Models',
     speed: 'Speed',

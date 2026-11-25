@@ -564,11 +564,11 @@ class AgentTurnTests(unittest.TestCase):
              patch('services.hermes.daily_session.start') as start,\
              patch('services.hermes.retired_history.withhold_retired'),\
              patch('services.hermes.profile_config.preferences',return_value={'nocheh.carry_messages':20}):
-            agent=self.agent(native_turn);body=turn_body(42,day_zone='Asia/Dubai');agent.start(body);self.wait(agent,body)
+            agent=self.agent(native_turn);body=turn_body(42,day_zone='Asia/Baku');agent.start(body);self.wait(agent,body)
             # A follow-up after an approval stays in the session that asked, whatever the day.
             cursor.write_text(json.dumps({'session_id':'nocheh-yesterday','day':'2000-01-01','last_active':946684800}))
             body=turn_body(43,attempt='c1-'+'e'*40,continuation='e'*64);agent.start(body);self.wait(agent,body)
-        today=daily_session.day_of(time.time(),daily_session.zone('Asia/Dubai'))
+        today=daily_session.day_of(time.time(),daily_session.zone('Asia/Baku'))
         fresh='nocheh-'+logical+'-'+today.replace('-','')
         self.assertEqual(process.await_args_list[0].args[5],fresh)
         self.assertEqual(start.call_args.args[1:4],(fresh,'nocheh-yesterday',20))

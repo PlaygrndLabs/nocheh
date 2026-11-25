@@ -24,8 +24,8 @@ class QuietHoursTests(unittest.TestCase):
         self.assertFalse(inside(span, 'UTC', at(7)))
         self.assertFalse(inside(span, 'UTC', at(22, 59)))
         # 20:00 UTC is midnight in a zone four hours ahead.
-        self.assertTrue(inside(span, 'Asia/Dubai', at(20)))
-        self.assertFalse(inside(span, 'Asia/Dubai', at(4)))
+        self.assertTrue(inside(span, 'Asia/Baku', at(20)))
+        self.assertFalse(inside(span, 'Asia/Baku', at(4)))
         self.assertFalse(inside(span, 'Not/AZone', at(23, 30)))
         self.assertTrue(inside(window('01:00-02:00'), 'UTC', at(1, 30)))
         self.assertFalse(inside(window('01:00-02:00'), 'UTC', at(2)))
@@ -34,7 +34,7 @@ class QuietHoursTests(unittest.TestCase):
         reads = []
         def fetch():
             reads.append(1)
-            return {'100': 'UTC', '200': 'Asia/Dubai'}
+            return {'100': 'UTC', '200': 'Asia/Baku'}
         clock = [0.0]
         quiet = QuietHours(fetch=fetch, clock=lambda: clock[0], setting='23:00-07:00')
         for kind in ('notice', 'card', 'job_report', 'approved_post', 'follow_up', None):

@@ -26,7 +26,7 @@ DEFAULTS = {
     'NOCHEH_ARCHIVE_PASSWORD': '', 'NOCHEH_DERIVED_PASSWORD': '', 'NOCHEH_CONTROL_PASSWORD': '',
     'NOCHEH_WORKFLOW_UI_PORT': '8288',
     'NOCHEH_WORKFLOW_HISTORY_RETENTION_DAYS': '0', 'NOCHEH_HERMES_JOURNAL_RETENTION_DAYS': '0',
-    'NOCHEH_BACKUP_SCHEDULE': 'daily', 'NOCHEH_BACKUP_TIME': '04:00', 'NOCHEH_BACKUP_TIME_ZONE': 'UTC', 'NOCHEH_BACKUP_KEEP': '7',
+    'NOCHEH_BACKUP_SCHEDULE': 'daily', 'NOCHEH_BACKUP_TIME': '04:00', 'NOCHEH_BACKUP_KEEP': '7',
     'NOCHEH_OFFSITE': 'off', 'NOCHEH_OFFSITE_PROVIDER': 'cloudflare', 'NOCHEH_OFFSITE_ENDPOINT': '', 'NOCHEH_OFFSITE_BUCKET': '', 'NOCHEH_OFFSITE_REGION': 'auto',
     'NOCHEH_OFFSITE_ACCESS_KEY_ID': '', 'NOCHEH_OFFSITE_SECRET_ACCESS_KEY': '', 'NOCHEH_OFFSITE_PASSPHRASE': '', 'NOCHEH_OFFSITE_KEEP': '14',
     'NOCHEH_LOG_MAX_SIZE': '10m', 'NOCHEH_LOG_MAX_FILES': '3',
@@ -173,6 +173,7 @@ def load(state):
     if 'OPENAI_API_KEY' not in values and 'NOCHEH_EMBEDDING_API_KEY' in values:values['OPENAI_API_KEY']=values['NOCHEH_EMBEDDING_API_KEY']
     values={**DEFAULTS,**values}
     values.pop('NOCHEH_WORKFLOWS_ENABLED',None)  # Retired migration setting.
+    values.pop('NOCHEH_BACKUP_TIME_ZONE',None)  # Retired: backups follow the owner's time zone (Settings › General).
     if values.get('NOCHEH_GUARD_MODE')=='auto': values['NOCHEH_GUARD_MODE']='on'
     return values
 
@@ -180,12 +181,6 @@ def load(state):
 def validate_backups(values):
     if values.get('NOCHEH_BACKUP_SCHEDULE','daily') not in ('daily','off'):raise ValueError('NOCHEH_BACKUP_SCHEDULE must be daily or off')
     if not re.fullmatch(r'(?:[01]\d|2[0-3]):[0-5]\d',str(values.get('NOCHEH_BACKUP_TIME','04:00'))):raise ValueError('NOCHEH_BACKUP_TIME must be a time such as 04:00')
-    zone=str(values.get('NOCHEH_BACKUP_TIME_ZONE','UTC'))
-    try:
-        from zoneinfo import ZoneInfo
-        if not re.fullmatch(r'[A-Za-z_]+(?:/[A-Za-z0-9_+-]+)*',zone):raise ValueError
-        ZoneInfo(zone)
-    except Exception:raise ValueError('NOCHEH_BACKUP_TIME_ZONE must be a time zone such as Europe/Berlin') from None
     keep=str(values.get('NOCHEH_BACKUP_KEEP','7'))
     if not re.fullmatch(r'[1-9]\d{0,2}',keep) or int(keep)>365:raise ValueError('NOCHEH_BACKUP_KEEP must be 1-365')
 
@@ -352,6 +347,7 @@ def initialize(state, workspace=None):
         for key in ('COMPOSE_PROJECT_NAME', 'NOCHEH_IMAGES'):
             if not values.get(key): values[key] = identity[key]
     values.pop('NOCHEH_WORKFLOWS_ENABLED',None)
+    values.pop('NOCHEH_BACKUP_TIME_ZONE',None)
     if 'OPENAI_API_KEY' not in existing and 'NOCHEH_EMBEDDING_API_KEY' in existing:values['OPENAI_API_KEY']=existing['NOCHEH_EMBEDDING_API_KEY']
     if values.get('NOCHEH_GUARD_MODE')=='auto': values['NOCHEH_GUARD_MODE']='on'
     values.setdefault('NOCHEH_UID', str(os.getuid())); values.setdefault('NOCHEH_GID', str(os.getgid()))

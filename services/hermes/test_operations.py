@@ -19,7 +19,7 @@ from tools.operations.installation.operations import sha,validate_snapshot,backu
 
 WORKSPACE='hermes/profiles/owner/workspace'
 RETIRED='hermes/retired-profiles/old-1700000000/workspace'
-NOTHING_SCHEDULED={'NOCHEH_BACKUP_SCHEDULE':'off','NOCHEH_BACKUP_TIME':'04:00','NOCHEH_BACKUP_TIME_ZONE':'UTC','NOCHEH_BACKUP_KEEP':'7'}
+NOTHING_SCHEDULED={'NOCHEH_BACKUP_SCHEDULE':'off','NOCHEH_BACKUP_TIME':'04:00','NOCHEH_BACKUP_KEEP':'7'}
 
 
 def new_state(root):

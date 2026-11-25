@@ -9,6 +9,9 @@ import {useFeedback} from '../../ui/overlay';
 import {SubPanel, SubTabs} from '../../ui/page';
 import {Unsaved, UnsavedDot} from './telegram';
 import {PasswordSettings} from './password';
+import {zoneName} from './general';
+import {useResource} from '../../lib/resource';
+import {href} from '../../lib/routes';
 
 const offsiteKeys = [
   'NOCHEH_OFFSITE',
@@ -28,20 +31,11 @@ export const privacyKeys = [
   'NOCHEH_HERMES_JOURNAL_RETENTION_DAYS',
   'NOCHEH_BACKUP_SCHEDULE',
   'NOCHEH_BACKUP_TIME',
-  'NOCHEH_BACKUP_TIME_ZONE',
   'NOCHEH_BACKUP_KEEP',
   ...offsiteKeys,
 ];
 
 const keepPresets = ['3', '7', '14', '30'];
-
-function zones(): string[] {
-  try {
-    return (Intl as any).supportedValuesOf('timeZone') as string[];
-  } catch {
-    return ['UTC'];
-  }
-}
 
 type Provider = 'cloudflare' | 'backblaze' | 'other';
 type Connected = {
@@ -550,14 +544,13 @@ function OffsiteSettings() {
   );
 }
 
-/** Daily automatic backups: on or off, the time and time zone they run at, and how many to keep. */
+/** Daily automatic backups: on or off, the time they run at in the owner's time zone (ADR-0312), and how many to keep. */
 function BackupSettings() {
   const s = useSettings();
   const on = (s.value('NOCHEH_BACKUP_SCHEDULE') || 'daily') === 'daily';
-  const zone = s.value('NOCHEH_BACKUP_TIME_ZONE') || 'UTC';
+  const zone = useResource<{time_zone: string}>('/tasks/settings').data?.time_zone;
   const keep = s.value('NOCHEH_BACKUP_KEEP') || '7';
   const customKeep = !keepPresets.includes(keep);
-  const device = Intl.DateTimeFormat().resolvedOptions().timeZone;
   const changed = (...keys: string[]) => keys.some(key => s.changed(key));
   return (
     <Card>
@@ -596,10 +589,18 @@ function BackupSettings() {
               title={
                 <>
                   Time
-                  <Unsaved show={changed('NOCHEH_BACKUP_TIME', 'NOCHEH_BACKUP_TIME_ZONE')} />
+                  <Unsaved show={changed('NOCHEH_BACKUP_TIME')} />
                 </>
               }
-              description="Pick a quiet hour. If the machine is off then, the backup runs when it is back."
+              description={
+                <>
+                  Pick a quiet hour in your time zone{zone ? ` (${zoneName(zone)})` : ''}, set in{' '}
+                  <a className="underline" href={href('settings', {view: 'general'})}>
+                    Settings › General
+                  </a>
+                  . If the machine is off then, the backup runs when it is back.
+                </>
+              }
             >
               <div className="flex flex-wrap gap-2 sm:justify-end">
                 <Input
@@ -610,24 +611,6 @@ function BackupSettings() {
                   disabled={s.busy}
                   onChange={e => e.target.value && s.set('NOCHEH_BACKUP_TIME', e.target.value.slice(0, 5))}
                 />
-                <Select
-                  aria-label="Backup time zone"
-                  className="w-56"
-                  value={zone}
-                  disabled={s.busy}
-                  onChange={e => s.set('NOCHEH_BACKUP_TIME_ZONE', e.target.value)}
-                >
-                  {[...new Set(['UTC', zone, ...zones()])].map(item => (
-                    <option key={item} value={item}>
-                      {item.replace(/_/g, ' ')}
-                    </option>
-                  ))}
-                </Select>
-                {device && device !== zone && (
-                  <Button size="sm" disabled={s.busy} onClick={() => s.set('NOCHEH_BACKUP_TIME_ZONE', device)}>
-                    Use this device’s ({device.replace(/_/g, ' ')})
-                  </Button>
-                )}
               </div>
             </SettingRow>
             <SettingRow
