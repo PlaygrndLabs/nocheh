@@ -263,7 +263,7 @@ export function Field({
   children: React.ReactNode;
 }) {
   return (
-    <div className={cn('space-y-1.5', className)}>
+    <div data-setting-row className={cn('space-y-1.5', className)}>
       <div className={cn('flex items-baseline justify-between gap-2', labelHidden && 'sm:sr-only')}>
         <label htmlFor={htmlFor} className="text-[13px] font-medium">
           {label}
@@ -385,6 +385,7 @@ export function SettingRow({
 }) {
   return (
     <div
+      data-setting-row
       className={cn(
         'flex flex-col gap-3 border-t border-line px-5 py-4 first:border-t-0',
         !stack && 'sm:flex-row sm:items-center sm:justify-between sm:gap-6',

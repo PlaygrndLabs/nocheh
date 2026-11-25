@@ -30,7 +30,7 @@ import {
 } from 'lucide-react';
 import {resolveRoute, type PageId} from './lib/routes';
 import {useHash, useParam} from './lib/navigation';
-import {tabLinks} from './lib/page-tabs';
+import {pageTitles, tabLinks} from './lib/page-tabs';
 import {useResource} from './lib/resource';
 import {useInboxCount} from './lib/inbox';
 import {cn} from './lib/utils';
@@ -39,24 +39,25 @@ import {Button, Dot, Field, Input, Spinner, type Tone} from './ui/core';
 import {FeedbackProvider} from './ui/overlay';
 import {SaveWatcher} from './ui/save-bar';
 import {LogoMark, Wordmark} from './ui/logo';
+import {CommandSearch, SearchButton, useSearchShortcut} from './ui/command-search';
 
 type NavIcon = React.ComponentType<{className?: string}>;
 /** A Nocheh page, or a link to a page of the assistant console. */
 type NavItem = {id: PageId; title: string; Icon: NavIcon} | {href: string; title: string; Icon: NavIcon};
 const nav: NavItem[] = [
-  {id: 'home', title: 'Home', Icon: Home},
-  {id: 'inbox', title: 'Inbox', Icon: Inbox},
-  {id: 'tasks', title: 'Tasks', Icon: ListChecks},
-  {id: 'schedules', title: 'Schedules', Icon: CalendarClock},
-  {id: 'chats', title: 'Chats', Icon: Users},
-  {id: 'members', title: 'Members', Icon: Contact},
-  {id: 'keys', title: 'Keys', Icon: KeyRound},
-  {id: 'messages', title: 'Messages', Icon: MessagesSquare},
-  {id: 'memory', title: 'Memory', Icon: BrainCircuit},
-  {id: 'usage', title: 'Usage', Icon: Gauge},
-  {id: 'system', title: 'System', Icon: Server},
-  {id: 'connections', title: 'Connections', Icon: Plug},
-  {id: 'settings', title: 'Settings', Icon: Settings},
+  {id: 'home', title: pageTitles.home, Icon: Home},
+  {id: 'inbox', title: pageTitles.inbox, Icon: Inbox},
+  {id: 'tasks', title: pageTitles.tasks, Icon: ListChecks},
+  {id: 'schedules', title: pageTitles.schedules, Icon: CalendarClock},
+  {id: 'chats', title: pageTitles.chats, Icon: Users},
+  {id: 'members', title: pageTitles.members, Icon: Contact},
+  {id: 'keys', title: pageTitles.keys, Icon: KeyRound},
+  {id: 'messages', title: pageTitles.messages, Icon: MessagesSquare},
+  {id: 'memory', title: pageTitles.memory, Icon: BrainCircuit},
+  {id: 'usage', title: pageTitles.usage, Icon: Gauge},
+  {id: 'system', title: pageTitles.system, Icon: Server},
+  {id: 'connections', title: pageTitles.connections, Icon: Plug},
+  {id: 'settings', title: pageTitles.settings, Icon: Settings},
 ];
 
 const pages: Record<PageId, React.LazyExoticComponent<React.ComponentType>> = {
@@ -173,11 +174,13 @@ function useOpenGroups(page: PageId): [(id: PageId) => boolean, (id: PageId) => 
 function Navigation({
   page,
   onNavigate,
+  onSearch,
   collapsed = false,
   onToggle,
 }: {
   page: PageId;
   onNavigate?: () => void;
+  onSearch: () => void;
   collapsed?: boolean;
   onToggle?: () => void;
 }) {
@@ -218,6 +221,9 @@ function Navigation({
           <span className="sr-only">Nocheh</span>
         </a>
         {toggle}
+      </div>
+      <div className={cn('mb-3', collapsed && 'flex justify-center')}>
+        <SearchButton onClick={onSearch} compact={collapsed} />
       </div>
       <nav aria-label="Main" className="-mx-1 flex min-h-0 flex-1 flex-col gap-0.5 overflow-y-auto px-1 pb-3">
         {nav.map(item => {
@@ -355,6 +361,11 @@ function App() {
   const page = resolveRoute(location.hash).page;
   const [menuOpen, setMenuOpen] = React.useState(false);
   const [collapsed, toggleCollapsed] = useCollapsed();
+  const [searching, setSearching] = useSearchShortcut();
+  const search = () => {
+    setMenuOpen(false);
+    setSearching(true);
+  };
   const main = React.useRef<HTMLElement>(null);
   React.useEffect(() => {
     main.current?.scrollTo({top: 0});
@@ -368,7 +379,7 @@ function App() {
           collapsed ? 'w-[68px] px-2' : 'w-60',
         )}
       >
-        <Navigation page={page} collapsed={collapsed} onToggle={toggleCollapsed} />
+        <Navigation page={page} collapsed={collapsed} onToggle={toggleCollapsed} onSearch={search} />
       </aside>
       <DialogPrimitive.Root open={menuOpen} onOpenChange={setMenuOpen}>
         <DialogPrimitive.Portal>
@@ -383,7 +394,7 @@ function App() {
                 <X aria-hidden />
               </Button>
             </DialogPrimitive.Close>
-            <Navigation page={page} onNavigate={() => setMenuOpen(false)} />
+            <Navigation page={page} onNavigate={() => setMenuOpen(false)} onSearch={search} />
           </DialogPrimitive.Content>
         </DialogPrimitive.Portal>
       </DialogPrimitive.Root>
@@ -397,6 +408,9 @@ function App() {
             <Wordmark className="w-[92px]" />
             <span className="sr-only">Nocheh</span>
           </a>
+          <div className="ml-auto pr-1">
+            <SearchButton onClick={search} compact />
+          </div>
         </header>
         <main ref={main} id="main" className="min-h-0 flex-1 overflow-y-auto">
           <React.Suspense
@@ -411,6 +425,7 @@ function App() {
           <SaveWatcher />
         </main>
       </div>
+      <CommandSearch open={searching} onOpenChange={setSearching} />
     </div>
   );
 }
