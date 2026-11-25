@@ -11,11 +11,11 @@ import {honchoEngine} from '../src/memory/honcho.js';
 import {installMembersForTest} from '../src/members.js';
 import {connectStores,initializeStoreDatabases} from '../src/stores/connections.js';
 import {RuntimeProfileRepository} from '../src/stores/runtime-profiles.js';
-import {chatSchedules,issueClockGrant,recordScheduleDefinition,recordScheduleTurn,scheduleTurn,timeZoneTurn} from '../src/stores/schedules.js';
+import {chatSchedules,issueClockGrant,memberSender,recordScheduleDefinition,recordScheduleTurn,scheduleTurn,timeZoneTurn} from '../src/stores/schedules.js';
 import {ownerTimeZone,setOwnerTimeZone} from '../src/stores/task-settings.js';
 import {storageWorkflowOperations} from '../src/stores/workflow-operations.js';
 import {fixtureServices,type FakeCall} from './fixture-agent.js';
-import {GP1,GP2,GP3,GP_GROUP_IDS,MEMBER_GP_ACCOUNT,MEMBER_GP_CHAT,MEMBER_GP_ID,MEMBER_NG_CHAT,NG_GROUP_IDS,OWNER,P1,fixtureMemberDirectory,fixtureChats,groupsPolicy,
+import {GP1,GP2,GP3,GP_GROUP_IDS,MEMBER_GP,MEMBER_GP_ACCOUNT,MEMBER_GP_CHAT,MEMBER_GP_ID,MEMBER_NG,MEMBER_NG_CHAT,MEMBER_NG_ID,NG1,NG_GROUP_IDS,OWNER,P1,fixtureMemberDirectory,fixtureChats,groupsPolicy,
   seedChats,seedGroups,seedMembers} from './fixture-groups.js';
 
 /*
@@ -228,6 +228,33 @@ test('a member\'s own schedules: captured only with Personal assistant on, run a
     await assert.rejects(timeZoneTurn(ownerLive,{admin:false,scope:null,space:OWNER,answer:true} as any,{time_zone:'UTC'}),{status:403,code:'time_zone_not_here'});
     assert.equal(await ownerTimeZone(stores.control),'America/Chicago');
     await setOwnerTimeZone(stores.control,ownerZone);
+
+    // A member's own typed words are theirs also in a private chat first seen after step 2b, whose id is a digest and not
+    // their Telegram user id: their schedule runs, not held as steered by someone else's words (ADR-0294).
+    assert.equal(await memberSender(stores.control,MEMBER_GP_CHAT,MEMBER_GP_ID),MEMBER_GP);
+    assert.equal(await memberSender(stores.control,MEMBER_NG_CHAT,MEMBER_NG_ID),MEMBER_NG);
+    assert.notEqual(MEMBER_NG_CHAT,MEMBER_NG);
+    for(const [chat,id] of [[MEMBER_NG_CHAT,MEMBER_GP_ID],[MEMBER_GP_CHAT,MEMBER_NG_ID],[OWNER,MEMBER_GP_ID]])assert.equal(await memberSender(stores.control,chat!,id!),null);
+    await stores.control.query('UPDATE members SET assistant=true WHERE id=$1',[MEMBER_NG_ID]);
+    restore();restore=installMembersForTest(fixtureMemberDirectory({[MEMBER_GP_ID]:{assistant:true},[MEMBER_NG_ID]:{assistant:true}}));
+    {
+      const ngTurn:Reader={admin:false,scope:MEMBER_NG_CHAT,space:MEMBER_NG_CHAT,member:MEMBER_NG_ID,memberChat:MEMBER_NG_CHAT,
+        reads:{home:MEMBER_NG_CHAT,whole:[NG1]},turnEvent:digest('member-ng-turn-'+base)} as any;
+      const ngProfile='nocheh-'+digest(MEMBER_NG_CHAT).slice(0,24);
+      const own=(from:string)=>({query:async(sql:string)=>({rows:[{id:ngTurn.turnEvent,payload:Buffer.from(JSON.stringify(
+        {message:{message_id:1,chat:{id:Number(MEMBER_NG),type:'private'},from:{id:Number(from)},text:'Remind me every hour'}}))}].filter(()=>!sql.includes('FROM artifacts'))})}) as any;
+      const ngServices={...turnServices,stores:{...turnServices.stores,archive:own(MEMBER_NG)},turns:{binding:async()=>({logical_profile:ngProfile})}};
+      assert.equal((await recordScheduleTurn(ngServices,ngTurn,await scheduleTurn(ngServices,ngTurn))).allowed,true);
+      const ngDefinition=(job:string)=>({scope:MEMBER_NG_CHAT,profile:ngProfile,job_id:job,workflow_cursor:digest(job),workflow_sequence:1,
+        definition:{profile:ngProfile,name:'Hourly',prompt:'Remind me',schedule:{kind:'interval',minutes:60,display:'every 60m'},deliver:'telegram',repeat:null,
+          enabled:true,removed:false,preferences:{},execution_version:'v1',timezone:null}});
+      const set=await s.schedules.turnDefinition(ngTurn,ngDefinition('ng-'+base),ngServices);
+      assert.deepEqual([set.created,set.held],[true,false],'her own words set it running');
+      // Someone else's words in that chat are still outside content.
+      await assert.rejects(s.schedules.turnDefinition(ngTurn,ngDefinition('ng-other-'+base),{...ngServices,stores:{...ngServices.stores,archive:own(MEMBER_GP)}}),
+        {status:409,code:'schedule_start_needed'});
+    }
+    await stores.control.query('UPDATE members SET assistant=false WHERE id=$1',[MEMBER_NG_ID]);
 
     // Personal assistant off: her chat stops being a profile, nothing new is captured, and a reply may set none.
     await stores.control.query('UPDATE members SET assistant=false WHERE id=$1',[MEMBER_GP_ID]);
