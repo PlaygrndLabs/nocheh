@@ -4805,6 +4805,8 @@ test('Cmd+K search finds pages, settings, chats, members, people, projects, task
     assert.match(page.url(), address, `${group}: ${title}`);
     // A schedule has no page of its own: its row is shown.
     if (group === 'Schedules') await page.locator('tr[data-search-found]', {hasText: title}).waitFor();
+    // A person opens in a side panel; it must be open before the next search, or it opens over the search box.
+    if (group === 'People') await page.locator('#person-note').waitFor();
   }
   // The arrow keys and Enter pick a result.
   const box = await search(page, 'speed');
