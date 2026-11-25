@@ -180,15 +180,7 @@ class TurnTests(unittest.TestCase):
                 self.assertFalse(assistant_turn.schedule_turn(other,profile),other)
             self.assertEqual(answers,[],'Nocheh is asked only for a reply that could get the tool')
             with patch('services.hermes.archive_tools.request',lambda *a,**k:{'allowed':False}):
-                self.assertFalse(assistant_turn.schedule_turn(body,profile),'Nocheh said no: not a chat with schedules')
-            # A chat with schedules, but a message that may not set one (a forward, or not live): the tool is offered,
-            # so the reply's tools stay the same from message to message, and the unbound gate refuses every call.
-            with patch('services.hermes.archive_tools.request',lambda *a,**k:{'allowed':False,'offered':True,'time_zone':'UTC','profile':None,'scope':None}):
-                self.assertTrue(assistant_turn.schedule_turn(body,profile),'offered')
-            self.assertFalse(gate.bound())
-            self.assertEqual(os.environ.get('HERMES_GATEWAY_SESSION'),'1')
-            self.assertEqual(gate.tool_call('cronjob_manage',{'action':'list'}),{'action':'block','message':gate.UNBOUND})
-            os.environ.pop('HERMES_GATEWAY_SESSION',None)
+                self.assertFalse(assistant_turn.schedule_turn(body,profile),'Nocheh said no: a forward, or not the owner\'s message')
             # Nocheh names where it records this turn's schedules: without a chat profile and chat, no tool.
             for missing in ({'profile':None},{'profile':'default'},{'scope':''},{'scope':None}):
                 with patch('services.hermes.archive_tools.request',lambda *a,missing=missing,**k:{**request('/v1/schedules/turn'),**missing}):

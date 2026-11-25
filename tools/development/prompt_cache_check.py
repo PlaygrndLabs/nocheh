@@ -9,12 +9,13 @@ through Nocheh's request boundary and memory evidence as in a reply, with an ide
 Run with the Hermes environment of the Hermes Python tests, from the repository root:
 
   PYTHONPATH=<hermes checkout>:. <hermes venv>/bin/python -m tools.development.prompt_cache_check \\
-      --ttl auto --placement after --gaps 0,60,600,120,1800,90,2400,60,200,45 --forwards 3,6
+      --ttl 5m --placement first --gaps 0,60,600,120,1800,90,2400,60,200,45 --forwards 3,6 --tool-rounds 2
 
 It prints one line per model call and a total: input tokens read, written and sent uncached, the share read, and the
 input cost in token-units (uncached 1, read 0.1, five-minute write 1.25, one-hour write 2). Token counts are estimated
-at four characters a token. `--placement first --ttl 5m --no-steady-schedules --forwards ...` reproduces the layout
-before ADR-0307. The stand-in model answers in text and never calls a tool.
+at four characters a token. The defaults are the live layout. `--placement after` moves the memory evidence to right
+after the turn's own message, `--ttl auto` is Hermes's adaptive cache life, `--steady-schedules` keeps the schedule tool
+on forwarded messages, and `--tool-rounds N` has the stand-in model make N rounds of two tool calls before it answers.
 """
 import argparse
 import hashlib
@@ -97,12 +98,20 @@ def serve(cache, state):
                 self.send_response(404); self.send_header('content-length', '0'); self.end_headers()
                 return
             read, write, uncached = cache.request(body, state['turn'])
+            state['calls'] += 1
             usage = {'input_tokens': uncached, 'output_tokens': 5, 'cache_read_input_tokens': read,
                      'cache_creation_input_tokens': write}
             text = f"answer {state['turn']} " + 'with the points the person asked about ' * 30
             message = {'id': 'msg_check', 'type': 'message', 'role': 'assistant', 'model': body['model'],
                        'content': [{'type': 'text', 'text': text}], 'stop_reason': 'end_turn', 'stop_sequence': None, 'usage': usage}
-            if not body.get('stream'):
+            if state['calls'] <= state['tool_rounds']:
+                # A round of two archive searches, as a reply that looks things up makes.
+                uses = [{'type': 'tool_use', 'id': f"toolu_{state['turn']}_{state['calls']}_{n}", 'name': 'session_search',
+                         'input': {'query': f'plans {n}'}} for n in range(2)]
+                message = {**message, 'content': uses, 'stop_reason': 'tool_use'}
+            if not body.get('stream') or message['stop_reason'] == 'tool_use':
+                if body.get('stream'):
+                    self.stream_tools(message); return
                 data = json.dumps(message).encode()
                 self.send_response(200); self.send_header('content-type', 'application/json')
                 self.send_header('content-length', str(len(data))); self.end_headers(); self.wfile.write(data)
@@ -116,6 +125,19 @@ def serve(cache, state):
                     ('message_delta', {'type': 'message_delta', 'delta': {'stop_reason': 'end_turn', 'stop_sequence': None}, 'usage': {'output_tokens': 5}}),
                     ('message_stop', {'type': 'message_stop'})):
                 self.wfile.write(f'event: {name}\ndata: {json.dumps(data)}\n\n'.encode())
+        def stream_tools(self, message):
+            self.send_response(200); self.send_header('content-type', 'text/event-stream'); self.end_headers()
+            events = [('message_start', {'type': 'message_start', 'message': {**message, 'content': [], 'stop_reason': None}})]
+            for index, use in enumerate(message['content']):
+                events += [('content_block_start', {'type': 'content_block_start', 'index': index, 'content_block': {**use, 'input': {}}}),
+                           ('content_block_delta', {'type': 'content_block_delta', 'index': index,
+                                                    'delta': {'type': 'input_json_delta', 'partial_json': json.dumps(use['input'])}}),
+                           ('content_block_stop', {'type': 'content_block_stop', 'index': index})]
+            events += [('message_delta', {'type': 'message_delta', 'delta': {'stop_reason': 'tool_use', 'stop_sequence': None}, 'usage': {'output_tokens': 5}}),
+                       ('message_stop', {'type': 'message_stop'})]
+            for name, data in events:
+                self.wfile.write(f'event: {name}\ndata: {json.dumps(data)}\n\n'.encode())
+
     server = ThreadingHTTPServer(('127.0.0.1', 0), Handler)
     threading.Thread(target=server.serve_forever, daemon=True).start()
     return server
@@ -123,27 +145,28 @@ def serve(cache, state):
 
 def main():
     parser = argparse.ArgumentParser(description=__doc__.split('\n')[0])
-    parser.add_argument('--ttl', default='auto', choices=['5m', '1h', 'auto'])
-    parser.add_argument('--placement', default='after', choices=['first', 'after'])
+    parser.add_argument('--ttl', default='5m', choices=['5m', '1h', 'auto'])
+    parser.add_argument('--placement', default='first', choices=['first', 'after'])
     parser.add_argument('--gaps', default='0,60,600,120,1800,90,2400,60,200,45', help='seconds before each reply')
     parser.add_argument('--forwards', default='', help='replies (from 1) to a forwarded message, which may not set a schedule')
-    parser.add_argument('--steady-schedules', action=argparse.BooleanOptionalAction, default=True,
-                        help='a forward keeps the schedule tool (ADR-0307); --no-steady-schedules drops it, as before')
+    parser.add_argument('--steady-schedules', action=argparse.BooleanOptionalAction, default=False,
+                        help='a forward keeps the schedule tool; live, a forward drops it')
     parser.add_argument('--memory', default='changing', choices=['none', 'same', 'changing'])
     parser.add_argument('--scale', type=int, default=3, help='size of memory and messages')
+    parser.add_argument('--tool-rounds', type=int, default=0, help='rounds of two tool calls before each answer')
     args = parser.parse_args()
-    cache, state = Cache(), {'turn': 0}
+    cache, state = Cache(), {'turn': 0, 'calls': 0, 'tool_rounds': args.tool_rounds}
     server = serve(cache, state)
     forwards = {int(n) for n in args.forwards.split(',') if n}
     now = 0.0
     with tempfile.TemporaryDirectory(prefix='nocheh-cache-check-') as home:
         for turn, gap in enumerate((float(n) for n in args.gaps.split(',')), 1):
-            now += gap; cache.now = now; state['turn'] = turn
+            now += gap; cache.now = now; state['turn'] = turn; state['calls'] = 0
             schedules = args.steady_schedules or turn not in forwards
             env = {**os.environ, 'HERMES_HOME': home, 'CHECK_CLOCK': str(now), 'CHECK_TURN': str(turn),
                    'CHECK_URL': f'http://127.0.0.1:{server.server_address[1]}/anthropic', 'CHECK_TTL': args.ttl,
                    'CHECK_PLACEMENT': args.placement, 'CHECK_MEMORY': args.memory, 'CHECK_SCALE': str(args.scale),
-                   'CHECK_SCHEDULES': '1' if schedules else '0'}
+                   'CHECK_SCHEDULES': '1' if schedules else '0', 'CHECK_TOOL_ROUNDS': str(args.tool_rounds)}
             done = subprocess.run([sys.executable, '-m', 'tools.development.prompt_cache_check', '--reply'], cwd=ROOT, env=env,
                                   capture_output=True, text=True, timeout=300)
             if done.returncode:
@@ -153,9 +176,27 @@ def main():
         print(json.dumps(call))
     total = {name: sum(call[name] for call in cache.calls) for name in ('total', 'read', 'write', 'uncached')}
     cost = sum(c['uncached'] + .1 * c['read'] + (2 if c['ttl'] == ['1h'] else 1.25) * c['write'] for c in cache.calls)
-    print(json.dumps({'ttl': args.ttl, 'placement': args.placement, 'forwards': sorted(forwards),
+    print(json.dumps({'ttl': args.ttl, 'placement': args.placement, 'forwards': sorted(forwards), 'tool_rounds': args.tool_rounds,
                       'steady_schedules': args.steady_schedules, **total,
                       'read_share': round(total['read'] / max(1, total['total']), 3), 'input_cost_units': round(cost)}))
+
+
+def moved(payload):
+    """The payload with Nocheh's memory evidence, which it puts first, moved to right after the turn's own message: the
+    layout ADR-0307 measured and did not take. The turn's message is the last user message with an archive source line."""
+    from services.hermes.memory_evidence import PREFIX
+    messages = [dict(message) for message in payload.get('messages') or []]
+    first = messages[0].get('content') if messages else None
+    if not isinstance(first, list) or not first or not str(first[0].get('text', '')).startswith(PREFIX):
+        return payload
+    evidence, messages[0]['content'] = first[0], first[1:]
+    for message in reversed(messages):
+        content = message.get('content')
+        texts = [content] if isinstance(content, str) else [str(part.get('text', '')) for part in content or [] if isinstance(part, dict)]
+        if message.get('role') == 'user' and any('[Archive source: nocheh:event:' in text for text in texts):
+            message['content'] = ([{'type': 'text', 'text': content}] if isinstance(content, str) else list(content)) + [evidence]
+            return {**payload, 'messages': messages}
+    return payload
 
 
 def reply():
@@ -174,7 +215,8 @@ def reply():
     from services.hermes.assistant_turn import bind_profile_home
     from services.hermes.prepared_context import install as prepare_native
     bind_profile_home(profile); prepare_native()
-    request_boundary.install(request_boundary.Boundary('on', transform=lambda url, payload: payload))
+    after = os.environ['CHECK_PLACEMENT'] == 'after'
+    request_boundary.install(request_boundary.Boundary('on', transform=lambda url, payload: moved(payload) if after else payload))
     message = (f'message {turn} from the person ' + 'with what they need today ' * 20 * scale +
                f'\n\n[Archive source: nocheh:event:check-{turn}]')
     restore = lambda: None
@@ -182,7 +224,7 @@ def reply():
         recalled = {'summary': 'The person runs a small studio and plans the week ahead. ' * 60 * scale,
                     'facts': [f'fact {n} about the person' for n in range(150 * scale)] +
                              ([f'a fact learned before reply {turn}'] if os.environ['CHECK_MEMORY'] == 'changing' else [])}
-        restore = memory_evidence.install(recalled, {}, os.environ['CHECK_PLACEMENT'], message)
+        restore = memory_evidence.install(recalled, {})
     schedules = os.environ['CHECK_SCHEDULES'] == '1'
     if schedules:
         os.environ['HERMES_GATEWAY_SESSION'] = '1'
@@ -194,7 +236,7 @@ def reply():
                     base_url=os.environ['CHECK_URL'], enabled_toolsets=['memory', 'session_search', 'skills'] + (['cronjob'] if schedules else []),
                     session_id=session, persistence=database, platform='telegram', chat_id='1', user_id='1', chat_type='dm',
                     skip_context_files=True, skip_memory=False, skip_background_review=True, quiet_mode=True, save_trajectories=False,
-                    max_iterations=4, ephemeral_system_prompt='Reply rules for this chat. ' * 200 + (' Schedules rules.' if schedules else ''))
+                    max_iterations=4 + int(os.environ['CHECK_TOOL_ROUNDS']), ephemeral_system_prompt='Reply rules for this chat. ' * 200 + (' Schedules rules.' if schedules else ''))
     agent._skip_mcp_refresh = True
     memory_evidence.collect(agent)
     try:

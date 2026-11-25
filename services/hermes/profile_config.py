@@ -71,12 +71,9 @@ def resolved(config, model):
     from .security_transport import anthropic_reply_route, isolated_enabled
     provider = 'openai'
     config['model'] = {'provider': 'anthropic' if isolated_enabled() and anthropic_reply_route() else provider, 'default': model}
-    # Hermes marks the stable start of each prompt for the provider's prompt cache. 'auto', Hermes's default, keeps a
-    # chat on the cheaper five-minute cache until its first pause of more than five minutes, then on the one-hour cache,
-    # so a reply after a pause reads the conversation instead of writing it again. Schedules and reviews start their
-    # own session and stay on five minutes; a job relaunched after a pause keeps its session and moves to one hour
-    # (ADR-0307).
-    config['prompt_caching'] = {'cache_ttl': 'auto'}
+    # Hermes marks the stable start of each prompt for the provider's prompt cache. Five
+    # minutes is Hermes's default and the cheapest cache write.
+    config['prompt_caching'] = {'cache_ttl': '5m'}
     # Voice notes are archived without transcription.
     config['stt'] = {'enabled': False}
     config['plugins'] = {'enabled': ['nocheh']}

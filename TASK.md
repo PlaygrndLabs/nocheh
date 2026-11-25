@@ -96,10 +96,6 @@ Checks and follow-ups:
   one live check on the owner's install with the setting on: a typed command runs, and the same command after a
   forward in that day's conversation shows its card with the reason line.
 - Development startup order: a full tester run of `project_groups_stay_apart` alone.
-- Prompt cache ([ADR-0307](docs/adr/0307-replies-keep-the-conversation-in-the-prompt-cache.md), proposed): waits for the
-  owner's choice of where the memory evidence goes, then one check of reply quality with the real model, and the daily
-  reply cache reads and writes on Usage for a few days after. Left out: memory thinking on Anthropic's cached route,
-  one-minute learning batches, and keeping a profile across quiet guard epochs.
 - Talk while it works ([ADR-0301](docs/adr/0301-a-message-joins-the-running-turn-in-its-chat.md)): the tester covers it
   (`message_joins_running_turn`); left is one check with the real model, two messages in a row while the agent uses a tool.
 - A project's tasks are one list ([ADR-0276](docs/adr/0276-a-projects-tasks-are-one-list.md)): a full tester run of

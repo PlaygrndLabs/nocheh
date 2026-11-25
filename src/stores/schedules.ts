@@ -437,10 +437,8 @@ export function recordScheduleDefinition(schedules:ScheduleRepository,input:unkn
   return schedules.record(input,async()=>authorization);
 }
 
-/** What a reply may do with Hermes's schedule tool (ADR-0266). `offered`: the chat itself has schedules (the owner's
- *  private chat, or a member's with Personal assistant on), even when this message may not set one, so the reply keeps
- *  the same tools from message to message and the prompt cache with them (ADR-0307). */
-export interface ScheduleTurnRules {allowed:boolean;offered?:boolean;time_zone:string;limit:number|null;count:number|null}
+/** What a reply may do with Hermes's schedule tool (ADR-0266). */
+export interface ScheduleTurnRules {allowed:boolean;time_zone:string;limit:number|null;count:number|null}
 interface ScheduleTurnServices {
   knowledge:{ownerTurn(principal:Reader):Promise<{source:TurnSource}>;liveGroupTurn(principal:Reader):Promise<{source:TurnSource}>};
   stores:{archive:pg.Pool;control:pg.Pool};
@@ -467,14 +465,12 @@ export async function scheduleTurn(s:ScheduleTurnServices,principal:Reader):Prom
     limits={limit:Number(row.limit),count:await chatSchedules(s.stores.control,chat)};zone=row.time_zone;
   }
   const {source}=member?await s.knowledge.liveGroupTurn(principal):await s.knowledge.ownerTurn(principal);
-  // The chat has schedules: a message that may not set one (not live, or forwarded) is refused, but still offered.
-  const declined={...refused,offered:true};
-  if(source.channel!=='telegram'||source.kind!=='telegram_update'||source.origin!=='live')return declined;
+  if(source.channel!=='telegram'||source.kind!=='telegram_update'||source.origin!=='live')return refused;
   const original=(await s.stores.archive.query('SELECT payload FROM events WHERE id=$1',[source.reference.id])).rows[0];
   let message:unknown=null;
   try{message=original?(JSON.parse(original.payload.toString()) as {message?:unknown}).message:null;}catch{message=null;}
-  if(!message||typeof message!=='object'||forwardedMessage(message as Record<string,unknown>))return declined;
-  return {allowed:true,offered:true,time_zone:zone??await ownerTimeZone(s.stores.control),...limits};
+  if(!message||typeof message!=='object'||forwardedMessage(message as Record<string,unknown>))return refused;
+  return {allowed:true,time_zone:zone??await ownerTimeZone(s.stores.control),...limits};
 }
 
 /** POST /v1/schedules/turn's answer: the rules, and the chat and profile a schedule this turn sets must name (ADR-0290). */
