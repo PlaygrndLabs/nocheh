@@ -5,7 +5,8 @@ import { join } from 'node:path';
 import { tmpdir } from 'node:os';
 import type { IncomingMessage } from 'node:http';
 import pg from 'pg';
-import { reader, scopeToken, admin } from '../src/access.js';
+import { reader, admin } from '../src/access.js';
+import { keyPass } from './one-time-key-pass.js';
 import { digest, ingest, type Envelope } from '../src/archive.js';
 import { initialize } from '../src/database.js';
 import { settings } from './fixture-settings.js';
@@ -14,13 +15,13 @@ import { exportPage, importRecord, readArtifact, readEvent, replay, search, uplo
 test('scope capabilities are signed, expiring and cannot grant administrative writes',()=>{
   const secret='test-only-service-secret-long-enough',now=Date.now();
   const request=(token:string)=>({headers:{authorization:`Bearer ${token}`}} as IncomingMessage);
-  const token=scopeToken(secret,'-100',now+60000);
-  assert.deepEqual(reader(request(token),secret,now),{scope:'-100',admin:false});
+  const token=keyPass(secret,'-100',now+60000);
+  assert.equal(reader(request(token),secret,now).scope,'-100');assert.equal(reader(request(token),secret,now).admin,false);
   assert.throws(()=>admin(reader(request(token),secret,now)),{code:'owner_required'});
   assert.throws(()=>reader(request(token.slice(0,-4)+'fake'),secret,now),{code:'invalid_scope_token'});
   assert.throws(()=>reader({headers:{authorization:secret}} as IncomingMessage,secret,now),{code:'unauthorized'});
   assert.throws(()=>reader(request(token),secret,now+60001),{code:'invalid_scope_token'});
-  assert.throws(()=>admin(reader(request(scopeToken(secret,null,now+60000)),secret,now)),{code:'owner_required'});
+  assert.throws(()=>admin(reader(request(keyPass(secret,null,now+60000)),secret,now)),{code:'owner_required'});
 });
 
 test('real PostgreSQL: scoped reads and export/reimport preserve originals, files and provenance without replay replies',{skip:!process.env.PGHOST},async()=>{

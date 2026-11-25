@@ -61,7 +61,7 @@ def review_profile(root,policy,model,body):
     if not re.fullmatch(r'[a-f0-9]{64}',body.get('id','')) or not isinstance(body.get('content'),str) or len(body['content'])>12000:
         raise ValueError('invalid_review_request')
     scope=Scope(owner,served.owner_user() or '',True,Scopes.profile(owner),owner)
-    claims=check_claims(body['archive_credential'],scope,body['event_id'])
+    claims=check_claims(body['archive_credential'],scope,body['event_id'],('review',))
     if claims.get('generation') and claims.get('purpose')!='memory-review':raise ValueError('review_capability_required')
     scope=Scopes.apply_revision(scope,claims)
     return prepare_profile(root,scope,model)

@@ -2,7 +2,8 @@ import {test} from 'node:test';
 import assert from 'node:assert/strict';
 import type pg from 'pg';
 import {HttpError} from '../src/http.js';
-import {turnToken,type Reader} from '../src/access.js';
+import {type Reader} from '../src/access.js';
+import {keyPass} from './one-time-key-pass.js';
 import {brokerServer,scopedRoute,type TurnBinding} from '../src/security/broker.js';
 import {TASK_PROJECTS_NAMED,TaskProjectRequired} from '../src/stores/tasks.js';
 
@@ -23,7 +24,7 @@ test('knowledge broker exposes only typed routes and preserves the scoped creden
   await new Promise<void>(resolve=>server.listen(0,'127.0.0.1',resolve));
   try {
     const address=server.address();assert.ok(address&&typeof address!=='string');const base='http://127.0.0.1:'+address.port;
-    const credential=(scope:string|null,purpose?:Reader['purpose'])=>turnToken(secret,scope,Date.now()+600000,source,{space:scope??'42',revision:1,guard_epoch:1,...(purpose?{purpose}:{})});
+    const credential=(scope:string|null,purpose?:Reader['purpose'])=>keyPass(secret,scope,Date.now()+600000,source,{space:scope??'42',revision:1,guard_epoch:1,...(purpose?{purpose}:{})});
     const owner=credential(null,'assistant'),group=credential('-10');
     const request=(path:string,body:unknown|undefined,key=owner)=>fetch(base+path,{method:body===undefined?'GET':'POST',headers:{authorization:'Bearer '+key,'content-type':'application/json'},...(body===undefined?{}:{body:JSON.stringify(body)})});
     const input={operation_id:'synthetic-operation',proposal:{kind:'organization',reason:'Fixture',creates:[],assignments:[]}};
@@ -65,7 +66,7 @@ test('task routes reach storage only from a live owner-private or group turn and
   await new Promise<void>(resolve=>server.listen(0,'127.0.0.1',resolve));
   try {
     const address=server.address();assert.ok(address&&typeof address!=='string');const base='http://127.0.0.1:'+address.port;
-    const credential=(scope:string|null,purpose:Reader['purpose']='assistant')=>turnToken(secret,scope,Date.now()+600000,source,{space:scope??'42',revision:1,guard_epoch:1,purpose});
+    const credential=(scope:string|null,purpose:Reader['purpose']='assistant')=>keyPass(secret,scope,Date.now()+600000,source,{space:scope??'42',revision:1,guard_epoch:1,purpose});
     const request=(path:string,body:unknown|undefined,key=credential(null))=>fetch(base+path,{method:body===undefined?'GET':'POST',headers:{authorization:'Bearer '+key,'content-type':'application/json'},...(body===undefined?{}:{body:JSON.stringify(body)})});
     assert.equal((await request('/v1/owner/tasks?state=open',undefined)).status,200);
     assert.equal((await request('/v1/owner/tasks',{title:'Synthetic task'})).status,200);
@@ -110,7 +111,7 @@ test('a task refusal naming 50 projects with long non-Latin names reaches the tu
   await new Promise<void>(resolve=>server.listen(0,'127.0.0.1',resolve));
   try {
     const address=server.address();assert.ok(address&&typeof address!=='string');const base='http://127.0.0.1:'+address.port;
-    const key=turnToken(secret,'-10',Date.now()+600000,source,{space:'-10',revision:1,guard_epoch:1,purpose:'assistant'});
+    const key=keyPass(secret,'-10',Date.now()+600000,source,{space:'-10',revision:1,guard_epoch:1,purpose:'assistant'});
     const list=async()=>{const response=await fetch(base+'/v1/owner/tasks?state=open',{headers:{authorization:'Bearer '+key}});return {status:response.status,body:await response.json() as any};};
     assert.ok(Buffer.byteLength(JSON.stringify(refusal))>4096);
     const refused=await list();

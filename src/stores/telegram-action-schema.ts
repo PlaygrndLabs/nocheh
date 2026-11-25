@@ -21,6 +21,9 @@ ALTER TABLE telegram_action_requests ADD COLUMN IF NOT EXISTS asker_account text
 -- What kind of message the send is (ADR-0256): an approved post, a job's report, a scheduled result, or a notice, which
 -- memory keeps but does not learn. Older rows have none and are approved posts.
 ALTER TABLE telegram_action_requests ADD COLUMN IF NOT EXISTS send_class text CHECK(send_class IN ('approved_post','job_report','scheduled_run','notice'));
+-- Who asked for the send through which agent, from the asking turn's one-time key (ADR-0305); null on Nocheh's own sends.
+ALTER TABLE telegram_action_requests ADD COLUMN IF NOT EXISTS person text CHECK(person IS NULL OR person='owner' OR person ~ '^[a-f0-9]{64}$');
+ALTER TABLE telegram_action_requests ADD COLUMN IF NOT EXISTS agent text CHECK(agent IS NULL OR agent ~ '^[a-z][a-z0-9-]{0,31}$');
 CREATE TABLE IF NOT EXISTS telegram_action_decisions (
  operation_id text PRIMARY KEY,request_hash text NOT NULL,action_id text NOT NULL REFERENCES telegram_action_requests(id),
  decision text NOT NULL CHECK(decision IN ('approve','deny')),revision integer NOT NULL,source_reference jsonb,

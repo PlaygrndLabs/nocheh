@@ -5,7 +5,8 @@ import {mkdtemp,rm} from 'node:fs/promises';
 import {tmpdir} from 'node:os';
 import {join} from 'node:path';
 import type pg from 'pg';
-import {turnToken,type Reader} from '../src/access.js';
+import {type Reader} from '../src/access.js';
+import {keyPass} from './one-time-key-pass.js';
 import {telegramDeliveryAllowed} from '../src/assistant-policy.js';
 import {HttpError} from '../src/http.js';
 import {brokerServer,type TurnBinding} from '../src/security/broker.js';
@@ -25,7 +26,7 @@ installChatsForTest(fixtureDirectory());
 const secret='synthetic-service-token-only-for-tests',start='e'.repeat(64),answer='a'.repeat(32),hex='b'.repeat(64);
 const reads=readSet({home:GP1_TOPIC,whole:[GP1,GP2,GP3],project:P1});
 /** The pass of a private answer: the asker's private chat as scope and space, and the record it answers. */
-const answerPass=()=>turnToken(secret,OWNER,Date.now()+60000,start,{space:OWNER,revision:1,guard_epoch:1,answer});
+const answerPass=()=>keyPass(secret,OWNER,Date.now()+60000,start,{space:OWNER,revision:1,guard_epoch:1,answer});
 const listen=async(server:Server)=>{await new Promise<void>(resolve=>server.listen(0,'127.0.0.1',resolve));const address=server.address();if(!address||typeof address==='string')throw Error();return 'http://127.0.0.1:'+address.port;};
 const close=async(server:Server)=>{server.closeAllConnections();await new Promise<void>(resolve=>server.close(()=>resolve()));};
 
@@ -67,7 +68,7 @@ test('storage binds an answer pass to its record on every request and refuses ev
     if(!open)throw new HttpError(409,'private_answer_closed');return {...principal,reads};};
   const s={stores:{control:{query:async(sql:string,values:unknown[])=>{calls.push(['imports',values[0]]);return {rows:[]};}},archive:{query:async()=>({rows:[]})}},
     access:{bindReads:async(principal:Reader)=>bound(principal),bindMachine:async(principal:Reader)=>principal,reads:(principal:Reader)=>principal.reads,policy:()=>groupsPolicy()},
-    turns:{assertAudience:async()=>{}},guards:{state:async()=>({mode:'on'})},configuration:{assert:async()=>{}},prepared:{allow:async()=>{}},
+    turns:{assertKey:async()=>{},assertAudience:async()=>{}},guards:{state:async()=>({mode:'on'})},configuration:{assert:async()=>{}},prepared:{allow:async()=>{}},
     sources:{search:async(principal:Reader,query:string)=>{calls.push(['search',principal.reads,query]);return [];}},
     telegramActions:{request:async()=>{calls.push(['request']);return {};}},actionCommands:{offer:async()=>({})}};
   const server=storageServer(s as unknown as Parameters<typeof storageServer>[0],{token:secret,dataDir:root,guardMode:'on'} as Parameters<typeof storageServer>[1],async()=>({}));
@@ -92,7 +93,7 @@ test('storage binds an answer pass to its record on every request and refuses ev
     assert.deepEqual(calls.splice(0),[['bind',answer,start,false]]);
     // A group pass is bound too: storage decides whether its project shares its group chats (ADR-0267).
     open=true;
-    const group=turnToken(secret,GP1,Date.now()+60000,start,{space:GP1,revision:1,guard_epoch:1});
+    const group=keyPass(secret,GP1,Date.now()+60000,start,{space:GP1,revision:1,guard_epoch:1});
     assert.equal((await call('GET','/v1/search?q=invoice',group)).status,200);
     assert.deepEqual(calls.splice(0),[['bind',undefined,start,false],['search',reads,'invoice']]);
   }finally{await close(server);await rm(root,{recursive:true,force:true});}

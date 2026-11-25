@@ -3,7 +3,7 @@ import assert from 'node:assert/strict';
 import {once} from 'node:events';
 import {tmpdir} from 'node:os';
 import {join} from 'node:path';
-import {scopeToken} from '../src/access.js';
+import {keyPass} from './one-time-key-pass.js';
 import {storageServer} from '../src/stores/server.js';
 
 test('storage takes no browser input, run or delivery while the dashboard chat page is off, whatever the caller holds',async()=>{
@@ -13,7 +13,7 @@ test('storage takes no browser input, run or delivery while the dashboard chat p
   const base='http://127.0.0.1:'+(server.address() as {port:number}).port;
   try {
     const operations=['input','delivered','admit','workflow-context','claim','prepare','heartbeat','finish','cancel','observe','active','undelivered','unknown'];
-    for(const credential of [token,scopeToken(token,'123',Date.now()+60000),null])
+    for(const credential of [token,keyPass(token,'123',Date.now()+60000),null])
       for(const operation of operations) {
         const answer=await fetch(base+'/v1/browser/'+operation,{method:'POST',headers:credential?{authorization:'Bearer '+credential}:{},
           body:JSON.stringify({scope:'123',conversation:'c1',id:'submission',text:'Synthetic browser text',files:[]})});
