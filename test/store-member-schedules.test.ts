@@ -13,6 +13,8 @@ import {connectStores,initializeStoreDatabases} from '../src/stores/connections.
 import {RuntimeProfileRepository} from '../src/stores/runtime-profiles.js';
 import {chatSchedules,issueClockGrant,memberSender,recordScheduleDefinition,recordScheduleTurn,scheduleTurn,timeZoneTurn} from '../src/stores/schedules.js';
 import {ownerTimeZone,setOwnerTimeZone} from '../src/stores/task-settings.js';
+import {sendsTo} from '../src/stores/telegram-actions.js';
+import {currentChats} from '../src/stores/chats.js';
 import {storageWorkflowOperations} from '../src/stores/workflow-operations.js';
 import {fixtureServices,type FakeCall} from './fixture-agent.js';
 import {GP1,GP2,GP3,GP_GROUP_IDS,MEMBER_GP,MEMBER_GP_ACCOUNT,MEMBER_GP_CHAT,MEMBER_GP_ID,MEMBER_NG,MEMBER_NG_CHAT,MEMBER_NG_ID,NG1,NG_GROUP_IDS,OWNER,P1,fixtureMemberDirectory,fixtureChats,groupsPolicy,
@@ -42,10 +44,12 @@ test('a member\'s own schedules: captured only with Personal assistant on, run a
     if(op==='schedule.advance')return {state:'waiting',next_attempt:Date.now()+60000};
     if(op==='run.resume')return native.get(String(body.event_id))??{state:'not_found'};
     if(op==='run.cancel')return {state:'cancelled'};
+    // The bot's last check before it sends.
+    if(op==='action.execute'){delivered.push(await s.telegramActions.authorizeDelivery(body).then(()=>String(body.destination),error=>String(error?.code)));return {state:'done'};}
     assert.equal(op,'run.start');const id=String(body.event_id);
     try{return await start(id,body);}catch(error){failures.push(error);throw error;}
   };
-  const failures:unknown[]=[];
+  const failures:unknown[]=[],delivered:string[]=[];
   const start=async(id:string,body:Record<string,any>)=>{
     const context:any=await s.scheduled.context(body);
     const claim=await s.scheduled.claim(context);assert.equal(claim.claimed,true);
@@ -256,11 +260,30 @@ test('a member\'s own schedules: captured only with Personal assistant on, run a
     }
     await stores.control.query('UPDATE members SET assistant=false WHERE id=$1',[MEMBER_NG_ID]);
 
+    // A member Telegram has not seen in any served group yet (here: GP1 switched off for her, GP3 off, GP2 left) still gets
+    // her own scheduled results in her chat while Personal assistant is on (ADR-0311), through the bot's last check. Any
+    // other send to her chat, and a scheduled result for any other chat, still needs a served group.
+    restore();restore=installMembersForTest(fixtureMemberDirectory({[MEMBER_GP_ID]:{assistant:true}},{switches:{[MEMBER_GP_ID]:{[GP1]:false}}}));
+    {
+      const directory=await currentChats(),own={destination:MEMBER_GP_CHAT,scope:MEMBER_GP_CHAT};
+      assert.deepEqual(['scheduled_run','approved_post','job_report','notice',null].map(send_class=>sendsTo(policy,{...own,send_class},directory)),
+        [true,false,false,false,false]);
+      assert.equal(sendsTo(policy,{destination:MEMBER_GP_CHAT,scope:MEMBER_NG_CHAT,send_class:'scheduled_run'},directory),false,'only for a run of her own chat');
+      const later=await capture(MEMBER_GP_CHAT);assert.equal((await run(later.event_id)).state,'completed');assert.deepEqual(failures,[]);
+      const result=await s.scheduled.delivery(later);assert.equal(result.state,'approved');assert.ok('id' in result);
+      const epoch=Number((await stores.control.query("SELECT epoch FROM workflow_owners WHERE family='actions'")).rows[0].epoch);
+      assert.equal((await storageWorkflowOperations(s,runtime).actions!(String(result.id),{owner:'inngest',epoch})).state,'completed');
+      assert.deepEqual(delivered,[MEMBER_GP_CHAT],'the bot\'s last check lets it through');
+      assert.equal((await stores.control.query('SELECT state FROM telegram_action_requests WHERE id=$1',[result.id])).rows[0].state,'done');
+      restore();restore=installMembersForTest(fixtureMemberDirectory({},{switches:{[MEMBER_GP_ID]:{[GP1]:false}}}));
+      assert.equal(sendsTo(policy,{...own,send_class:'scheduled_run'},await currentChats()),false,'only while Personal assistant is on');
+    }
+
     // Personal assistant off: her chat stops being a profile, nothing new is captured, and a reply may set none.
     await stores.control.query('UPDATE members SET assistant=false WHERE id=$1',[MEMBER_GP_ID]);
     restore();restore=installMembersForTest(fixtureMemberDirectory());
     assert.equal((await scheduleTurn(live,member)).allowed,false);
     await assert.rejects(capture(MEMBER_GP_CHAT),refusedProfile);
-    assert.equal(seen.length,1,'nothing more ran');
+    assert.equal(seen.length,2,'nothing more ran');
   } finally {restore();await stores.close();await rm(root,{recursive:true,force:true});}
 });
