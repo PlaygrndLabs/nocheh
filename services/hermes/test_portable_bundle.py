@@ -108,6 +108,23 @@ class PortableBundleTests(unittest.TestCase):
             try:self.assertEqual(counted.execute("SELECT kind,failed FROM note_daily").fetchall(),[('restore',1)])
             finally:counted.close()
 
+    def test_what_each_carried_note_rests_on_travels_with_it_and_is_checked_again(self):
+        # ADR-0292: a carried note's dependencies go with its profile, marked unchecked so the first turn after a restore
+        # looks them up again; an altered file stops the restore before anything is written.
+        from services.hermes.retired_history import DEPENDENCIES,load_dependencies,save_dependencies
+        entries={'c'*64:{'turn':['d'*64],'sources':['e'*64]}}
+        with tempfile.TemporaryDirectory() as temporary:
+            root=Path(temporary);home=root/'state/hermes/profiles'/('nocheh-'+'a'*24);home.mkdir(parents=True)
+            save_dependencies(home,'4:2026-11-08',entries)
+            api,manifest=self.prepare(root);profile=manifest['native_profiles'][0]['profile']
+            import_all(root/'package',root/'inactive',api)
+            self.assertEqual(load_dependencies(root/'inactive/native'/profile),{'checked':None,'entries':entries})
+            exported=root/'package/native'/profile/DEPENDENCIES
+            exported.write_text(json.dumps({'version':1,'checked':'4:2026-11-08','entries':entries}))
+            manifest['files']['native/'+profile+'/'+DEPENDENCIES]={'size':exported.stat().st_size,'sha256':file_digest(exported)}
+            (root/'package/manifest.json').write_text(json.dumps(manifest))
+            with self.assertRaisesRegex(ValueError,'portable_note_dependencies_invalid'):validate_package(root/'package')
+
     def test_all_checks_precede_remote_import_writes(self):
         with tempfile.TemporaryDirectory() as temporary:
             root=Path(temporary);api,manifest=self.prepare(root)

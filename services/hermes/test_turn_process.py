@@ -51,7 +51,7 @@ class TurnProcessTests(unittest.IsolatedAsyncioTestCase):
         signature=base64.urlsafe_b64encode(hmac.new((key or self.secret).encode(),encoded.encode(),hashlib.sha256).digest()).decode().rstrip('=')
         return {'scope':'42','id':'a'*64,'event_id':'b'*64,'content':'synthetic','archive_credential':'turn.'+encoded+'.'+signature}
 
-    async def execute(self,source,cancel=None,delivery_allowed=True,extra=None,progress=None,scope=None,labels=None):
+    async def execute(self,source,cancel=None,delivery_allowed=True,extra=None,progress=None,scope=None,labels=None,memory=None):
         with tempfile.TemporaryDirectory() as folder:
             self.env=None;original=asyncio.create_subprocess_exec
             async def spawn(*args,**kwargs):
@@ -62,7 +62,7 @@ class TurnProcessTests(unittest.IsolatedAsyncioTestCase):
                 result=await _run_process(Path(folder),scope or Scope('-10','42',False,'group'),
                     {'event_id':'event','archive_credential':'scoped','text':'original','channel':'browser',**(extra or {})},'model',
                     SimpleNamespace(runtime=lambda:{'api_key':'ephemeral','base_url':'https://gateway.example.test/v1',
-                                                    'provider':'openai','api_mode':'chat_completions'}),'session',events.append,cancel,progress,labels)
+                                                    'provider':'openai','api_mode':'chat_completions'}),'session',events.append,cancel,progress,labels,memory=memory)
                 self.assertNotIn('SERVICE_TOKEN',self.env);self.assertNotIn('TELEGRAM_BOT_TOKEN',self.env);self.assertNotIn('OPENAI_API_KEY',self.env)
                 # Only the isolated mode's bridge gets the agent login (ADR-0295); a legacy model child gets no key.
                 self.assertNotIn('NOCHEH_HERMES_SESSION_TOKEN',self.env)
@@ -196,15 +196,24 @@ class TurnProcessTests(unittest.IsolatedAsyncioTestCase):
             counted.clear()
             await self.execute('import sys,json; body=json.load(sys.stdin); assert body["note_sources"]=={}; print(json.dumps({"state":"done","text":"hi"}))')
             self.assertEqual(counted,[('memory_read','done')])
+    async def test_the_long_term_memory_a_turn_was_given_reaches_the_parent_even_when_its_answer_is_dropped(self):
+        # ADR-0292: the ids come on their own line as soon as the turn reads its memory, so a turn whose answer the guard
+        # drops still leaves them for its notes; only well-formed ids count.
+        memory=[]
+        source=('import sys,json; sys.stdin.read(); print(json.dumps({"event":"memory_sources","ids":["'+'d'*64+'","not an id"]})); '
+                'print(json.dumps({"state":"done","text":"hi"}))')
+        result,_=await self.execute(source,delivery_allowed=False,memory=memory)
+        self.assertEqual(result['error_code'],'guard_context_changed');self.assertEqual(memory,['d'*64])
     async def test_the_parent_records_who_wrote_the_notes_a_turn_added_even_when_it_stopped(self):
         from . import note_sources
         event='e'*64
         for outcome in ('done','failed','raised'):
             with self.subTest(outcome=outcome),tempfile.TemporaryDirectory() as folder:
                 profile=Path(folder);(profile/'memories').mkdir()
-                async def child(*args):
+                async def child(*args,memory):
                     (profile/'memories'/'MEMORY.md').write_text('Learned in this turn.')
                     self.assertEqual(args[9],{'f'*64:{'from':'nocheh','label':'Nocheh\'s note'}},'the labels go to the turn')
+                    memory[:]=['d'*64]
                     if outcome=='raised':raise RuntimeError('assistant_process_failed')
                     return {'state':outcome}
                 with patch('services.hermes.assistant_gateway.prepare_profile',return_value=profile),patch('services.hermes.assistant_gateway.check_delivery_policy',return_value=True),\
@@ -216,6 +225,10 @@ class TurnProcessTests(unittest.IsolatedAsyncioTestCase):
                     else:await run_process(profile,Scope('42','42',True,'owner'),body,'model',None,'session')
                 origin=note_sources.load(profile)[note_sources.key('memory','Learned in this turn.')]['origins'][0]
                 self.assertEqual((origin['by'],origin['event'],origin['channel'],origin['complete']),('turn',event,'telegram',outcome=='done'))
+                # The note also rests on the turn's message and the long-term memory it was given (ADR-0292).
+                from .retired_history import load_dependencies
+                self.assertEqual(load_dependencies(profile)['entries'][note_sources.key('memory','Learned in this turn.')],
+                                 {'turn':[event],'sources':['d'*64]},'also when the turn stopped')
     async def test_the_parent_reports_the_owners_conversation_before_the_model_starts(self):
         """ "Do what I ask" learns what the conversation holds besides the owner's typed words before the model can act
         on it, and only from an owner's live turn (ADR-0293)."""
@@ -227,7 +240,7 @@ class TurnProcessTests(unittest.IsolatedAsyncioTestCase):
         for scope,channel,expected in cases:
             with self.subTest(scope=scope,channel=channel),tempfile.TemporaryDirectory() as folder:
                 profile=Path(folder);reported=[]
-                async def child(*args):
+                async def child(*args,**kwargs):
                     self.assertEqual(reported,expected,'reported before the model starts')
                     return {'state':'done'}
                 with patch('services.hermes.assistant_gateway.prepare_profile',return_value=profile),patch('services.hermes.assistant_gateway.check_delivery_policy',return_value=True),\

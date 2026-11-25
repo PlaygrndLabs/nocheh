@@ -155,8 +155,8 @@ export class SourceRetirementRepository {
   async historyRetirements(eventIds:string[]) {
     const revision=String((await this.stores.control.query(`SELECT count(*)::text||':'||coalesce(max(created_at)::text,'') AS revision
       FROM source_retirement_history`)).rows[0].revision);
-    if(!eventIds.length)return {revision,retired:[] as string[],answered:{} as Record<string,string[]>,retired_records:[] as string[]};
-    const [retired,memory]=await Promise.all([this.retiredEvents(eventIds),this.retiredRecords(eventIds)]);
+    if(!eventIds.length)return {revision,retired:[] as string[],answered:{} as Record<string,string[]>,retired_records:[] as string[],lapsed_grants:[] as string[]};
+    const [retired,memory,reviews,grants]=await Promise.all([this.retiredEvents(eventIds),this.retiredRecords(eventIds),this.retiredReviews(eventIds),this.lapsedGrants(eventIds)]);
     const reactions=(await this.archive.pool.query(`SELECT event_id,target_id FROM source_relations
       WHERE event_id=ANY($1::text[]) AND kind='reaction_to'`,[eventIds])).rows;
     if(reactions.length) {
@@ -172,7 +172,25 @@ export class SourceRetirementRepository {
       const ids=[...new Set(previews.map(reply=>reply.id).filter(reply=>retiredReplies.has(reply)))].sort();
       if(ids.length)answered[id]=ids;
     }
-    return {revision,retired:[...retired,...memory].sort(),answered,retired_records:[...memory].sort()};
+    // A lapsed grant is not retired: only a group's carried notes leave with it, never stored history or the owner's notes.
+    return {revision,retired:[...retired,...memory,...reviews].sort(),answered,retired_records:[...memory].sort(),lapsed_grants:[...grants].sort()};
+  }
+  /** Of these ids, the notes reviews that read a retired message: the one reviewed or any of its batch. A Hermes note a
+   *  review wrote rests on them all, so it leaves with any of them (ADR-0292). */
+  async retiredReviews(ids:readonly string[]):Promise<Set<string>> {
+    const rows=(await this.stores.control.query('SELECT id,source_reference,provenance FROM native_review_jobs WHERE id=ANY($1::text[])',[[...new Set(ids)]])).rows;
+    const hex=(value:unknown):value is string=>typeof value==='string'&&/^[a-f0-9]{64}$/.test(value);
+    const read=new Map(rows.map(row=>[row.id as string,[row.source_reference?.id,...Array.isArray(row.provenance?.events)?row.provenance.events.map((event:any)=>event?.id):[]].filter(hex)]));
+    const retired=await this.retiredAmong([...read.values()].flat());
+    return new Set([...read].filter(([,events])=>events.some(id=>retired.has(id))).map(([id])=>id));
+  }
+  /** Of these ids, the owner's grants of a fact to a group that no longer hold: not active, or approved in an earlier guard
+   *  epoch, which suspends them on their next read (memory-access.ts validateGrant). A group's note copied from one
+   *  does not outlive it (ADR-0292). */
+  async lapsedGrants(ids:readonly string[]):Promise<Set<string>> {
+    return new Set((await this.stores.control.query(`SELECT f.id FROM memory_fact_grants f CROSS JOIN guard_state g CROSS JOIN installation i
+      WHERE f.id=ANY($1::text[]) AND g.singleton AND i.singleton AND (f.state<>'active' OR f.binding->>'generation' IS DISTINCT FROM i.generation::text
+        OR f.binding->>'epoch' IS DISTINCT FROM g.epoch::text)`,[[...new Set(ids)]])).rows.map(row=>row.id as string));
   }
   async get(principal:Reader,eventId:string) {
     admin(principal);const id=await this.identity(eventId);
@@ -234,7 +252,8 @@ export class SourceRetirementRepository {
         if(body.retired)await db.query(`UPDATE dispatches SET state='cancelled',error_code='source_retired',revision=revision+1,updated_at=now()
           WHERE event_id=ANY($1::text[]) AND state IN ('pending','failed') AND attempts=0`,[messageEvents]);
         return {event_id:eventId,source_object_id:id,retired:body.retired,revision,authority:'owner',observation:'not_observed'};
-      });
+      // Notes carry across a hide or restore; each carry removes the notes that rest on a hidden message (ADR-0292).
+      },{notes:'all'});
     return result;
   }
 }

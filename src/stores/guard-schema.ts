@@ -51,4 +51,8 @@ CREATE TABLE IF NOT EXISTS guard_quiet_epochs (
  generation uuid NOT NULL,epoch bigint NOT NULL,reason text NOT NULL,
  created_at timestamptz NOT NULL DEFAULT now(),PRIMARY KEY(generation,epoch)
 );
+CREATE TABLE IF NOT EXISTS guard_notes_epochs (
+ generation uuid NOT NULL,epoch bigint NOT NULL,keeps text NOT NULL CHECK(keeps IN ('all','owner')),
+ created_at timestamptz NOT NULL DEFAULT now(),PRIMARY KEY(generation,epoch)
+);
 `;

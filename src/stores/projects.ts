@@ -112,7 +112,8 @@ export class ProjectRepository {
       throw new HttpError(400,'invalid_project');
     const change={id:projectId,name,description,state:body.state as Project['state'],...(typeof body.share_chats==='boolean'?{share_chats:body.share_chats}:{}),
       ...(Array.isArray(body.own_groups)?{own_groups:body.own_groups as string[]}:{}),expected_revision:expected};
-    return this.commands.run(principal,operationId,{kind:'project',...change},db=>writeProject(db,change));
+    // A project change can stop a group reading another (Share group chats off), so only the owner's notes carry (ADR-0292).
+    return this.commands.run(principal,operationId,{kind:'project',...change},db=>writeProject(db,change),{notes:'owner'});
   }
   async assign(principal:Reader,input:unknown):Promise<Assignment> {
     admin(principal);const body=object(input);exact(body,['space_id','project_id','mode','expected_revision','operation_id','tasks']);
@@ -123,7 +124,7 @@ export class ProjectRepository {
     const projectId=mode==='assigned'?id(body.project_id):null;
     if(mode!=='assigned'&&body.project_id!==undefined&&body.project_id!==null)throw new HttpError(400,'invalid_project_assignment');
     return this.commands.run(principal,string(body.operation_id,200),{kind:'project_assignment',space,mode,projectId,expected,...(tasks==='move'?{tasks}:{})},
-      db=>writeAssignment(db,{space_id:space,project_id:projectId,mode,expected_revision:expected,tasks}));
+      db=>writeAssignment(db,{space_id:space,project_id:projectId,mode,expected_revision:expected,tasks}),{notes:'owner'});
   }
   async effective(space:string):Promise<{space:string;own_assignment:Assignment|null;assignment:Assignment|null;project:Project|null;inherited:boolean}> {
     validateSpace(space);const parent=parentSpace(space);
@@ -177,7 +178,7 @@ export class SharingPolicyRepository {
         [ruleId,rule.name,JSON.stringify(sources),destination,rule.enabled,rule.mode,rule.instructions,rule.revision]);
       if(rule.enabled&&rule.mode==='filtered')await filteredLimit(db,destination);
       return rule;
-    });
+    },{notes:'owner'});
   }
   /** Each rule names the private chats it would read or share into, which Nocheh skips (ADR-0242). */
   async list(principal:Reader,after='') {

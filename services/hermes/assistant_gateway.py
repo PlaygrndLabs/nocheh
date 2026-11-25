@@ -84,13 +84,15 @@ def prepare_profile(root,scope,model):
     link=plugins/'nocheh';target=Path(__file__).resolve().parent
     if not link.exists():link.symlink_to(target,target_is_directory=True)
     if scope.guard_epoch:
-        # A new guard epoch starts a new profile; the chat keeps its conversation
-        # and the superseded profiles are removed once idle.
+        # A new guard epoch starts a new profile; the chat keeps its conversation and its notes (ADR-0292), and the
+        # superseded profiles are removed once idle.
         from .profile_history import carry, prune, prune_answers
+        from .profile_notes import carry_notes
         # A private answer starts empty: no earlier answer's conversation, from any group, is carried into it (ADR-0249).
         # Nor is anything carried into the owner's ask about a member (step 4b), and its profile is never carried on: it is
-        # not the owner's and no later turn opens it.
-        if scope.purpose!='filter' and not scope.answer and not scope.member_read:carry(profile)
+        # not the owner's and no later turn opens it. A member's private chat carries its conversation but has no notes.
+        if scope.purpose!='filter' and not scope.answer and not scope.member_read:
+            carry(profile);carry_notes(profile)
         prune(profile)
         # No later turn opens a private answer's profile, so any turn removes those no answer can run in any more.
         prune_answers(profile)

@@ -11,16 +11,16 @@ import {agentRoute,agentRoutes,serveAgent} from '../src/stores/agent-routes.js';
 import type {StorageServices} from '../src/stores/services.js';
 import type {Settings} from '../src/config.js';
 
-// What Hermes calls on nocheh-app with the agent login (ADR-0295), and nothing more.
+// What Hermes calls on nocheh-app with the agent login (ADR-0295, and the notes carry of ADR-0292), and nothing more.
 const expected=[
-  'GET /internal/chats','POST /internal/notes/sources','POST /internal/sources/retired',
+  'GET /internal/chats','POST /internal/notes/sources','POST /internal/sources/retired','POST /internal/notes/carry',
   'GET /v1/runtime/profiles','POST /v1/runtime/profiles/resolve',
   ...['definition','input','workflow-context','claim','prepare','heartbeat','observe','cancel','finish','recover','runs'].map(step=>'POST /v1/scheduler/'+step),
   ...['workflow-context','claim','prepare','heartbeat','observe','finish'].map(step=>'POST /v1/background/'+step)];
 const url=(path:string)=>new URL(path,'http://local');
 
 test('the agent login reaches exactly the routes Hermes calls',()=>{
-  assert.deepEqual(agentRoutes.map(([method,path])=>method+' '+path),expected);assert.equal(agentRoutes.length,22);
+  assert.deepEqual(agentRoutes.map(([method,path])=>method+' '+path),expected);assert.equal(agentRoutes.length,23);
   for(const row of expected){const [method,path]=row.split(' ');assert.ok(agentRoute(method,url(path!)),row);}
   for(const [method,path] of [
     // Profile save while Hermes's Profiles page only reads; background cancel and memory spaces have no Hermes caller.
