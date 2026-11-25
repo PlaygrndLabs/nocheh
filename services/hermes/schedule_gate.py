@@ -11,6 +11,8 @@ gateway, which Nocheh does not run, are replaced by what Nocheh does.
 The hooks are inert, and the tool refused, unless the turn bound them.
 """
 import json
+import logging
+import re
 import threading
 from pathlib import Path
 from zoneinfo import ZoneInfo,available_timezones
@@ -139,9 +141,23 @@ def _record(action,value,args):
         answer=native_cron.turn_capture(job_id,rules['home'],rules['profile'],rules['scope'],request)
         return HELD if isinstance(answer,dict) and answer.get('held') is True else None
     except Exception as error:
-        if native_cron.refusal(error)[1]=='schedule_limit_reached':return LIMIT_NOW
+        status,code=native_cron.refusal(error)
+        _log_refusal(action,status,code,error)
+        if code=='schedule_limit_reached':return LIMIT_NOW
         if native_cron.transient(error):return UNCONFIRMED
         return NOT_SAVED if action=='create' else NOT_SAVED_CHANGE
+
+
+CODE=re.compile(r'^[a-z][a-z0-9_]{0,63}$')
+
+
+def _log_refusal(action,status,code,error):
+    """Logs why Nocheh did not record a schedule: its action, the answer's status and fixed code, or else the failure's
+    type. Never the schedule's words or the answer's other text."""
+    try:
+        reason=code if isinstance(code,str) and CODE.match(code) else type(error).__name__
+        logging.getLogger(__name__).warning('schedule_not_recorded: action=%s status=%s reason=%s',action,status if isinstance(status,int) else '-',reason)
+    except Exception:pass
 
 
 def tool_result(tool_name='',result=None,args=None,**_):

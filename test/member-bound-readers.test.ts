@@ -7,6 +7,7 @@ import {installChatsForTest} from '../src/chats.js';
 import {assertPrivateAnswerRoute,boundReaderTools,privateAnswerRoute,privateAnswerTools} from '../src/stores/private-answers.js';
 import {ownerRecallAllowed} from '../src/stores/recall-places.js';
 import {boundChat} from '../src/stores/access.js';
+import {assertKeyRoute} from '../src/stores/key-routes.js';
 import {memberAskReads,memberReads} from '../src/stores/member-reads.js';
 import {sourceTag,type TagSource} from '../src/source-tags.js';
 import {readSet,readSetGroups} from '../src/spaces.js';
@@ -85,6 +86,14 @@ test('each bound reader reaches only its own read routes, refused with its own c
   assert.ok(privateAnswerRoute('POST','/v1/tools/propose','member'));
   assert.ok(privateAnswerRoute('POST','/v1/schedules/time-zone','member'),'its own time zone (members\' time zones)');
   for(const kind of ['answer','memberRead'] as const)assert.equal(privateAnswerRoute('POST','/v1/schedules/time-zone',kind),false,kind);
+  // Its own schedules (members' schedules): whether it may set them, and each one Hermes's tool set, reported to the store
+  // from inside the turn (ADR-0290). Without the report the schedule is refused and removed again.
+  for(const path of ['/v1/schedules/turn','/v1/schedules/turn/definition']) {
+    assert.ok(privateAnswerRoute('POST',path,'member'),path);assert.doesNotThrow(()=>assertKeyRoute(member(MEMBER_GP_CHAT,{memberChat:MEMBER_GP_CHAT,keyKind:'turn'}),'POST',path),path);
+    for(const kind of ['answer','memberRead'] as const)assert.equal(privateAnswerRoute('POST',path,kind),false,kind+' '+path);
+  }
+  for(const [method,path] of [['GET','/v1/schedules/turn/definition'],['POST','/v1/schedules/turn/other'],['POST','/v1/schedules/turn/definition/x']] as const)
+    assert.equal(privateAnswerRoute(method,path,'member'),false,method+' '+path);
   for(const kind of ['answer','memberRead'] as const)for(const [method,path] of [['GET','/v1/notion/connections'],['GET','/v1/github/repos'],
     ['GET','/v1/tools/actions/'+'b'.repeat(64)],['POST','/v1/tools/propose']] as const)assert.equal(privateAnswerRoute(method,path,kind),false,kind+' '+path);
   for(const [method,path] of [['GET','/v1/tools/actions'],['POST','/v1/tools/decide'],['GET','/v1/notion/connections/x']] as const)

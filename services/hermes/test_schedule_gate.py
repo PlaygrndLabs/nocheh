@@ -83,9 +83,15 @@ class GateTests(unittest.TestCase):
             def capture(*_):raise HTTPError('http://nocheh/v1/schedules/turn/definition',403,'refused',{},io.BytesIO(json.dumps({'error':code}).encode()))
             return capture
         for code,message in (('schedule_limit_reached',gate.LIMIT_NOW),('schedule_turn_not_allowed',gate.NOT_SAVED)):
-            with patch('services.hermes.native_cron.turn_capture',refuse(code)):
-                value=json.loads(gate.tool_result(tool_name=gate.TOOL,args={'action':'create'},result=json.dumps({'success':True,'job_id':'abc'})))
+            with patch('services.hermes.native_cron.turn_capture',refuse(code)),self.assertLogs('services.hermes.schedule_gate','WARNING') as logs:
+                value=json.loads(gate.tool_result(tool_name=gate.TOOL,args={'action':'create','prompt':'Private words'},result=json.dumps({'success':True,'job_id':'abc'})))
             self.assertEqual(value,{'success':False,'error':message,'job_id':'abc'})
+            # Why it was not recorded is logged by its fixed code alone, never the schedule's words.
+            self.assertEqual(logs.output,['WARNING:services.hermes.schedule_gate:schedule_not_recorded: action=create status=403 reason='+code])
+        # A code that is not a fixed one is logged as the failure's type.
+        with patch('services.hermes.native_cron.turn_capture',refuse('Some <text>')),self.assertLogs('services.hermes.schedule_gate','WARNING') as logs:
+            gate.tool_result(tool_name=gate.TOOL,args={'action':'create'},result=json.dumps({'success':True,'job_id':'abc'}))
+        self.assertEqual(logs.output,['WARNING:services.hermes.schedule_gate:schedule_not_recorded: action=create status=403 reason=HTTPError'])
         with patch('services.hermes.native_cron.turn_capture',refuse('schedule_turn_not_allowed')):
             value=json.loads(gate.tool_result(tool_name=gate.TOOL,args={'action':'update','job_id':'abc'},result=json.dumps({'success':True,'job':{'job_id':'abc'}})))
         self.assertEqual((value['success'],value['error']),(False,gate.NOT_SAVED_CHANGE),'a refused change says the schedule no longer runs')
