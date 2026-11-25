@@ -93,8 +93,8 @@ Checks and follow-ups:
   one live check on the owner's install with the setting on: a typed command runs, and the same command after a
   forward in that day's conversation shows its card with the reason line.
 - Development startup order: a full tester run of `project_groups_stay_apart` alone.
-- Talk while it works ([ADR-0301](docs/adr/0301-a-message-joins-the-running-turn-in-its-chat.md)): a live check on the owner's install, two messages
-  in a row while the agent uses a tool, after the merge.
+- Talk while it works ([ADR-0301](docs/adr/0301-a-message-joins-the-running-turn-in-its-chat.md)): the tester covers it
+  (`message_joins_running_turn`); left is one check with the real model, two messages in a row while the agent uses a tool.
 - A project's tasks are one list ([ADR-0276](docs/adr/0276-a-projects-tasks-are-one-list.md)): a full tester run of
   `project_groups_stay_apart`, `member_private_chat_reads_joined_groups`, `member_app_tasks`,
   `member_app_drops_a_left_group` and `member_app_never_leaks`.

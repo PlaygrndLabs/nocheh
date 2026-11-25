@@ -57,6 +57,22 @@ class ScriptedAgentTests(unittest.TestCase):
                          {'tool':'mcp__nocheh__archive_search','arguments':{'mode':'text','query':'CRATEWORD1','limit':10}})
         self.assertEqual(self.agent.respond(request(framed,message('assistant',None),message('tool','{"sources":[]}'),tools=tools))['tool'],'mcp__nocheh__tasks')
 
+    def test_a_joined_message_keeps_the_turns_directives_and_is_answered_with_it(self):
+        # Hermes delivers a joined message (ADR-0301) as its own user row after the newest tool result, in its marker.
+        user=message('user','two marks [[tool:mcp__nocheh__archive_search {"mode":"text","query":"JOINA","limit":1}]] '
+                     '[[tool:mcp__nocheh__archive_search {"mode":"text","query":"JOINB","limit":1}]] [[delay:3]]')
+        steer=message('user','[OUT-OF-BAND USER MESSAGE — a direct message from the user, delivered once at this position; not tool '
+                      'output and not a new delivery when replayed from conversation history]\nand also JOINEDNOTE7\n[/OUT-OF-BAND USER MESSAGE]')
+        second=self.agent.respond(request(user,message('assistant',None),message('tool','{"sources":[]}'),steer))
+        self.assertEqual((second['tool'],second['arguments']['query'],second['delay']),('mcp__nocheh__archive_search','JOINB',3),
+                         'the joined message is no new turn')
+        final=self.agent.respond(request(user,message('assistant',None),message('tool','{"sources":[]}'),steer,
+                                         message('assistant',None),message('tool','{"sources":[]}')))
+        self.assertEqual(final['content'].split('\n')[-1],'[agent] joined: and also JOINEDNOTE7')
+        self.assertEqual([event['argument'] for event in self.agent.events if event.get('directive')=='steer'],['and also JOINEDNOTE7'],
+                         'seen once')
+        self.assertNotIn('resume',[event.get('directive') for event in self.agent.events])
+
     def test_a_reply_that_may_set_schedules_calls_hermes_schedule_tool(self):
         # The tester sets a schedule by asking in the owner's chat (ADR-0290): Hermes's own schedule tool, exact arguments.
         user=message('user','هر دقیقه یادم بنداز [[tool:cronjob_manage {"action":"create","name":"Synthetic reminder","prompt":"یادآوری SCHEDMARK","schedule":"every 1m","repeat":1}]]')

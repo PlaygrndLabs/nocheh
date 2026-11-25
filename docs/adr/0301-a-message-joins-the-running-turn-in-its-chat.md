@@ -52,3 +52,6 @@ runs each turn as its own sealed process and must keep every message answered on
   cites it.
 - If the running turn's reply is withdrawn after it ended (its context changed), the turn runs
   again without the joined messages, which were already closed as answered.
+- The tester's `message_joins_running_turn` scenario covers it end to end: the scripted model
+  reads a joined message (Hermes's steer row after a tool result) as part of the turn before it
+  and names it in its answer.
