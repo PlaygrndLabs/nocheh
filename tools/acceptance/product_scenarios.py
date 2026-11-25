@@ -5769,6 +5769,10 @@ class ProductScenarios(Scenarios):
         command = lambda where, name=None: compose_command(where, name or project)+['-f', str(overlay)]
         environment = lambda where: {**compose_environment(where), 'NOCHEH_RECOVERY_SERVICES_IMAGE': images['services'],
                                      'NOCHEH_RECOVERY_POSTGRES_IMAGE': images['postgres'], 'NOCHEH_RECOVERY_HONCHO_IMAGE': images['honcho']}
+        # The copy's settings name the fixture's model at its plain-http address, which settings accept only inside an
+        # installation fixture, as installation-rehearsal.py runs.
+        fixture = patch.dict(os.environ, {'NOCHEH_INSTALLATION_FIXTURE': '1'})
+        fixture.start()
         try:
             with patch.object(operations, 'compose', side_effect=command), patch.object(operations, 'environment', side_effect=environment):
                 manifest = operations.validate_snapshot(snapshot)
@@ -5793,10 +5797,19 @@ class ProductScenarios(Scenarios):
             self.gate('restored_copy_waits_for_the_owner', (target/'spool/.restore-inactive').exists() and (target/'workflows/inactive').exists()
                       and (target/'hermes/scheduler-inactive').exists())
         finally:
-            if (target/'.env').exists():
-                subprocess.run(command(target)+['--profile', 'honcho', 'down', '--volumes'], env=environment(target), check=False, capture_output=True)
-            for volume in (project+'_honcho_database', project+'_honcho_redis'):
-                subprocess.run(['docker', 'volume', 'rm', volume], check=False, capture_output=True)
+            try:
+                if (target/'.env').exists():
+                    subprocess.run(command(target)+['--profile', 'honcho', 'down', '--volumes'], env=environment(target), check=False, capture_output=True)
+            finally:
+                fixture.stop()
+                # Whatever the restore left behind, by its project's label, so a failure above never leaves it running.
+                for kind in ('container', 'volume', 'network'):
+                    found = subprocess.run(['docker', kind, 'ls', '-q', *(['-a'] if kind == 'container' else []),
+                                            '--filter', 'label=com.docker.compose.project='+project], capture_output=True, text=True).stdout.split()
+                    if found:
+                        subprocess.run(['docker', kind, 'rm', *(['-f'] if kind == 'container' else []), *found], check=False, capture_output=True)
+                for volume in (project+'_honcho_database', project+'_honcho_redis', project+'_postgres_data'):
+                    subprocess.run(['docker', 'volume', 'rm', volume], check=False, capture_output=True)
 
     # Owner dashboard session ------------------------------------------------------------------------
 
