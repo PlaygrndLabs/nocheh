@@ -45,6 +45,13 @@ message by message, not at a session's end.
 7. **A new guard epoch keeps the day.** Carry copies the cursor's `day` and `last_active`
    with the session.
 
+8. **Each turn says the chat's local date and time.** Hermes dates its prompt once per
+   session, in the server's zone. A session runs until 04:00 in the chat, so after midnight
+   a reply counted "today", "tomorrow" and "yesterday" from the day before. Each turn's
+   message now ends with a `[Local time: …]` line in the chat's time zone: the time a message
+   was sent, or the time a scheduled run runs, in the schedule's own zone. Text from a group
+   or a forward can't write that line.
+
 Private answers, asks about a member, schedules, memory reviews and background jobs are
 unchanged: the first four already start fresh each run, and a job keeps one session for all
 its attempts.

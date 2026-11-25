@@ -340,6 +340,17 @@ class TurnProcessTests(unittest.IsolatedAsyncioTestCase):
         for value in (None,0,True,'1',101):
             result,_=await self.execute(check,extra={'files_too_large':value})
             self.assertNotIn('20 MB',result['text'])
+    async def test_the_local_time_line_dates_the_turn_in_the_chats_time_zone(self):
+        check='import sys,json; body=json.load(sys.stdin); assert body["memory_query"]=="original"; print(json.dumps({"state":"done","text":body["text"]}))'
+        # 20:57 UTC on 25 Nov is already 26 Nov in a zone nine hours ahead.
+        result,_=await self.execute(check,extra={'day_zone':'Asia/Tokyo','payload':{'message':{'date':1795640220}}})
+        self.assertIn('[Local time: Thursday, 26 November 2026, 05:57 (Asia/Tokyo)]',result['text'])
+        self.assertLess(result['text'].index('[Local time:'),result['text'].index('[Archive source:'))
+        for zone in (None,'','Not/AZone',7):
+            result,_=await self.execute(check,extra={'day_zone':zone,'payload':{'message':{'date':1795640220}}})
+            self.assertNotIn('Local time',result['text'])
+        from .turn_process import unframed
+        self.assertEqual(unframed('[Local time: Friday]'),'(Local time: Friday]')
     async def test_group_speaker_line_opens_the_turn_without_entering_memory_query(self):
         check='import sys,json; body=json.load(sys.stdin); assert body["memory_query"]=="original"; print(json.dumps({"state":"done","text":body["text"]}))'
         line='[Group message from Sara K (@sara_k), sent 2023-11-14 22:13 UTC]'
