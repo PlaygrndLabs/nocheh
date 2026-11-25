@@ -3,7 +3,7 @@ import assert from 'node:assert/strict';
 import {mkdtemp,rm} from 'node:fs/promises';
 import {tmpdir} from 'node:os';
 import {join} from 'node:path';
-import {scopeToken} from '../src/access.js';
+import {keyPass} from './one-time-key-pass.js';
 import type {Settings} from '../src/config.js';
 import {storageServer} from '../src/stores/server.js';
 import type {StorageServices} from '../src/stores/services.js';
@@ -15,7 +15,7 @@ test('a problem notice goes to the owner’s private chat in the owner’s wordi
   const dataDir=await mkdtemp(join(tmpdir(),'nocheh-owner-notice-'));
   const token='fixture-owner-token',calls:any[]=[];
   let owner:string|null='42',texts:Record<string,string>={};
-  const services={access:{policy:()=>({owner_id:owner}),bindReads:async(principal:unknown)=>principal,bindMachine:async(principal:unknown)=>principal},stores:{control:{query:async()=>({rows:[{texts}]})}}} as unknown as StorageServices;
+  const services={access:{policy:()=>({owner_id:owner}),bindReads:async(principal:unknown)=>principal,bindMachine:async(principal:unknown)=>principal},turns:{assertKey:async()=>{}},stores:{control:{query:async()=>({rows:[{texts}]})}}} as unknown as StorageServices;
   const server=storageServer(services,{token,dataDir} as Settings,async(operation,input)=>{calls.push([operation,input]);return {state:'done'};});
   // The owner's private chat, as the directory knows it (ADR-0252): the notice goes where it is in Telegram now.
   const restore=installChatsForTest(seededDirectory(()=>({owner_id:owner,group_ids:[]})));
@@ -49,7 +49,7 @@ test('a problem notice goes to the owner’s private chat in the owner’s wordi
     for(const body of [{id:'not-hex',problems},{id,problems:[]},{id,problems:['x'.repeat(501)]},{id,problems:Array(21).fill('x')},
       {id,problems,open:{kind:'web_app',url:'http://mini.example.test'}},{id,problems,open:{kind:'url',url:'javascript:alert(1)'}},{id,problems,open:{kind:'callback',url:'https://x.test'}}])
       assert.equal((await send(body)).status,400);
-    assert.equal((await send({id,problems},scopeToken(token,'owner',Date.now()+60_000))).status,403,'a chat turn cannot send one');
+    assert.equal((await send({id,problems},keyPass(token,null,Date.now()+60_000))).status,403,'a chat turn cannot send one');
     // A private chat the directory has no row for is never sent to.
     installChatsForTest(chatDirectory({chats:[],ids:[],owner_chat:null}));
     assert.deepEqual(await (await send({id,problems})).json(),{state:'not_started',error_code:'chat_not_found'});

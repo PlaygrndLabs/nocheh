@@ -355,7 +355,7 @@ const memberRoutes:readonly [string,RegExp][]=[
  * delivery check, context preparation, its own files and, at the broker, its binding, guard preparation and model
  * calls. No long-term memory (that chat is never learned), no tasks, no imports and no shared or granted context.
  */
-const memberReadRoutes:readonly [string,RegExp][]=[
+export const memberReadRoutes:readonly [string,RegExp][]=[
   ['GET',/^\/v1\/(?:search|archive\/page|events\/[a-f0-9]{64}|artifacts\/[a-f0-9]{64}\/bytes|memory\/check|security\/binding|turn-files\/[a-f0-9]{64})$/],
   ['POST',/^\/(?:mcp|v1\/(?:context\/prepare|guard|chat\/completions)|anthropic\/v1\/messages)$/],
 ];

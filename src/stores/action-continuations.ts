@@ -16,6 +16,8 @@ import type {GuardRepository} from './guards.js';
 import type {PreparedContextRepository} from './prepared-context.js';
 import type {RuntimeTurnRepository} from './turns.js';
 import {closedTurnStates,currentTurn,dispatchPayload,terminalTurnStates,turnFence,turnResultCodes,type TurnInput} from './telegram-turn.js';
+import {closeSubject} from './one-time-keys.js';
+import {members} from '../members.js';
 import {botReady,cancelReply,deliveredReceipt,finishPresence,replyOutcome,replyTarget,sendReply,showPresence,unansweredFinish,withdrawReply} from './telegram-reply.js';
 
 /** One row per controlled action that ended in a live conversation; the DB trigger writes it in the same commit as the end state. */
@@ -48,7 +50,9 @@ const protocol='action-continuation-v1';
 const maxAttempts=3,chainLimit=3,askingWaitMs=600000,receiptWaitMs=120000,siblingWaitMs=120000;
 const closedRows=new Set(['done','ambiguous','suppressed','cancelled','skipped']);
 const renewedCodes=['guard_context_changed','audience_context_changed','guard_transition_pending'];
-const withdrawnCodes=[...renewedCodes,'conversation_not_selected','source_retired'];
+const withdrawnCodes=[...renewedCodes,'conversation_not_selected','source_retired',
+  // The asker can no longer be named (they stopped being a member): no key, so the follow-up is withdrawn (ADR-0305).
+  'one_time_key_person_required'];
 /** Names the continuation in AsyncRuns, the gateway receipt and the archived result; never an integer, so it cannot meet a message turn's. */
 export const continuationAttempt=(leader:string,attempts:number)=>'c'+attempts+'-'+leader.slice(0,40);
 /** A leader counts once it started, or from its claim while it has yet to start. */
@@ -100,6 +104,7 @@ export class ActionContinuationRepository {
   private async row(id:string){return (await this.control.query('SELECT * FROM action_continuations WHERE action_id=$1',[id])).rows[0];}
   private async close(id:string,state:string,code:string) {
     await this.control.query("UPDATE action_continuations SET state=$2,error_code=$3,updated_at=now() WHERE action_id=$1 AND state IN ('pending','waiting','failed')",[id,state,code]);
+    await closeSubject(this.control,'follow_up',id,'not_delivered');
     return this.observation(await this.row(id));
   }
   private async wait(row:any,delay:number) {
@@ -125,6 +130,8 @@ export class ActionContinuationRepository {
     await this.control.query(`UPDATE action_continuations SET state=$2,result_reference=$3,error_code=$4,
       next_attempt=CASE WHEN $2='failed' THEN now()+least(300,5*power(2,least(attempts,6)))*interval '1 second' ELSE next_attempt END,
       updated_at=now() WHERE action_id=$1`,[row.action_id,result.state,reference,result.error_code??null]);
+    // Delivered or not, this attempt's one-time key closes (ADR-0305); a retry gets its own.
+    await closeSubject(this.control,'follow_up',row.action_id,result.state==='done'?'delivered':'not_delivered');
     return this.observation(await this.row(row.action_id));
   }
   private async receive(row:any,result:Record<string,unknown>) {
@@ -133,19 +140,29 @@ export class ActionContinuationRepository {
       next_attempt=now()+interval '1 second',updated_at=now() WHERE action_id=$1`,[row.action_id]);
     return this.observation(await this.row(row.action_id));
   }
-  /** A pass for the turn under the current binding, after the turn's own binding and source are checked. */
-  private async credential(input:TurnInput):Promise<string> {
+  /** A pass for the turn under the current binding, after the turn's own binding and source are checked: the one-time key
+   * of this attempt, for the person whose turn asked for the operations (ADR-0305). */
+  private async credential(input:TurnInput,row:{action_id:string;attempts:number}):Promise<string> {
     if(this.token.length<24)throw new HttpError(503,'service_credential_required');
-    const credential=await this.prepared.audience.turn(this.token,input.principal,input.principal.turnEvent!,Date.now()+600000);
+    const credential=await this.prepared.audience.turn(this.token,input.principal,input.principal.turnEvent!,Date.now()+600000,
+      {kind:'follow_up',subject:row.action_id,attempt:continuationAttempt(row.action_id,row.attempts),person:await this.person(row.action_id)});
     await currentTurn(this,input);
     return credential;
+  }
+  /** Who asked for the leader operation: the person its key named, else its asking member's (null once they are no
+   * member), else the owner (ADR-0305). */
+  private async person(id:string):Promise<string|null> {
+    const action=(await this.control.query<{person:string|null;asker_account:string|null}>('SELECT person,asker_account FROM controlled_actions WHERE id=$1',[id])).rows[0];
+    if(!action)return null;
+    if(action.person)return action.person;
+    return action.asker_account?members().memberOf(action.asker_account)?.id??null:'owner';
   }
   /** As for a reply (TelegramDispatchRepository.settle): a done follow-up is sent by Nocheh's bot, and it alerts, as
    * nobody watched it being typed. */
   private async settle(row:any,input:TurnInput,receipt:TurnReceipt):Promise<Observation> {
     const attempt=continuationAttempt(row.action_id,row.attempts),state=String(receipt.state);
     let credential:string|null=null,withdrawn:string|null=null;
-    try{credential=await this.credential(input);}catch(error){
+    try{credential=await this.credential(input,row);}catch(error){
       if(!(error instanceof HttpError)||!withdrawnCodes.includes(error.code))throw error;
       withdrawn=error.code;
     }
@@ -203,13 +220,14 @@ export class ActionContinuationRepository {
         try{observed=await this.agent.observeTurn({channel:'telegram',event_id:row.event_id,attempt});}
         catch{return await this.receive(row,{state:'running'});}
         if(closedTurnStates.has(String(observed.state)))return await this.settle(row,input,observed);
-        try{credential=await this.credential(input);}catch(error){
+        try{credential=await this.credential(input,row);}catch(error){
           if(!(error instanceof HttpError)||!withdrawnCodes.includes(error.code))throw error;
           // As for a reply: a newer epoch rebuilds a turn that never started, and a running one's reply is not sent.
           const renewed=renewedCodes.includes(error.code);
           if(renewed&&observed.state==='not_found') {
             await this.control.query(`UPDATE action_continuations SET state='failed',error_code=$2,next_attempt=now()+interval '2 seconds',
               updated_at=now() WHERE action_id=$1 AND state='running'`,[id,error.code]);
+            await closeSubject(this.control,'follow_up',id,'not_delivered');
             return this.observation(await this.row(id));
           }
           if(renewed)return await this.receive(row,observed);
@@ -269,7 +287,8 @@ export class ActionContinuationRepository {
             const candidates=(await db.query(`SELECT c.action_id,c.created_at AS ended,a.event_id,a.kind,a.state,a.error_code,a.observed_in_turn
               FROM action_continuations c JOIN controlled_actions a ON a.id=c.action_id
               WHERE c.event_id=$1 AND c.action_id<>$2 AND c.run_id IS NULL AND c.state IN ('pending','waiting')
-              AND a.space_id=$3 AND a.profile=$4 ORDER BY c.created_at,c.action_id FOR UPDATE OF c`,[row.event_id,id,action.space_id,action.profile])).rows;
+              AND a.space_id=$3 AND a.profile=$4 AND a.person IS NOT DISTINCT FROM $5
+              ORDER BY c.created_at,c.action_id FOR UPDATE OF c`,[row.event_id,id,action.space_id,action.profile,action.person??null])).rows;
             const merged:string[]=[];
             // One that needs no follow-up of its own is left for its own job to skip, and one still awaiting a late receipt for its own wait.
             for(const candidate of candidates)if(!ownerRejected(candidate,scope.owner)&&!awaitingReceipt(candidate,candidate.ended)
@@ -302,7 +321,7 @@ export class ActionContinuationRepository {
         }catch(error){await db.query('ROLLBACK');throw error;}
         if(row.state!=='running')return this.observation(row);
       }
-      credential??=await this.credential(input);
+      credential??=await this.credential(input,row);
       const attempt=continuationAttempt(id,row.attempts);
       if(!await botReady(this.call))return await this.receive(row,{state:'running'});
       await showPresence(this.call,replyTarget(input,attempt,credential));

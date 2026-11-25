@@ -6,7 +6,7 @@ import {tmpdir} from 'node:os';
 import {join} from 'node:path';
 import pg from 'pg';
 import {digest,type Envelope} from '../src/archive.js';
-import {scopeToken} from '../src/access.js';
+import {keyPass,openKey} from './one-time-key-pass.js';
 import type {Settings} from '../src/config.js';
 import {connectStores,initializeStoreDatabases} from '../src/stores/connections.js';
 import {fixtureServices} from './fixture-agent.js';
@@ -49,7 +49,7 @@ test('host imports preserve originals through retries and fence job writes, lear
   };
   try{
     const first=await job(true),second=await job(false),original=record(':first');
-    await request('/v1/import',original.input,403,{authorization:'Bearer '+scopeToken(token,'123',Date.now()+60000)});
+    await request('/v1/import',original.input,403,{authorization:'Bearer '+await openKey(stores.control,keyPass(token,'123',Date.now()+60000))});
     await request('/v1/projects',{},403,first.headers);
     await request('/v1/import',{...original.input,event:{...original.input.event,origin:'live'}},403,first.headers);
     // Simulate a lost archive acknowledgment before membership/handoff commits.
@@ -128,8 +128,9 @@ test('an import shows how far its messages are prepared, becomes ready once all 
     const id=randomUUID();
     await stores.control.query("INSERT INTO workflow_imports(id,configuration_hash,review_approved,total,completed,state,label,scopes) VALUES($1,$2,false,2,2,'completed','Garden club',ARRAY['-1001'])",[id,digest(id)]);
     const binding=await s.guards.state();
+    // A group's turn key (ADR-0305), open, for its group's imports.
     const pending=async(scope:string|null)=>(await (await fetch(base+'/v1/imports/pending',{headers:{authorization:'Bearer '+(scope===null?token:
-      scopeToken(token,scope,Date.now()+60000,{generation:binding.generation,guard_epoch:binding.epoch}))}})).json() as any).imports;
+      await openKey(stores.control,keyPass(token,scope,Date.now()+60000,undefined,{generation:binding.generation,guard_epoch:binding.epoch})))}})).json() as any).imports;
     const events:string[]=[];
     for(const suffix of [':a',':b']) {
       const event:Envelope={version:1,key:key+suffix,origin:'import',bot_id:'desktop-export',kind:'telegram_desktop_message',scope:'123',source_id:suffix,revision:'1',occurred_at:null,

@@ -1,6 +1,6 @@
 import {blockingPublications} from './publications.js';
 import type pg from 'pg';
-import {type Reader} from '../access.js';
+import {type KeyKind,type Reader} from '../access.js';
 import {canonical,digest} from '../archive.js';
 import {HttpError,object,string} from '../http.js';
 import type {Agent} from '../agent/agent.js';
@@ -13,6 +13,8 @@ import {carriesForward,type GuardBinding} from './guards.js';
 import {RuntimeProfileRepository} from './runtime-profiles.js';
 import {ownerChat} from '../assistant-policy.js';
 import {servedGroup} from '../spaces.js';
+import {closeEvent} from './one-time-keys.js';
+import {activeAgent} from '../agent/agents.js';
 
 export const managedStorageSchema=`
 CREATE TABLE IF NOT EXISTS managed_runs (
@@ -30,8 +32,17 @@ ALTER TABLE managed_runs ADD COLUMN IF NOT EXISTS launch_requested_at timestampt
 -- Background job runs joined browser and scheduled runs after the first table.
 ALTER TABLE managed_runs DROP CONSTRAINT IF EXISTS managed_runs_channel_check;
 ALTER TABLE managed_runs ADD CONSTRAINT managed_runs_channel_check CHECK(channel IN ('browser','scheduler','background'));
+-- Who a run is for and which agent it was made for (ADR-0305): its one-time key names both, and a key for anyone else
+-- never drives it. Null only on a row Nocheh made without a person, which is never claimed.
+ALTER TABLE managed_runs ADD COLUMN IF NOT EXISTS person text CHECK(person IS NULL OR person='owner' OR person ~ '^[a-f0-9]{64}$');
+ALTER TABLE managed_runs ADD COLUMN IF NOT EXISTS agent text CHECK(agent IS NULL OR agent ~ '^[a-z][a-z0-9-]{0,31}$');
 `;
 const closed=new Set(['done','failed','cancelled','interrupted']);
+/**
+ * The kinds of one-time key a managed run's pass is (ADR-0305). A browser run is the owner's own chat turn, so its key is
+ * a turn's; its event is the run's own operation id, never a Telegram message's.
+ */
+const runKeys=(channel:string):readonly KeyKind[]=>channel==='browser'?['turn']:['scheduled','background'];
 export const managedIdentity=(value:unknown)=>{const id=string(value,128);if(!/^[a-zA-Z0-9_-]+$/.test(id))throw new HttpError(400,'invalid_run_identity');return id;};
 export const managedEventId=(value:unknown)=>{const id=string(value,64);if(!/^[a-f0-9]{64}$/.test(id))throw new HttpError(400,'invalid_run_identity');return id;};
 export type ManagedInput={principal:Reader;text:string;transcripts:string[];files:Record<string,unknown>[];source_key:string};
@@ -118,6 +129,13 @@ export abstract class ManagedExecutionRepository {
     const body=object(input);await this.context(body);const row=await this.scoped(body);
     if(body.actor!=='run_'+row.event_id)throw new HttpError(403,'run_actor_mismatch');
     if(row.state!=='captured')return {claimed:false,event_id:row.event_id,state:row.state};
+    // The run's one-time key (ADR-0305), for the person and agent its row was made for, checked before the run is claimed
+    // so a run nobody can be named for never starts. A browser run is the owner's.
+    const person=this.channel==='browser'?'owner':row.person;
+    if(!person)throw new HttpError(409,'one_time_key_person_required');
+    if(row.agent&&row.agent!==activeAgent)throw new HttpError(409,'one_time_key_agent_changed');
+    const key={kind:this.channel==='scheduler'?'scheduled' as const:this.channel==='browser'?'turn' as const:'background' as const,subject:row.event_id,attempt:1,
+      person:person as string,agent:row.agent??null};
     const built=await this.build(row),expires=await this.credentialExpiry(row),db=await this.control.connect();let held=false;
     try {
       held=await enterFamily(db,this.family,'inngest',Number(body.owner_epoch));if(!held)throw new HttpError(409,'workflow_owner_changed');
@@ -135,7 +153,7 @@ export abstract class ManagedExecutionRepository {
     await this.current(row);await this.turns.binding(built.input.principal);
     return {claimed:true,event_id:row.event_id,state:'running',channel:this.channel,scope:row.scope,owner:row.scope===ownerChat(this.access.policy()),
       guard_mode:row.binding.mode,text:built.input.text,source_key:built.input.source_key,payload:{profile:row.logical_profile,space:row.space_id,conversation_id:row.conversation_id},
-      archive_credential:await this.turns.prepared.audience.turn(this.token,built.input.principal,row.event_id,expires,this.carries?row.binding:undefined)};
+      archive_credential:await this.turns.prepared.audience.turn(this.token,built.input.principal,row.event_id,expires,key,this.carries?row.binding:undefined)};
   }
   async prepare(input:unknown){const row=await this.scoped(input);await this.leased(row,object(input));const saved=await this.savedInput(row);
     await this.turns.binding(saved.principal);await this.current(row);return {transcripts:saved.transcripts,files:saved.files};}
@@ -163,6 +181,8 @@ export abstract class ManagedExecutionRepository {
       await db.query(`UPDATE managed_runs SET state=$2,result_reference=$3,error_code=$4,lease_until=NULL,revision=revision+1,updated_at=now() WHERE event_id=$1`,
         [row.event_id,state,reference,interrupted?'execution_interrupted':result.error_code]);
       await db.query("UPDATE runtime_turns SET state='closed',closed_at=now() WHERE id=$1 AND state='open'",[row.event_id]);
+      // The run ended: its one-time key closes with it (ADR-0305).
+      await closeEvent(db,row.event_id,runKeys(this.channel),state==='done'||state==='failed'?'run_finished':state==='cancelled'?'run_cancelled':'run_interrupted');
       await db.query(`UPDATE workflow_receipts SET state=$2,receipt_id=$3,updated_at=now() WHERE step=$4 AND workflow_id IN
         (SELECT id FROM workflow_registry WHERE family=$5 AND job_id=$1) AND state IN ('started','ambiguous')`,[this.workflowJob(row.event_id),state==='done'?'done':state==='interrupted'?'ambiguous':'failed',reference.id,this.channel,this.family]);
       await db.query('COMMIT');return {event_id:row.event_id,state,duplicate:false};
@@ -197,13 +217,15 @@ export abstract class ManagedExecutionRepository {
   /** Cancel a run inside the caller's transaction: its runtime turn closes with it, so the broker refuses its next call. */
   protected async cancelIn(db:pg.PoolClient,id:string){
     await db.query("UPDATE managed_runs SET cancel_requested=true,state=CASE WHEN state='captured' THEN 'cancelled' ELSE state END,revision=revision+1,updated_at=now() WHERE event_id=$1 AND state IN ('captured','running')",[id]);
-    await db.query("UPDATE runtime_turns SET state='closed',closed_at=now() WHERE id=$1 AND state='open'",[id]);}
+    await db.query("UPDATE runtime_turns SET state='closed',closed_at=now() WHERE id=$1 AND state='open'",[id]);
+    await closeEvent(db,id,runKeys(this.channel),'run_cancelled');}
   protected async cancelRow(id:string){const db=await this.control.connect();try{await db.query('BEGIN');
     await this.cancelIn(db,id);await db.query('COMMIT');return {cancel_requested:true};
   }catch(error){await db.query('ROLLBACK');throw error;}finally{db.release();}}
   protected async interrupt(id:string,code:string){const db=await this.control.connect();try{await db.query('BEGIN');
     await db.query("UPDATE managed_runs SET state='interrupted',error_code=$2,lease_until=NULL,revision=revision+1,updated_at=now() WHERE event_id=$1 AND state IN ('captured','running')",[id,code]);
     await db.query("UPDATE runtime_turns SET state='closed',closed_at=now() WHERE id=$1 AND state='open'",[id]);
+    await closeEvent(db,id,runKeys(this.channel),'run_interrupted');
     await db.query("UPDATE workflow_receipts SET state='ambiguous',updated_at=now() WHERE step=$2 AND state='started' AND workflow_id IN (SELECT id FROM workflow_registry WHERE family=$3 AND job_id=$1)",[this.workflowJob(id),this.channel,this.family]);
     await db.query('COMMIT');
   }catch(error){await db.query('ROLLBACK');throw error;}finally{db.release();}}

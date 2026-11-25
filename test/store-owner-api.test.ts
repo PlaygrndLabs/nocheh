@@ -6,7 +6,8 @@ import {mkdtemp,rm} from 'node:fs/promises';
 import {tmpdir} from 'node:os';
 import {join} from 'node:path';
 import {canonical,digest,type Envelope} from '../src/archive.js';
-import {reader,scopeToken} from '../src/access.js';
+import {reader} from '../src/access.js';
+import {keyPass,openKey} from './one-time-key-pass.js';
 import {HttpError,json} from '../src/http.js';
 import {connectStores,initializeStoreDatabases,type StorePasswords} from '../src/stores/connections.js';
 import {fixtureServices} from './fixture-agent.js';
@@ -52,14 +53,16 @@ test('owner HTTP manages versions, provenance, corrections, project assignments 
     const value=await response.json() as any;assert.equal(response.status,status,JSON.stringify(value));return value;
   };
   try {
-    const unauthorized=await fetch(base+'/v1/projects',{method:'POST',body:'not json',headers:{authorization:'Bearer '+scopeToken(token,'123',Date.now()+60000)}});
+    // A reply's open one-time key (ADR-0305): it reaches no owner route.
+    const scopedPass=await openKey(stores.control,keyPass(token,'123',Date.now()+60000));
+    const unauthorized=await fetch(base+'/v1/projects',{method:'POST',body:'not json',headers:{authorization:'Bearer '+scopedPass}});
     assert.equal(unauthorized.status,403,'owner authority is checked before body parsing');
     assert.equal((await fetch(base+'/v1/projects')).status,401);
     // The GitHub copies: the service token only, and a body the store checks itself.
     assert.deepEqual(await request('/v1/background-jobs/copies'),{copies:[],pinned:[],removal:0});
     assert.deepEqual(await request('/v1/background-jobs/copies',{remove:'example-org/widgets.git'},400),{error:'invalid_github_copy'});
     assert.deepEqual(await request('/v1/background-jobs/copies',{clear:true}),{copies:[],pinned:[],removal:0});
-    assert.equal((await fetch(base+'/v1/background-jobs/copies',{headers:{authorization:'Bearer '+scopeToken(token,'123',Date.now()+60000)}})).status,403);
+    assert.equal((await fetch(base+'/v1/background-jobs/copies',{headers:{authorization:'Bearer '+scopedPass}})).status,403);
     const transferTypes=await request('/v1/exports/derivatives/types');assert.ok(transferTypes.types.includes('guard_revisions'));
     await request('/v1/exports/derivatives?type=workflow_registry',undefined,400);
     assert.equal((await request('/v1/derivation-engines')).engines.length,2);
@@ -86,7 +89,7 @@ test('owner HTTP manages versions, provenance, corrections, project assignments 
     await request(reminderPath,{enabled:true,expected_revision:0,operation_id:key+':reminder-allowed'});
     const learned=await request(reminderPath);assert.deepEqual([learned.effective,learned.authority],[true,'owner']);
     assert.equal(await services.access.notLearned(kept),null);
-    const scopedConsent=await fetch(base+consentPath,{method:'POST',body:'not json',headers:{authorization:'Bearer '+scopeToken(token,'123',Date.now()+60000)}});
+    const scopedConsent=await fetch(base+consentPath,{method:'POST',body:'not json',headers:{authorization:'Bearer '+scopedPass}});
     assert.equal(scopedConsent.status,403,'conversation content cannot grant learning consent');
     const body={artifact_id:file.id,input_hash:file.input_hash,producer:'fixture',producer_version:'1',configuration:{},operation_id:key+':reprocess'};
     const first=await request('/v1/sources/'+file.event.id+'/reprocess',body);

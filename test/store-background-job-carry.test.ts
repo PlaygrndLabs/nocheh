@@ -196,7 +196,8 @@ test('a running job run carries across reaction and learning epochs, any other c
     // A learning publication is pending for a moment: a run's checks wait it out and check again in full, while anything
     // else is refused at once; the heartbeat's refusal is tolerated in the turn, and the supervisor leaves the run alone.
     const waited=await approved('Pending check'),pending=await claim(waited);
-    const reply=await s.prepared.audience.turn(token,{scope:group,space:group,purpose:'assistant'},(await message(group,'A made-up question in the group')).id,Date.now()+600000);
+    const question=(await message(group,'A made-up question in the group')).id;
+    const reply=await s.prepared.audience.turn(token,{scope:group,space:group,purpose:'assistant'},question,Date.now()+600000,{kind:'turn',subject:question,attempt:1,person:'owner'});
     const publication=await learn(false);
     await assert.rejects(afterPending(false,()=>s.guards.state()),{code:'guard_transition_pending'});
     await assert.rejects(beat(pending),{code:'guard_transition_pending'});

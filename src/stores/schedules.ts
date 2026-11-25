@@ -16,6 +16,8 @@ import {forwardedMessage} from './owner-member-asks.js';
 import {ownerTimeZone,setOwnerTimeZone,timeZone} from './task-settings.js';
 import {keepNotes} from './notes-epochs.js';
 import {outsideReads,type OutsideRead} from './turn-reads.js';
+import {activeAgent} from '../agent/agents.js';
+import {memberReads} from './member-reads.js';
 
 export const scheduleStorageSchema=`
 CREATE TABLE IF NOT EXISTS schedule_versions (
@@ -52,6 +54,8 @@ ALTER TABLE managed_runs ADD COLUMN IF NOT EXISTS scheduled_for timestamptz;
 ALTER TABLE managed_runs ADD COLUMN IF NOT EXISTS fired_by text;
 -- The id of Nocheh's latest message about a schedule set by asking, which a press on it edits (ADR-0294).
 ALTER TABLE workflow_schedules ADD COLUMN IF NOT EXISTS notice_id text;
+-- The agent whose turn first set the schedule (ADR-0305); its person is created_by. Each fire's run is made for both.
+ALTER TABLE workflow_schedules ADD COLUMN IF NOT EXISTS agent text CHECK(agent IS NULL OR agent ~ '^[a-z][a-z0-9-]{0,31}$');
 `;
 const identity=(value:unknown)=>{const id=string(value,128);if(!/^[a-zA-Z0-9_-]+$/.test(id))throw new HttpError(400,'invalid_schedule_identity');return id;};
 /** A profile or job id as Hermes names them; 400 `invalid_schedule_identity` otherwise. */
@@ -74,7 +78,9 @@ const turnPerson=(principal:Reader)=>boundReader(principal)==='member'?principal
 
 /** Who set a definition version: a person's live turn, a person's press (edit grant), or Hermes's own checkpoint. */
 export type ScheduleSetBy={via:'turn';person:string;turn:string}|{via:'edit';person:string;request_id:string}|{via:'checkpoint'};
-export interface ScheduleAuthorization {set_by:ScheduleSetBy;created_by?:string;created_turn?:string}
+export interface ScheduleAuthorization {set_by:ScheduleSetBy;created_by?:string;created_turn?:string;
+  /** The agent the setting turn's key named (ADR-0305), kept with created_by. */
+  agent?:string}
 /** Decides inside the definition's transaction whether this change may be recorded; `version` is null for the read-only
  *  check before any derived records are written, so nothing is consumed then. */
 export type ScheduleAuthorizer=(db:Pick<pg.PoolClient,'query'>,current:any|undefined,document:Record<string,unknown>,
@@ -89,6 +95,10 @@ export class ScheduleRepository {
     readonly detect:(text:string)=>Promise<unknown>){}
   private get control(){return this.access.stores.control;}
   private get guards(){return this.access.guards;}
+  /** The member whose own open private chat `scope` is, or null (ADR-0305: who a schedule there is for). */
+  private async chatMember(scope:string):Promise<string|null> {
+    return (await memberReads(this.control,scope,ownerChat(this.access.policy())))?.member??null;
+  }
   /** The runtime profile, which must be that chat's own (scope and space equal). */
   async profile(profile:string,scope:string){
     const entry=await new RuntimeProfileRepository(this.access).resolve({admin:true,scope:null},{profile});
@@ -159,7 +169,7 @@ export class ScheduleRepository {
    * read outside content (`steered`, ADR-0294) may not leave a schedule running unless it already ran with that very
    * instruction: 409 `schedule_start_needed`, and Hermes saves it paused instead, for its person's Start.
    */
-  private turnChange(grant:{scope:string;person:string},turn:string,limit:number|null,steered=false):ScheduleAuthorizer {
+  private turnChange(grant:{scope:string;person:string},turn:string,limit:number|null,steered=false,agent?:string):ScheduleAuthorizer {
     return async(db,current,document,{version})=>{
       if(current&&current.scope!==grant.scope)throw new HttpError(403,'profile_scope_denied');
       if(steered&&document.enabled===true&&document.removed!==true&&!(current&&current.configuration?.enabled!==false&&
@@ -169,7 +179,7 @@ export class ScheduleRepository {
         if(version)await db.query('SELECT pg_advisory_xact_lock(hashtextextended($1,803369))',['schedule-chat:'+grant.scope]);
         if(limit===null||await chatSchedules(db,grant.scope)>=limit)throw new HttpError(403,'schedule_limit_reached');
       }
-      return {set_by:{via:'turn',person:grant.person,turn},created_by:grant.person,created_turn:turn};
+      return {set_by:{via:'turn',person:grant.person,turn},created_by:grant.person,created_turn:turn,...(agent?{agent}:{})};
     };
   }
   async definition(principal:Reader|AgentLogin,input:unknown){
@@ -227,13 +237,17 @@ export class ScheduleRepository {
           revision=revision+1,updated_at=now() WHERE channel='scheduler' AND logical_profile=$1 AND job_id=$2 AND state IN ('captured','running')`,[profile,job]);
         await db.query(`UPDATE runtime_turns SET state='closed',closed_at=now() WHERE id IN
           (SELECT event_id FROM managed_runs WHERE channel='scheduler' AND logical_profile=$1 AND job_id=$2) AND state='open'`,[profile,job]);
+        // Their one-time keys close with them (ADR-0305).
+        await db.query(`UPDATE one_time_keys SET closed_at=now(),closed_reason='schedule_changed' WHERE kind='scheduled' AND closed_at IS NULL AND event_id IN
+          (SELECT event_id FROM managed_runs WHERE channel='scheduler' AND logical_profile=$1 AND job_id=$2)`,[profile,job]);
       }
       await db.query(`INSERT INTO schedule_versions(id,schedule_id,document_hash,execution_version,operation_reference,definition_reference,prompt_reference,configuration,execution_hash,body_hash,set_by)
         VALUES($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11) ON CONFLICT DO NOTHING`,[operation.id,id,fingerprint,document.execution_version,operation,output,prepared,configuration,executionHash,
           bodyHash(document),allowed.set_by]);
       // Who first set a schedule by asking, and in which turn, is kept as it was; a later version never changes it.
-      await db.query(`INSERT INTO workflow_schedules(id,logical_profile,job_id,scope,version_id,cursor,sequence,created_by,created_turn) VALUES($1,$2,$3,$4,$5,$6,$7,$8,$9)
-        ON CONFLICT(id) DO UPDATE SET version_id=$5,cursor=$6,sequence=$7,updated_at=now()`,[id,profile,job,scope,operation.id,cursor,sequence,allowed.created_by??null,allowed.created_turn??null]);
+      await db.query(`INSERT INTO workflow_schedules(id,logical_profile,job_id,scope,version_id,cursor,sequence,created_by,created_turn,agent) VALUES($1,$2,$3,$4,$5,$6,$7,$8,$9,$10)
+        ON CONFLICT(id) DO UPDATE SET version_id=$5,cursor=$6,sequence=$7,updated_at=now()`,[id,profile,job,scope,operation.id,cursor,sequence,allowed.created_by??null,allowed.created_turn??null,
+          allowed.agent??null]);
       await db.query(`UPDATE workflow_registry SET state='skipped',waiting_reason='superseded',revision=revision+1,updated_at=now()
         WHERE family='schedules' AND job_id LIKE $1 AND job_id<>$2 AND state IN ('queued','waiting','retryable_failed')`,['schedule:'+id+':%','schedule:'+id+':'+cursor]);
       // A Run now moves the cursor away and back again (pending, running, then idle with the same next run); the cursor's
@@ -272,7 +286,7 @@ export class ScheduleRepository {
     const reads=(await outsideReads(this.control,s.stores.archive,turn,asker)).filter(read=>!SCHEDULE_IGNORES.has(read));
     const before=(await this.control.query(currentSql,[scheduleId(grant.profile,identity(body.job_id))])).rows[0];
     const earlier=before&&!before.configuration?.removed?await this.currentBody(before):null;
-    const result=await this.record(body,this.turnChange(grant,turn,rules.limit,reads.length>0));
+    const result=await this.record(body,this.turnChange(grant,turn,rules.limit,reads.length>0,principal.agent));
     if(result.duplicate)return {id:result.id,event_id:result.event_id,duplicate:true,superseded:result.superseded,created:false,notice:null,held:false};
     // Held: saved paused, by a turn that read outside content, as new or with another instruction. Its person starts it.
     const held=reads.length>0&&!document.removed&&document.enabled===false&&(result.created||earlier!==bodyHash(document));
@@ -353,13 +367,17 @@ export class ScheduleRepository {
       const firedBy=await this.fireGrant(db,current,{reason,scheduled:Date.parse(scheduled),epoch:Number(body.owner_epoch),request_id:pressed,event:operation.id});
       const prompt=current.prompt_reference as DerivativeReference;
       if(binding.mode==='on')await this.guards.read('derived_artifacts:'+prompt.id,binding);
+      // Who the run is for (ADR-0305): the schedule's creator; one with none recorded, the owner in the owner's chat and
+      // the member in their own chat. Anywhere else nobody can be named, and the fire is refused before it is recorded.
+      const person=current.created_by??(scope===ownerChat(this.access.policy())?'owner':await this.chatMember(scope));
+      if(!person)throw new HttpError(409,'one_time_key_person_required');
       const busy=(await db.query("SELECT 1 FROM managed_runs WHERE channel='scheduler' AND logical_profile=$1 AND job_id=$2 AND state IN ('captured','running')",[profile,job])).rowCount;
       const effective=busy?'overlap':reason,missed=['missed','overlap'].includes(effective);
       await db.query(`INSERT INTO managed_runs(event_id,channel,source_reference,scope,space_id,logical_profile,conversation_id,binding,
-        owner_epoch,job_id,schedule_version,trigger_reference,fire_reason,state,error_code,scheduled_for,fired_by)
-        VALUES($1,'scheduler',$2,$3,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15)`,[operation.id,operation,scope,profile,
+        owner_epoch,job_id,schedule_version,trigger_reference,fire_reason,state,error_code,scheduled_for,fired_by,person,agent)
+        VALUES($1,'scheduler',$2,$3,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16,$17)`,[operation.id,operation,scope,profile,
           'cron_'+job+'_'+operation.id.slice(0,24),binding,body.owner_epoch,job,current.version_id,output,effective,missed?'cancelled':'captured',missed?'scheduled_'+effective:null,
-          new Date(Date.parse(scheduled)),firedBy]);
+          new Date(Date.parse(scheduled)),firedBy,person,current.agent??activeAgent]);
       await requestWorkflow(db,'schedules','run:'+operation.id);await db.query('COMMIT');
       return {event_id:operation.id,state:missed?'cancelled':'captured',fire_reason:effective,duplicate:false};
     }catch(error){await db.query('ROLLBACK');throw error;}finally{await releaseOperation(db,async()=>{if(held)await leaveFamily(db,'schedules');});}

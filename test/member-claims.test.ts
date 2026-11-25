@@ -3,7 +3,8 @@ import {test} from 'node:test';
 import assert from 'node:assert/strict';
 import {createHmac} from 'node:crypto';
 import type {IncomingMessage} from 'node:http';
-import {boundReader,boundReaderReadOnly,memberClaimId,memberReadId,reader,turnToken,type Reader} from '../src/access.js';
+import {boundReader,boundReaderReadOnly,memberClaimId,memberReadId,reader,type Reader} from '../src/access.js';
+import {keyClaims,keyPass} from './one-time-key-pass.js';
 import {installChatsForTest} from '../src/chats.js';
 import {installMembersForTest,memberDirectory} from '../src/members.js';
 import {memberChangeRequest} from '../src/stores/member-api.js';
@@ -26,9 +27,17 @@ const secret='synthetic-service-token-only-for-tests',event='e'.repeat(64),later
 const member='d'.repeat(64),ask='c'.repeat(32),answer='a'.repeat(32);
 const request=(token:string)=>({headers:{authorization:'Bearer '+token}}) as unknown as IncomingMessage;
 const signed=(prefix:'turn'|'scope',claims:Record<string,unknown>)=>{
-  const body=Buffer.from(JSON.stringify({expires:later(),audience:prefix==='turn'?'nocheh-assistant':'nocheh-archive',...claims})).toString('base64url');
+  // The one-time key a pass is (ADR-0305): its person is the member or lane it names, else the owner, so each refusal
+  // below is for the claim it is about.
+  const key=prefix==='turn'?{agent:'hermes',person:claims.member??claims.lane??'owner',jti:keyClaims().jti,key_kind:claims.member_read!==undefined?'member_ask':'turn'}:{};
+  const body=Buffer.from(JSON.stringify({expires:later(),audience:prefix==='turn'?'nocheh-assistant':'nocheh-archive',...key,...claims})).toString('base64url');
   return `${prefix}.${body}.${createHmac('sha256',secret).update(body).digest('base64url')}`;
 };
+/** A signed pass for `policy`, keyed for the person it names (ADR-0305). */
+const turnToken=(key:string,scope:string|null,expires:number,id:string,policy?:{space:string;revision:number;guard_epoch?:number;member?:string;lane?:string;memberRead?:string})=>
+  keyPass(key,scope,expires,id,{...policy,person:policy?.member??policy?.lane??'owner',kind:policy?.memberRead!==undefined?'member_ask':'turn'});
+/** A reader without its key's fields, which differ for every pass. */
+const bare=(value:Reader)=>{const {person:_person,jti:_jti,keyKind:_kind,...rest}=value;return rest;};
 const refused=(token:string,why:string)=>assert.throws(()=>reader(request(token),secret),{code:'invalid_scope_token'},why);
 /** A turn pass whose scope and space are `chat`. */
 const at=(chat:string|null,claims:Record<string,unknown>)=>signed('turn',{scope:chat,event_id:event,space:chat??OWNER,revision:1,...claims});
@@ -36,7 +45,7 @@ const at=(chat:string|null,claims:Record<string,unknown>)=>signed('turn',{scope:
 test('a member claim is read only from a turn pass for a private chat that is not the owner\'s, in both families',()=>{
   for(const chat of [MEMBER_GP_CHAT,MEMBER_NG_CHAT,MEMBER_GP_OFF_CHAT,MEMBER_NG_OFF_CHAT,BOB_CHAT]) {
     const parsed=reader(request(turnToken(secret,chat,later(),event,{space:chat,revision:1,guard_epoch:1,member})),secret);
-    assert.deepEqual(parsed,{scope:chat,admin:false,turnEvent:event,space:chat,revision:1,guard_epoch:1,agent:'hermes',member},chat);
+    assert.deepEqual(bare(parsed),{scope:chat,admin:false,turnEvent:event,space:chat,revision:1,guard_epoch:1,agent:'hermes',member},chat);
     assert.equal(boundReader(parsed),'member');
   }
   for(const value of ['D'.repeat(64),'d'.repeat(63),'d'.repeat(65),'d'.repeat(32),'g'.repeat(64),'',64,null])
@@ -55,7 +64,7 @@ test('a member claim is read only from a turn pass for a private chat that is no
 test('a lane is checked for shape and dropped: it never reaches the reader and grants nothing',()=>{
   // A member's group pass and private pass may carry their lane; the reader is the same as without it.
   const group=reader(request(turnToken(secret,GP1,later(),event,{space:GP1,revision:1,lane:member})),secret);
-  assert.deepEqual(group,reader(request(turnToken(secret,GP1,later(),event,{space:GP1,revision:1})),secret));
+  assert.deepEqual(bare(group),bare(reader(request(turnToken(secret,GP1,later(),event,{space:GP1,revision:1})),secret)));
   assert.equal('lane' in group,false);assert.equal(boundReader(group),null);
   const own=reader(request(turnToken(secret,MEMBER_NG_CHAT,later(),event,{space:MEMBER_NG_CHAT,revision:1,member,lane:member})),secret);
   assert.equal('lane' in own,false);assert.equal(own.member,member);
@@ -69,7 +78,7 @@ test('a lane is checked for shape and dropped: it never reaches the reader and g
 
 test('a member_read claim is read only from a turn pass for the owner\'s private chat, as an answer is',()=>{
   const parsed=reader(request(turnToken(secret,OWNER,later(),event,{space:OWNER,revision:1,memberRead:ask})),secret);
-  assert.deepEqual(parsed,{scope:OWNER,admin:false,turnEvent:event,space:OWNER,revision:1,agent:'hermes',memberRead:ask});
+  assert.deepEqual(bare(parsed),{scope:OWNER,admin:false,turnEvent:event,space:OWNER,revision:1,agent:'hermes',memberRead:ask});
   assert.equal(boundReader(parsed),'memberRead');
   assert.ok(memberReadId.test(ask));assert.ok(memberClaimId.test(member));
   for(const value of ['C'.repeat(32),'c'.repeat(31),'c'.repeat(64),'',32])refused(at(OWNER,{member_read:value}),String(value));

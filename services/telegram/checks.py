@@ -197,6 +197,10 @@ def answer_button(button, chat_id, event_id, served):
     return InlineKeyboardMarkup([[InlineKeyboardButton(label, callback_data=data)]])
 
 
+# The one-time keys a reply is sent with (ADR-0305); a run's, a review's or a filter's key never reaches Telegram.
+REPLY_KEYS=('turn','follow_up','member_ask')
+
+
 def verify_turn_credential(credential, event_id, chat_id, topic, policy):
     """The turn credential Nocheh minted for this event and conversation, unexpired and signed with the service token,
     and the served list it was checked against.
@@ -211,7 +215,13 @@ def verify_turn_credential(credential, event_id, chat_id, topic, policy):
     served list marks member_private: its scope and space are that chat, never a topic, never the owner's. The owner's ask
     about a member (member_read, step 4b) reads as the owner's private chat, as an answer does. A pass names at most one
     of these. A lane (a member id, so the agent runs one turn at a time per member) grants nothing; it is taken only on a
-    member's own pass, for that member, and on a group pass."""
+    member's own pass, for that member, and on a group pass.
+
+    Every pass is a one-time key for one reply (ADR-0305): its own id, the person it is for and the agent it was made for.
+    Only a reply's key reaches Telegram: a message's turn, a follow-up after actions, or the owner's ask about a member
+    (and an ask's key is never anything else). The person fits the pass: a member's pass and a lane are that member's, the
+    owner's own turn, an answer and an ask the owner's. Core closes the key once the reply is delivered, after this service
+    wrote its receipt; from then on every delivery check with it is refused."""
     try:
         prefix,body,signature=credential.split('.')
         expected=base64.urlsafe_b64encode(hmac.new(secret('SERVICE_TOKEN').encode(),body.encode(),hashlib.sha256).digest()).decode().rstrip('=')
@@ -224,8 +234,16 @@ def verify_turn_credential(credential, event_id, chat_id, topic, policy):
         member,member_read,lane=claims.get('member'),claims.get('member_read'),claims.get('lane')
         if not isinstance(space,str) or type(claims.get('revision')) is not int or claims['revision']<1:raise ValueError()
         # Storage binds what a member may read on the server; a pass never carries it, under any spelling.
-        if any(key in claims for key in ('reads','member_chat','memberChat','memberRead')):raise ValueError()
+        if any(key in claims for key in ('reads','member_chat','memberChat','memberRead','keyKind')):raise ValueError()
         if sum(value is not None for value in (answer,member,member_read))>1:raise ValueError()
+        jti,person,kind,agent=claims.get('jti'),claims.get('person'),claims.get('key_kind'),claims.get('agent')
+        if not isinstance(jti,str) or not re.fullmatch(r'[a-f0-9]{32}',jti):raise ValueError()
+        if person!='owner' and (not isinstance(person,str) or not re.fullmatch(r'[a-f0-9]{64}',person)):raise ValueError()
+        # Which agent is plugged in is core's to check; here its name has only to be one.
+        if kind not in REPLY_KEYS or not isinstance(agent,str) or not re.fullmatch(r'[a-z][a-z0-9-]{0,31}',agent):raise ValueError()
+        if (member_read is not None)!=(kind=='member_ask') or claims.get('purpose','assistant')!='assistant':raise ValueError()
+        if (member is not None and person!=member or lane is not None and person!=lane or
+                (scope is None or answer is not None or member_read is not None) and person!='owner'):raise ValueError()
         if lane is not None and (not isinstance(lane,str) or not re.fullmatch(r'[a-f0-9]{64}',lane) or scope is None or
                                  answer is not None or member_read is not None or member is not None and lane!=member):raise ValueError()
         epoch=claims.get('guard_epoch')

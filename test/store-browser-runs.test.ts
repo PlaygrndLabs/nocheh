@@ -90,7 +90,11 @@ test('browser execution separates originals, prepared inputs, receipts and same-
     assert.equal((await stores.archive.query("SELECT 1 FROM source_relations r JOIN source_revisions v ON v.object_id=r.target_id JOIN source_observations o ON o.revision_id=v.id WHERE r.event_id=$1 AND r.kind='reply_to' AND o.event_id=$2",[receipt.event_id,first.event_id])).rowCount,1,'delivered browser message resolves its original reply target');
     await s.browserDelivery.acknowledge(owner,delivered.delivery);await drainSourceSpool(s.capture,root,receipt.event_id);
     assert.equal((await stores.archive.query('SELECT count(*)::int AS count FROM events WHERE id=$1',[receipt.event_id])).rows[0].count,1);
-    await assert.rejects(s.turns.binding(reader({headers:{authorization:'Bearer '+claims.get(first.event_id).archive_credential}} as any,token)),{code:'runtime_turn_changed'});
+    // The run ended: its one-time key, a turn's for the owner, closed with it (ADR-0305).
+    const finished=reader({headers:{authorization:'Bearer '+claims.get(first.event_id).archive_credential}} as any,token);
+    assert.deepEqual([finished.person,finished.keyKind],['owner','turn']);
+    assert.equal((await stores.control.query('SELECT closed_reason FROM one_time_keys WHERE jti=$1',[finished.jti])).rows[0].closed_reason,'run_finished');
+    await assert.rejects(s.turns.binding(finished),{code:'one_time_key_closed'});
     assert.ok(((await s.reviews.queue((await s.archive.captured(first.event_id)).reference)).ids).length>0,'completed browser originals remain available to permitted background learning');
     const reviewBinding=await s.guards.state();
     const processing={admin:false,scope:null,space:'123',turnEvent:first.event_id,generation:reviewBinding.generation,guard_epoch:reviewBinding.epoch,revision:reviewBinding.epoch,purpose:'filter' as const};
@@ -119,7 +123,7 @@ test('browser execution separates originals, prepared inputs, receipts and same-
     (s.browser as any).agent=agent;
     const cancelled=await capture();await s.browser.admit(owner,cancelled);await prepare(cancelled.event_id);await run(cancelled.event_id);await s.browser.cancel(cancelled);
     await assert.rejects(s.browser.prepare(contexts.get(cancelled.event_id)),{code:'run_lease_lost'});
-    await assert.rejects(s.turns.binding(reader({headers:{authorization:'Bearer '+claims.get(cancelled.event_id).archive_credential}} as any,token)),{code:'runtime_turn_changed'});
+    await assert.rejects(s.turns.binding(reader({headers:{authorization:'Bearer '+claims.get(cancelled.event_id).archive_credential}} as any,token)),{code:'one_time_key_closed'});
     assert.equal((await s.browser.heartbeat(contexts.get(cancelled.event_id))).cancel_requested,true);await run(cancelled.event_id);
     const scoped=await capture({scope:group,space:group+'/topic/12'});const reference=(await s.archive.captured(scoped.event_id)).reference,binding=await s.guards.state();
     const principal={admin:false,scope:group,space:group+'/topic/12',generation:binding.generation,guard_epoch:binding.epoch,revision:binding.epoch};

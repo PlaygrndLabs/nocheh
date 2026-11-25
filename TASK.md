@@ -67,7 +67,10 @@ Nocheh is in development mode and not yet released. Everything below is built an
   grants every schedule change and fire, and Hermes's Cron page is read-only
   ([ADR-0290](docs/adr/0290-nocheh-grants-schedule-changes-and-fires.md)); an agent login replaces the master key in
   Hermes, which reaches only its own routes, and `rotate-keys` renews the master key, the agent login and Hermes's session token
-  ([ADR-0295](docs/adr/0295-agent-login-replaces-the-master-key-in-hermes.md)). Next: one-time keys per reply. A group's
+  ([ADR-0295](docs/adr/0295-agent-login-replaces-the-master-key-in-hermes.md)). Step 1, part B: every pass is a one-time key for one
+  reply or run, naming its person and the agent plugged in now, written as a row and closed once the reply is delivered or
+  the run ends; each kind of key reaches only its own routes, review and filter keys no data tool, and Hermes keeps no pass on
+  disk ([ADR-0305](docs/adr/0305-one-time-keys-per-reply.md)). Next: close read holes, key-use log and the Keys list. A group's
   tools permission runs only what carries no data, within ten reads a message; the rest asks
   ([ADR-0291](docs/adr/0291-group-tools-run-only-what-carries-no-data.md)).
 - Dashboard: compact tables and sub-tabs on every page (table-first plan, steps 1 to 5);
@@ -95,8 +98,8 @@ Checks and follow-ups:
   one live check on the owner's install with the setting on: a typed command runs, and the same command after a
   forward in that day's conversation shows its card with the reason line.
 - Development startup order: a full tester run of `project_groups_stay_apart` alone.
-- Talk while it works ([ADR-0301](docs/adr/0301-a-message-joins-the-running-turn-in-its-chat.md)): a live check on the owner's install, two messages
-  in a row while the agent uses a tool, after the merge.
+- Talk while it works ([ADR-0301](docs/adr/0301-a-message-joins-the-running-turn-in-its-chat.md)): the tester covers it
+  (`message_joins_running_turn`); left is one check with the real model, two messages in a row while the agent uses a tool.
 - Notes carry ([ADR-0292](docs/adr/0292-chat-notes-carry-into-new-guard-epochs.md)): on the owner's install, hide a message
   and check that the private chat's notes are still in Memory › Assistant notes after its next reply.
 - A project's tasks are one list ([ADR-0276](docs/adr/0276-a-projects-tasks-are-one-list.md)): a full tester run of

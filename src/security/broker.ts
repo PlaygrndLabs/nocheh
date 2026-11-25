@@ -14,12 +14,13 @@ import type {OperationReference} from '../stores/operations.js';
 import {JobBoxRepository,boxTokenSet,boxTokenValid} from '../stores/job-box.js';
 import {MACHINE_BODY,MachineRepository,machineErrors} from '../stores/machines.js';
 import {RuntimeTurnRepository} from '../stores/turns.js';
-import {assertPrivateAnswerRoute} from '../stores/private-answers.js';
+import {assertKeyRoute} from '../stores/key-routes.js';
 import {afterPending,jobRun} from '../stores/guards.js';
 import {elapsed,timedBody,type ModelTimings} from './timing.js';
 import {actionErrors,askErrors,jobErrors,taskErrors} from '../mcp/tools.js';
 import {loopback,selfBase,serveMcp} from '../mcp/server.js';
 import {longFetch} from '../long-fetch.js';
+import {relayRoutes} from './relay-routes.js';
 
 export interface TurnBinding {
   event_id:string;scope:string;profile:string;logical_profile:string;owner:boolean;
@@ -31,20 +32,18 @@ export interface BrokerStorage {
   turnFile(principal:Reader,hash:string):Promise<string>;
   /** An answer reader's read set from its record (ADR-0249); a reader without an answer comes back as it is. */
   bindReads?(principal:Reader):Promise<Reader>;
+  /** A pass's one-time key is open (ADR-0305). A broker without storage (unit tests only) checks no key. */
+  assertKey?(principal:Reader):Promise<void>;
 }
 /** `agentKey` is the agent login (ADR-0295): the broker calls Hermes with it and takes it on POST /v1/guard alone; without it
  * no agent login is accepted and no transport call is sent. */
 export interface BrokerOptions {pool:pg.Pool; token:string; agentKey?:string; archive:string; prepare:(principal:Reader|AgentLogin,input:unknown)=>Promise<any>; hermes:string; model:string; backupModel?:string; fetch?:typeof fetch;storage?:BrokerStorage;assertActive?:()=>void;assertReady?:()=>Promise<void>;health?:()=>Promise<unknown>;}
-/** Why Nocheh did not save a schedule a turn set (ADR-0290); any other refusal stays opaque. */
+/** Why Nocheh did not save a schedule a turn set (ADR-0290), or saves it only paused (ADR-0294); any other refusal stays opaque. */
 export const scheduleErrors=new Set(['schedule_turn_required','schedule_turn_not_allowed','schedule_limit_reached','schedule_cron_unsupported',
   'invalid_schedule_definition','invalid_schedule_prompt','invalid_schedule_preference','profile_scope_denied','schedule_sequence_conflict',
-  'schedule_execution_version_conflict']);
+  'schedule_execution_version_conflict','schedule_start_needed']);
 /** A fixed label for preparation-only guard requests; nothing is sent there. */
 const PREPARATION_DESTINATION='https://preparation.nocheh.invalid';
-const relayRoutes:[string,RegExp][]=[
-  ['GET',/^\/v1\/(search|archive\/page|imports\/pending|events\/[a-f0-9]{64}|artifacts\/[a-f0-9]{64}\/bytes|memory\/check|memory\/context|memory\/(shared|filtered|grants)\/[a-f0-9]{64}|memory\/learned\/[a-f0-9]{64}\/[1-9][0-9]{0,8}|memory\/notes\/[a-f0-9]{12}|memory\/facts\/[a-f0-9]{64}(?:\/[1-9][0-9]{0,2})?|knowledge\/(context|proposals\/[a-f0-9]{64})|owner\/(conversations|conversation-context|projects|project-assignments|people|telegram-identities|memory-map|tasks(?:\/[a-f0-9]{64})?)|tools\/actions(?:\/[a-f0-9]{64})?|telegram\/destinations|notion\/connections|github\/repos)$/],
-  ['POST',/^\/v1\/(context\/prepare|memory\/(recall|longterm\/(recall|context|search))|jobs\/(start|status|stop)|machines\/exec|tools\/propose|knowledge\/proposals|action-requests|member-asks|schedules\/(turn(?:\/definition)?|time-zone)|owner\/tasks(?:\/[a-f0-9]{64}(?:\/comments)?)?)$/],
-];
 export function scopedRoute(method:string,path:string):boolean {return relayRoutes.some(([m,re])=>method===m&&re.test(path));}
 /** The installation rehearsal's fixture provider; accepted only when the fixture flag is set. */
 export const FIXTURE_PROVIDER_URL='http://model-fixture:8317/v1';
@@ -182,9 +181,13 @@ export function brokerServer(options:BrokerOptions) {
     // call, or refused without one, and reaches its read routes only (ADR-0249, ADR-0262). A pass for a topic the app
     // recorded a moment ago is read once this service's chat directory has looked again (ADR-0252).
     const parsed=await currentReader(req,options.token),bound=boundReader(parsed);
+    // Every pass is a one-time key, open until its reply is delivered or its run ends (ADR-0305): checked before anything
+    // else is done for it, and again with every audience check below.
+    if(!parsed.admin)await options.storage?.assertKey?.(parsed);
     if(bound!==null&&!options.storage?.bindReads)throw new HttpError(409,bound==='answer'?'private_answer_closed':'member_chat_closed');
     const principal=bound!==null?await options.storage!.bindReads!(parsed):parsed,job=jobRun(principal);
-    assertPrivateAnswerRoute(principal,req.method,path);
+    // Each key reaches only its kind's routes; a bound reader keeps its read-only codes (ADR-0249, ADR-0305).
+    assertKeyRoute(principal,req.method,path);
     await afterPending(job,async()=>options.assertReady?.());
     // Nocheh's data tools: each call comes back to this broker's own routes with the turn's pass, so it meets every check below (ADR-0233).
     if(path==='/mcp')return serveMcp(req,res,{principal,call:loopback(selfBase(req),req.headers.authorization!),isolated:true});

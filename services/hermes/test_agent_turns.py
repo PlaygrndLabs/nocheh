@@ -21,6 +21,7 @@ from .async_runs import CLOSED,identity
 from .agent_turns import AgentTurns
 from services.durable import canonical,digest,immutable_file
 from .scopes import Scope,Scopes
+from .key_fixture import keyed
 from . import daily_session
 from datetime import timezone
 from .subscription import ProviderNotConfigured
@@ -32,9 +33,10 @@ LEADER='ab'*32
 REPO=Path(__file__).resolve().parents[2]
 
 
-def credential(chat,event,topic=None,secret=SECRET):
-    claims={'scope':chat,'event_id':event,'expires':time.time()*1000+600000,'audience':'nocheh-assistant',
-            **({'space':chat+'/topic/'+str(topic),'revision':1} if topic else {})}
+def credential(chat,event,topic=None,secret=SECRET,kind=None):
+    # Every pass is a one-time key (ADR-0305): its id, person, kind and agent.
+    claims=keyed({'scope':chat,'event_id':event,'expires':time.time()*1000+600000,'audience':'nocheh-assistant',
+                  **({'space':chat+'/topic/'+str(topic),'revision':1} if topic else {})},kind)
     body=base64.urlsafe_b64encode(canonical(claims)).decode().rstrip('=')
     signature=base64.urlsafe_b64encode(hmac.new(secret.encode(),body.encode(),hashlib.sha256).digest()).decode().rstrip('=')
     return 'turn.'+body+'.'+signature
@@ -47,7 +49,8 @@ def turn_body(update,chat='-20',text='synthetic question',topic=None,bot=BOT,sec
              'from':{'id':456,'is_bot':False,'first_name':'Participant'},'text':text,
              **({'message_thread_id':topic,'is_topic_message':True} if topic else {})}
     value={'channel':'telegram','event_id':event,'attempt':1,'source_key':key,'scope':chat,'payload':{'update_id':update,'message':message},
-           'text':text,'transcripts':[],'files':[],'control_reply':None,'guard_mode':'on','archive_credential':credential(chat,event,topic,secret),'prompts':{}}
+           'text':text,'transcripts':[],'files':[],'control_reply':None,'guard_mode':'on',
+           'archive_credential':credential(chat,event,topic,secret,'follow_up' if changes.get('continuation') is not None else None),'prompts':{}}
     value.update(changes)
     return value
 
@@ -158,7 +161,11 @@ class AgentTurnTests(unittest.TestCase):
         self.assertEqual(restarted.resume(observe(body))['state'],'queued')
         time.sleep(.05);self.assertEqual(self.calls,[],'observation cannot launch a queued turn')
         resumed={key:value for key,value in observe(body).items() if key!='observe_only'}
-        self.assertIn(restarted.resume(resumed)['state'],('running','done'))
+        # The request on disk holds no pass (ADR-0305): a resume that would launch brings a fresh one, or launches nothing.
+        self.assertNotIn('archive_credential',json.loads((self.folder/(identity(body)+'.request')).read_bytes()))
+        with self.assertRaisesRegex(ValueError,'archive_credential_required'):restarted.resume(resumed)
+        time.sleep(.05);self.assertEqual(self.calls,[],'a resume without a fresh pass launches nothing')
+        self.assertIn(restarted.resume({**resumed,'archive_credential':credential('-20',body['event_id'])})['state'],('running','done'))
         self.assertEqual(self.wait(restarted,body)['reply']['text'],'Synthetic answer');self.assertEqual(len(self.calls),1)
 
     def test_cancel_stops_a_running_turn_withdraws_a_late_answer_and_skips_a_queued_one(self):
@@ -331,6 +338,18 @@ class AgentTurnTests(unittest.TestCase):
                     self.assertIn(text,started)
         self.assertEqual(agent.lanes,{},'idle chats leave no lane behind')
 
+    def test_a_turn_runs_only_with_a_one_time_key_of_its_own_kind(self):
+        # ADR-0305: a message's turn takes a turn key, a follow-up a follow_up key, for this agent; nothing else runs.
+        agent=self.agent(self.replying());attempt='c1-'+LEADER[:40]
+        for update,changes,kind,extra in ((51,{},'follow_up',{}),(52,{'attempt':attempt,'continuation':LEADER},'turn',{}),(53,{},'turn',{'agent':'another-agent'}),
+                                          (54,{},'turn',{'jti':None}),(55,{},'turn',{'person':None}),(56,{},'turn',{})):
+            body=turn_body(update,**changes)
+            claims=keyed({'scope':'-20','event_id':body['event_id'],'expires':time.time()*1000+600000,'audience':'nocheh-assistant'},kind,**extra)
+            body['archive_credential']='turn.'+base64.urlsafe_b64encode(canonical(claims)).decode().rstrip('=')+'.unchecked'
+            agent.start(body)
+            with self.subTest(update=update):self.assertEqual(self.wait(agent,body)['state'],'done' if update==56 else 'ambiguous')
+        self.assertEqual(len(self.calls),1,'only the turn with its own key ran')
+
     def test_a_continuation_attempt_is_its_own_run(self):
         agent=self.agent(self.replying());attempt='c1-'+LEADER[:40]
         follow=turn_body(41,attempt=attempt,continuation=LEADER);agent.start(follow)
@@ -469,7 +488,7 @@ class AgentTurnTests(unittest.TestCase):
         def signed(event,**extra):
             claims={'scope':'123','space':'123','event_id':event,'expires':time.time()*1000+600000,'audience':'nocheh-assistant',
                     'generation':'11111111-1111-1111-1111-111111111111','guard_epoch':5,'revision':1,**extra}
-            data=base64.urlsafe_b64encode(canonical(claims)).decode().rstrip('=')
+            data=base64.urlsafe_b64encode(canonical(keyed(claims))).decode().rstrip('=')
             return 'turn.'+data+'.'+base64.urlsafe_b64encode(hmac.new(SECRET.encode(),data.encode(),hashlib.sha256).digest()).decode().rstrip('=')
         owner=lambda body,claims:Scope(body['scope'],'123',True,Scopes.profile(body['scope']),body['scope'])
         agent=self.agent(self.replying(),resolve=owner)
@@ -490,7 +509,7 @@ class AgentTurnTests(unittest.TestCase):
         def signed(event,**extra):
             claims={'scope':'123','space':'123','event_id':event,'expires':time.time()*1000+600000,'audience':'nocheh-assistant',
                     'generation':'11111111-1111-1111-1111-111111111111','guard_epoch':5,'revision':1,**extra}
-            data=base64.urlsafe_b64encode(canonical(claims)).decode().rstrip('=')
+            data=base64.urlsafe_b64encode(canonical(keyed(claims))).decode().rstrip('=')
             return 'turn.'+data+'.'+base64.urlsafe_b64encode(hmac.new(SECRET.encode(),data.encode(),hashlib.sha256).digest()).decode().rstrip('=')
         owner=lambda body,claims:Scope(body['scope'],'123',True,Scopes.profile(body['scope']),body['scope'])
         agent=self.agent(self.replying(),resolve=owner);ask='d'*32
