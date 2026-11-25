@@ -73,8 +73,9 @@ def resolved(config, model):
     config['model'] = {'provider': 'anthropic' if isolated_enabled() and anthropic_reply_route() else provider, 'default': model}
     # Hermes marks the stable start of each prompt for the provider's prompt cache. 'auto', Hermes's default, keeps a
     # chat on the cheaper five-minute cache until its first pause of more than five minutes, then on the one-hour cache,
-    # so a reply after a pause reads the conversation instead of writing it again. Runs that start their own session
-    # (schedules, reviews, jobs) never pause and stay on five minutes (ADR-0307).
+    # so a reply after a pause reads the conversation instead of writing it again. Schedules and reviews start their
+    # own session and stay on five minutes; a job relaunched after a pause keeps its session and moves to one hour
+    # (ADR-0307).
     config['prompt_caching'] = {'cache_ttl': 'auto'}
     # Voice notes are archived without transcription.
     config['stt'] = {'enabled': False}

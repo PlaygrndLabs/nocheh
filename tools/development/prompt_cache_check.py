@@ -13,7 +13,8 @@ Run with the Hermes environment of the Hermes Python tests, from the repository 
 
 It prints one line per model call and a total: input tokens read, written and sent uncached, the share read, and the
 input cost in token-units (uncached 1, read 0.1, five-minute write 1.25, one-hour write 2). Token counts are estimated
-at four characters a token. `--placement first --ttl 5m --forwards ...` reproduces the layout before ADR-0307.
+at four characters a token. `--placement first --ttl 5m --no-steady-schedules --forwards ...` reproduces the layout
+before ADR-0307. The stand-in model answers in text and never calls a tool.
 """
 import argparse
 import hashlib

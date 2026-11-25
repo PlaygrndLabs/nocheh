@@ -40,7 +40,9 @@ def _after(messages,block):
     to turn, ahead of the conversation, made each turn write the whole conversation again. After the turn's own
     message it comes after Hermes's marks on that message, so the next turn reads the conversation, the turn's message
     included, from the cache. The evidence is never stored, so the next turn has that message without it. Within a
-    turn it stays where it is, and each later call of the turn reads it from the cache."""
+    turn it stays where it is, and each later call of the turn reads it from the cache. The tool calls of a turn are
+    cached with the evidence ahead of them, so the next turn writes them again; after more than about 20 blocks of
+    them, its read ends at the system prompt."""
     if _anchor is None:return None
     for index in range(len(messages)-1,-1,-1):
         message=messages[index]

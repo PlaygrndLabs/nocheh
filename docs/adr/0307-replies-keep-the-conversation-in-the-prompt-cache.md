@@ -42,7 +42,8 @@ evidence goes.
    (a compaction summed it up), it goes first as before. Memory-notes reviews, scheduled runs and
    jobs each run in their own session and keep it first. The OpenAI-compatible route is unchanged.
 2. **Hermes's `auto` cache life.** Hermes profiles use `prompt_caching.cache_ttl: auto`.
-   Schedules, reviews and jobs start their own sessions, never pause, and stay on five minutes.
+   Schedules and reviews start their own sessions, never pause, and stay on five minutes. A job
+   keeps one session across attempts, so a job relaunched after a pause moves to one hour.
 3. **The schedule tool stays.** Storage says whether the chat itself has schedules (`offered`),
    apart from whether this message may set one (`allowed`). Every Telegram reply in such a chat
    has the schedule tool, its time zone tool and its instructions. Only an allowed message binds
@@ -55,6 +56,10 @@ evidence goes.
 
 - The model reads memory after the person's message instead of before the conversation. Reply
   quality needs a check with the real model before this is accepted.
+- A reply's tool calls are cached with the evidence ahead of them, so the next turn writes them
+  again. After a reply with more than about 20 blocks of tool calls and results, the next
+  turn's read ends at the system prompt, as before. The check tool's replies call no tools, so
+  its numbers are for plain replies.
 - A one-hour write costs more than a five-minute one. Nocheh's own price table prices every cache
   write at the five-minute rate when Hermes has no price, so the Usage page can count a little low.
 - A forwarded message in a chat with schedules now sees the schedule tool; a call is refused.
