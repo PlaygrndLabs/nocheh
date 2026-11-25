@@ -4,8 +4,9 @@
 Accepted on 2026-11-24. The owner asked why Hermes's own notes are wiped on every safety
 change and asked for a fix, and chose to keep the fresh start only for changes that take
 something away from a chat. Amends [ADR-0163](0163-chat-conversation-carries-into-new-guard-epochs.md),
-[ADR-0168](0168-superseded-epoch-profiles-are-removed.md) and
-[ADR-0257](0257-learned-memory-names-its-source.md), and closes the residual of
+[ADR-0168](0168-superseded-epoch-profiles-are-removed.md),
+[ADR-0257](0257-learned-memory-names-its-source.md) and
+[ADR-0295](0295-agent-login-replaces-the-master-key-in-hermes.md) (one more agent route), and closes the residual of
 [ADR-0288](0288-one-agent-session-per-chat-per-day.md).
 </status>
 
@@ -47,8 +48,9 @@ behind in the earlier profile.
    takes the newest earlier profile of the same chat. If that profile's own carry has not
    finished, it finishes first, so it holds the chat's notes as they stand. Hermes then reads
    its notes and, when there are any, asks storage (`POST /internal/notes/carry` with
-   `generation`, `from`, `to`, `owner`, service token only). Storage says yes only when every
-   epoch after `from` up to `to` keeps notes for that chat. Only the owner's private chat's
+   `generation`, `from`, `to`, `owner`). Hermes asks with the agent login, for which this is a 23rd route,
+   and the admin bearer reaches it too. Storage says yes only when every epoch after `from` up to `to` keeps
+   notes for that chat. Only the owner's private chat's
    own profile and groups carry. A member's private chat, a private answer and an ask about a
    member have no memory tool, and filtering writes no notes. Named and job profiles do write
    notes, but start fresh each epoch, as their conversation does (ADR-0163).

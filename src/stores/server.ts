@@ -9,7 +9,6 @@ import {telegramAddress} from '../frontdoor/telegram.js';
 import {canonical,digest,envelope} from '../archive.js';
 import type {Settings} from '../config.js';
 import {HttpError,authorize,json,object,readJson,string} from '../http.js';
-import {notesCarry} from './notes-epochs.js';
 import {archiveFilters,matchesArchiveFilters,privateChatsParams,type ArchiveFilters} from '../archive-filters.js';
 import {actionReviews} from '../action-review-summary.js';
 import {sourceContentTypes} from '../source-content.js';
@@ -58,7 +57,7 @@ import {noticeAuthorizeRequest,type NoticeAuthorizeResponse} from '../notice-aut
 import {authorizeNotice} from './task-reminder-delivery.js';
 import type {hostTransport} from '../workflows/host-transport.js';
 import {MEMBER_APP_CORE_PREFIX} from '../member-app-wire.js';
-import {backgroundOperation,internalChats,noteSources,retiredSources,runtimeProfiles,schedulerOperation,serveAgent} from './agent-routes.js';
+import {backgroundOperation,internalChats,noteSources,notesCarryAnswer,retiredSources,runtimeProfiles,schedulerOperation,serveAgent} from './agent-routes.js';
 import {conversationReads,isTurnRead,recordTurnReads} from './turn-reads.js';
 
 /** No legacy pool, schema initialization, cross-store SQL or fallback route. */
@@ -132,10 +131,7 @@ export function storageServer(s:StorageServices,config:Settings,call:RuntimeCall
     if(req.method==='POST'&&path==='/internal/notes/carry') {
       // Hermes asks before a chat's new profile takes the notes of its earlier one (ADR-0292): whether every epoch since
       // let notes through for this chat. It names no chat, only whether it is the owner's.
-      authorize(req,config.token);const body=object(await readJson(req,1024));
-      if(Object.keys(body).some(key=>!['generation','from','to','owner'].includes(key))||typeof body.generation!=='string'||typeof body.owner!=='boolean'||
-        !Number.isSafeInteger(body.from)||!Number.isSafeInteger(body.to))throw new HttpError(400,'invalid_notes_carry');
-      return json(res,200,{carry:await notesCarry(s.stores.control,body.generation,Number(body.from),Number(body.to),body.owner)});
+      authorize(req,config.token);return json(res,200,await notesCarryAnswer(s,req));
     }
     if(req.method==='POST'&&path==='/internal/notes/sources') {
       // Hermes asks where its notes came from before each turn and review (ADR-0257). The labels name groups only as

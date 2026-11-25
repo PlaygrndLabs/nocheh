@@ -77,11 +77,11 @@ def source(profile):
 
 
 def service_post(body):
-    """Storage's answer whether notes may cross the epochs between two profiles; only the service token may ask."""
+    """Storage's answer whether notes may cross the epochs between two profiles, asked with the agent login (ADR-0295)."""
     from urllib.request import Request,urlopen
-    from .environment import secret
+    from .environment import agent_key
     request=Request(os.environ.get('ARCHIVE_URL','http://nocheh-app:8780')+'/internal/notes/carry',data=json.dumps(body).encode(),
-        headers={'Authorization':'Bearer '+secret('SERVICE_TOKEN'),'Content-Type':'application/json'})
+        headers={'Authorization':'Bearer '+agent_key(),'Content-Type':'application/json'})
     with urlopen(request,timeout=15) as response:value=json.loads(response.read(64*1024))
     if not isinstance(value,dict) or type(value.get('carry')) is not bool:raise RuntimeError('notes_carry_unavailable')
     return value
