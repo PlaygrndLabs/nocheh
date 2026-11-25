@@ -1,4 +1,4 @@
-# ADR-0311: One owner time zone, in Settings › General
+# ADR-0312: One owner time zone, in Settings › General
 
 <status>
 Accepted on 2026-11-25. The owner said the time zone is not for schedules only, it is for all

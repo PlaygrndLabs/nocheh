@@ -740,7 +740,9 @@ delivery remains ambiguous; it is not automatically resent.
 Nocheh sends only to chats it serves: the owner's private chat and its topics,
 the selected groups and their topics, and the private chats of members who may
 talk in one of those groups and whom Telegram has shown there. A send to a
-member's private chat always waits for the owner's card. Any other destination, a chat Nocheh has no record of included, is
+member's private chat always waits for the owner's card, except their own
+scheduled result, which goes there with no card while Personal assistant is on,
+also before Telegram has shown them in a group (ADR-0311). Any other destination, a chat Nocheh has no record of included, is
 refused alike with `destination_not_served`, and the assistant is told the owner
 can select the group on the Chats page or make the person a member on the
 Members page. The app checks this when a send is proposed,

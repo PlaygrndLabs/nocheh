@@ -16,7 +16,7 @@ function knownZones(): string[] {
 export const zoneName = (zone: string) => zone.replace(/_/g, ' ');
 
 /**
- * The owner's one time zone (ADR-0311): task dates and reminders, new schedules, quiet hours, the day each chat starts
+ * The owner's one time zone (ADR-0312): task dates and reminders, new schedules, quiet hours, the day each chat starts
  * afresh and the daily backup all follow it. It is saved from the bottom save bar like every other setting.
  */
 function OwnerTimeZone() {

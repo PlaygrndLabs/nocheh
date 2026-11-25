@@ -163,7 +163,7 @@ export default function Schedules({settingsLink = true}: {settingsLink?: boolean
 }
 
 /**
- * The owner's time zone, read only: it is set once in Settings › General (ADR-0311), and new schedules set in the owner's
+ * The owner's time zone, read only: it is set once in Settings › General (ADR-0312), and new schedules set in the owner's
  * private chat run in it. Schedules already set keep theirs. The mini app has no settings, so it names where to change it.
  */
 function OwnerTimeZone({settingsLink}: {settingsLink: boolean}) {

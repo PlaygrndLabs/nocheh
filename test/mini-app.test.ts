@@ -46,7 +46,7 @@ test('the mini app reaches only home, Inbox decisions, tasks with their chats an
   for(const [method,route] of [['POST','/settings'],['POST','/settings/apply'],['GET','/database-browser'],['POST','/shutdown'],['POST','/tools/revoke'],
     ['GET','/storage'],['POST','/memory/longterm/fresh-start'],['GET','/tasks/'+id+'/../../settings'],['POST','/entities/'+id+'/merge'],
     ['POST','/workflows/'+id+'/cancel'],['GET','/workflows'],['POST','/monitoring'],['POST','/tasks/'+id+'/audience'],['POST','/tasks/settings'],['GET','/tasks/time-zone'],
-    // The owner's time zone is set in the dashboard's Settings › General only (ADR-0311).
+    // The owner's time zone is set in the dashboard's Settings › General only (ADR-0312).
     ['POST','/tasks/time-zone']])
     assert.equal(miniAppRoute(method!,route!),false,method+' '+route);
 });

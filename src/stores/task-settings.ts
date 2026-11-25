@@ -3,7 +3,7 @@ import {HttpError,object,string} from '../http.js';
 /**
  * How tasks are described: statuses, priority names and the owner's own columns,
  * which the owner changes in Settings › Tasks, and the owner's one time zone, which
- * every part of Nocheh follows and the owner changes in Settings › General (ADR-0311).
+ * every part of Nocheh follows and the owner changes in Settings › General (ADR-0312).
  * Only these defaults live in code.
  */
 export type StatusCategory='not_started'|'active'|'done'|'cancelled';

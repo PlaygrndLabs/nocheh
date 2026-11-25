@@ -544,7 +544,7 @@ function OffsiteSettings() {
   );
 }
 
-/** Daily automatic backups: on or off, the time they run at in the owner's time zone (ADR-0311), and how many to keep. */
+/** Daily automatic backups: on or off, the time they run at in the owner's time zone (ADR-0312), and how many to keep. */
 function BackupSettings() {
   const s = useSettings();
   const on = (s.value('NOCHEH_BACKUP_SCHEDULE') || 'daily') === 'daily';
