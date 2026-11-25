@@ -16,6 +16,8 @@ export interface Effect {
   readonly profile:string; readonly job?:string; readonly fingerprint:string;
   /** The agent whose turn asked, from its pass; effects that no turn asks for have none. */
   readonly agent?:string;
+  /** The person and the one-time key id (jti) of the pass that asked (ADR-0306); never the pass itself. */
+  readonly person?:string; readonly key?:string;
 }
 export interface Rule {
   id:string; kind:EffectKind; outcome:'deny'|'ask';

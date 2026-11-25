@@ -1,9 +1,17 @@
 import {test} from 'node:test';
 import assert from 'node:assert/strict';
 import {createHmac} from 'node:crypto';
+import type {AddressInfo} from 'node:net';
 import type {IncomingMessage} from 'node:http';
-import {reader} from '../src/access.js';
-import {machineRunRoute} from '../src/stores/machine-reads.js';
+import type pg from 'pg';
+import {reader,type Reader} from '../src/access.js';
+import {installChatsForTest} from '../src/chats.js';
+import {HttpError} from '../src/http.js';
+import {mcpTools} from '../src/mcp/tools.js';
+import {brokerServer,type TurnBinding} from '../src/security/broker.js';
+import {machineRunRoute,machineRunTools} from '../src/stores/machine-reads.js';
+import {OWNER,fixtureDirectory} from './fixture-groups.js';
+import {keyPass} from './one-time-key-pass.js';
 import {notionMachineRead,notionPageKey} from '../src/stores/notion.js';
 import {notionPages} from '../src/stores/background-jobs.js';
 
@@ -54,4 +62,37 @@ test('what a machine job\'s run reads comes from storage, never from its pass', 
   assert.equal(reader(pass({}),secret,now).machineReads,undefined);
   for(const claim of ['machine_reads','machineReads'])
     assert.throws(()=>reader(pass({[claim]:{job:'j',chat:'123',from:null,to:null,until:'999999',notion:[]}}),secret,now),{code:'invalid_scope_token'},claim);
+});
+
+test('the broker offers a machine job\'s run only its card\'s tools and relays only its card\'s routes (ADR-0306)',async()=>{
+  installChatsForTest(fixtureDirectory());
+  const secret='synthetic-service-token-only-for-tests',event='c'.repeat(64),relayed:string[]=[],logged:unknown[][]=[];
+  const pool={query:async(sql:string,params:unknown[])=>{if(sql.includes('INSERT INTO security_events'))logged.push(params);
+    return {rows:sql.includes('SELECT p.revision')?[{revision:1,document:{version:1,rules:[]}}]:[],rowCount:1};}} as unknown as pg.Pool;
+  const binding=async(principal:Reader):Promise<TurnBinding>=>({event_id:principal.turnEvent!,scope:OWNER,profile:'synthetic',logical_profile:'job-synthetic',owner:true,guard_epoch:1,job:'j'});
+  const storage={binding,assertAudience:async()=>{},assertKey:async()=>{},turnFile:async()=>{throw new HttpError(404,'turn_file_not_found');},
+    bindMachine:async(principal:Reader)=>({...principal,machineReads:{job:'j',chat:OWNER,from:null,to:null,until:'9',notion:[]}})};
+  const fetcher=(async(url:string|URL)=>{relayed.push(new URL(String(url)).pathname);return Response.json([]);}) as typeof fetch;
+  const server=brokerServer({agentKey:'synthetic-agent-login-only-for-tests-0001',pool,token:secret,archive:'http://archive',hermes:'http://hermes',model:'synthetic',
+    prepare:async()=>({}),storage,fetch:fetcher});
+  await new Promise<void>(resolve=>server.listen(0,'127.0.0.1',resolve));const address=server.address() as AddressInfo,base='http://127.0.0.1:'+address.port;
+  const pass=keyPass(secret,null,Date.now()+60000,event,{space:OWNER,revision:1,guard_epoch:1,logical_profile:'job-synthetic',generation:'00000000-0000-4000-8000-000000000001',kind:'background'});
+  const headers={authorization:'Bearer '+pass,'content-type':'application/json',accept:'application/json, text/event-stream'};
+  const rpc=async(message:unknown)=>(await (await fetch(base+'/mcp',{method:'POST',headers,body:JSON.stringify(message)})).json()) as any;
+  try {
+    const listed=(await rpc({jsonrpc:'2.0',id:1,method:'tools/list'})).result.tools.map((tool:{name:string})=>tool.name);
+    assert.deepEqual(listed,mcpTools.map(tool=>tool.name).filter(name=>machineRunTools.has(name)));
+    for(const name of ['owner_read','memory_recall','shell','browser','tasks','background_job'])
+      assert.deepEqual((await rpc({jsonrpc:'2.0',id:2,method:'tools/call',params:{name,arguments:{}}})).error,{code:-32602,message:'Unknown tool'},name);
+    for(const path of ['/v1/owner/people','/v1/telegram/destinations']) {
+      const response=await fetch(base+path,{headers});
+      assert.equal(response.status,403,path);assert.deepEqual(await response.json(),{error:'machine_job_reads_card_only'},path);
+    }
+    assert.deepEqual([relayed,logged],[[],[]],'a route the card does not allow is neither relayed nor logged');
+    assert.equal((await fetch(base+'/v1/search?q=invoice',{headers})).status,200);
+    assert.deepEqual(relayed,['/v1/search']);
+    // Its log rows name the key's person and id, never the pass (ADR-0306).
+    const claims=JSON.parse(Buffer.from(pass.split('.')[1]!,'base64url').toString());
+    assert.ok(logged.length>=2&&logged.every(params=>params.at(-2)==='owner'&&params.at(-1)===claims.jti&&!params.some(value=>String(value).includes(pass))));
+  }finally{server.closeAllConnections();await new Promise<void>(resolve=>server.close(()=>resolve()));}
 });

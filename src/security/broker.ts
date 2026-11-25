@@ -15,6 +15,7 @@ import {JobBoxRepository,boxTokenSet,boxTokenValid} from '../stores/job-box.js';
 import {MACHINE_BODY,MachineRepository,machineErrors} from '../stores/machines.js';
 import {RuntimeTurnRepository} from '../stores/turns.js';
 import {assertKeyRoute} from '../stores/key-routes.js';
+import {assertMachineRunRoute} from '../stores/machine-reads.js';
 import {afterPending,jobRun} from '../stores/guards.js';
 import {elapsed,timedBody,type ModelTimings} from './timing.js';
 import {actionErrors,askErrors,jobErrors,taskErrors} from '../mcp/tools.js';
@@ -34,6 +35,9 @@ export interface BrokerStorage {
   bindReads?(principal:Reader):Promise<Reader>;
   /** A pass's one-time key is open (ADR-0305). A broker without storage (unit tests only) checks no key. */
   assertKey?(principal:Reader):Promise<void>;
+  /** What a run of a job on the owner's machine may read, from its job's row (machine jobs' reads, ADR-0306); any other
+   * reader comes back as it is. */
+  bindMachine?(principal:Reader):Promise<Reader>;
 }
 /** `agentKey` is the agent login (ADR-0295): the broker calls Hermes with it and takes it on POST /v1/guard alone; without it
  * no agent login is accepted and no transport call is sent. */
@@ -101,7 +105,10 @@ export class ProviderFailure extends HttpError {
 export {jobErrors};
 /** What a proposal may be told: the owner turned this tool off for the chat, the member who asked may not use web pages
  * and outside tools (ADR-0260), or a machine job's card named no such Notion page (machine jobs' reads). */
-const proposeErrors=new Set(['tool_disabled_by_owner','tool_not_permitted','notion_page_not_on_card']);
+/** What an effect's log rows name of the key that asked (ADR-0306): its agent, person and key id, never the pass itself. */
+const keyOf=(principal:Reader):Pick<Effect,'agent'|'person'|'key'>=>({...(principal.agent?{agent:principal.agent}:{}),
+  ...(principal.person?{person:principal.person}:{}),...(principal.jti?{key:principal.jti}:{})});
+const proposeErrors=new Set(['tool_disabled_by_owner','tool_not_permitted','notion_page_not_on_card','machine_job_reads_card_only']);
 /** What a machine command may be told, as services/hermes/machine_box.py names it: a refusal or a failure on the machine's side. */
 export {machineErrors};
 /** The error code in a refused archive answer, read within a small bound; null when there is none. */
@@ -190,7 +197,9 @@ export function brokerServer(options:BrokerOptions) {
     assertKeyRoute(principal,req.method,path);
     await afterPending(job,async()=>options.assertReady?.());
     // Nocheh's data tools: each call comes back to this broker's own routes with the turn's pass, so it meets every check below (ADR-0233).
-    if(path==='/mcp')return serveMcp(req,res,{principal,call:loopback(selfBase(req),req.headers.authorization!),isolated:true});
+    // A machine job's run is offered and runs only its card's tools, as storage would (ADR-0306).
+    if(path==='/mcp')return serveMcp(req,res,{principal:!principal.admin&&options.storage?.bindMachine?await options.storage.bindMachine(principal):principal,
+      call:loopback(selfBase(req),req.headers.authorization!),isolated:true});
     // The box's chat copy also needs the launcher's box token, and is never read with an owner credential.
     const copy=path==='/v1/box/chat'&&req.method==='GET';
     if(copy&&(principal.admin||!box||!boxTokenValid(req.headers['x-nocheh-box-token'])))throw new HttpError(403,'job_box_not_allowed');
@@ -211,7 +220,7 @@ export function brokerServer(options:BrokerOptions) {
     let trace:{effect:Effect;decision:Decision;started:boolean;closed:boolean}|undefined;
     const timings:ModelTimings={};
     const authorizeEffect=async(kind:Effect['kind'],value:unknown)=>{
-      const effect:Effect={id:randomUUID(),kind,scope:binding.scope,profile:binding.logical_profile,fingerprint:fingerprint(value),...(binding.job?{job:binding.job}:{}),...(principal.agent?{agent:principal.agent}:{})};
+      const effect:Effect={id:randomUUID(),kind,scope:binding.scope,profile:binding.logical_profile,fingerprint:fingerprint(value),...(binding.job?{job:binding.job}:{}),...keyOf(principal)};
       const decision=await evaluate(options.pool,effect);
       trace={effect,decision,started:false,closed:false};
       await recordEffect(options.pool,effect,'proposed',decision,binding.reference??binding.event_id);
@@ -248,6 +257,9 @@ export function brokerServer(options:BrokerOptions) {
       }
       if(copy&&!await box!.binding(binding))throw new HttpError(403,'job_box_not_allowed');
       if(copy||scopedRoute(req.method??'',relay)) {
+        // A machine job's run reaches only its card's routes here too, so a route storage would refuse is neither relayed
+        // nor logged (ADR-0306).
+        if(!principal.admin&&options.storage?.bindMachine)assertMachineRunRoute(await options.storage.bindMachine(principal),req.method,relay);
         // Only the box route reads whole texts; no other read can ask for them.
         if(!copy&&url.searchParams.has('full'))url.searchParams.delete('full');
         // The owner's ask about a member (step 4b) is the owner's live private turn's too, read as the owner's memory.
@@ -306,7 +318,7 @@ export function brokerServer(options:BrokerOptions) {
         if(payload.model!==options.model&&!(options.backupModel&&payload.model===options.backupModel))throw new HttpError(403,'model_configuration_mismatch');
       }catch(error){
         if(error instanceof HttpError){
-          const effect:Effect={id:randomUUID(),kind:'model.request',scope:binding.scope,profile:binding.logical_profile,fingerprint:fingerprint(input),...(binding.job?{job:binding.job}:{}),...(principal.agent?{agent:principal.agent}:{})};
+          const effect:Effect={id:randomUUID(),kind:'model.request',scope:binding.scope,profile:binding.logical_profile,fingerprint:fingerprint(input),...(binding.job?{job:binding.job}:{}),...keyOf(principal)};
           const current=await evaluate(options.pool,effect);
           const decision:Decision={outcome:'deny',origin:'mandatory',revision:current.revision,rule:error.code};
           await recordEffect(options.pool,effect,'proposed',decision,binding.reference??binding.event_id);

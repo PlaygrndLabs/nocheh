@@ -54,6 +54,9 @@ export class SourceAccessRepository {
    * reads, and last the scoped readers' own conversations.
    */
   async canRead(principal:Reader,reference:SourceReference,binding:GuardBinding,options:{historical?:boolean}={}):Promise<boolean> {
+    // A memory review's or a sharing filter's one-time key reads nothing as the owner, whatever route it came through; its
+    // routes are its delivery check, its binding and the model (ADR-0306). Nocheh's own review and filter readers carry no key.
+    if(!principal.admin&&principal.jti!==undefined&&(principal.keyKind==='review'||principal.keyKind==='filter'))return false;
     await this.guards.assertCurrent(binding);const source=await this.archive.verify(reference);
     if(!principal.admin&&source.channel==='telegram'){
       if(await this.retirements?.isRetired(reference))return false;

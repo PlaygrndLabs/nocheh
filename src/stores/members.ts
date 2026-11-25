@@ -12,6 +12,7 @@ import type {MemberAddRequest,MemberChangeRequest,MemberGroup,MemberGroupRef,Mem
 import type {MemberRepository} from './member-api.js';
 import {bumpMemberRevision} from './member-schema.js';
 import {OwnerCommands} from './owner-commands.js';
+import {closePerson} from './one-time-keys.js';
 import {chatLabel,ensureAccount,ensureConnection} from './chats.js';
 
 /*
@@ -283,6 +284,8 @@ export class Members implements MemberRepository {
       if(Object.entries(next).some(([key,value])=>row[key]!==value))await db.query(`UPDATE members SET state=$2,group_talk=$3,group_jobs=$4,group_post_other=$5,group_tools=$6,
         tasks=$7,private_chat=$8,reminders=$9,assistant=$10,app_since=CASE WHEN state='paused' AND $2='active' THEN now() ELSE app_since END,revision=revision+1,updated_at=now() WHERE id=$1`,
         [id,next.state,next.group_talk,next.group_jobs,next.group_post_other,next.group_tools,next.tasks,next.private_chat,next.reminders,next.assistant]);
+      // A paused member's keys close with the pause, so a reply or run of theirs under way reads nothing more (ADR-0306).
+      if(next.state==='paused'&&row.state!=='paused')await closePerson(db,id,'member_paused');
       if(c.groups) {
         const chats=Object.keys(c.groups),existing=new Set((await db.query('SELECT chat_id FROM member_chats WHERE member_id=$1 AND chat_id=ANY($2::text[])',
           [id,chats])).rows.map(item=>item.chat_id as string));
@@ -309,6 +312,7 @@ export class Members implements MemberRepository {
       await db.query('SELECT id FROM owner_member_asks WHERE member_id=$1 FOR UPDATE',[id]);
       await db.query("DELETE FROM owner_member_asks WHERE member_id=$1 AND state NOT IN ('queued','running')",[id]);
       if(!(await db.query('DELETE FROM members WHERE id=$1',[id])).rowCount)throw new HttpError(404,'member_not_found');
+      await closePerson(db,id,'member_removed');
       return {revision:await bump(db),removed:id};
     },{epoch:false});
     await reloadMembers();
