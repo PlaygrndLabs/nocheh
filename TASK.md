@@ -26,7 +26,9 @@ Nocheh is in development mode and not yet released. Everything below is built an
 - Workspaces: several installs run side by side on one machine ([ADR-0245](docs/adr/0245-several-workspaces-on-one-machine.md)).
 - Memory: fact sources and People pages ([ADR-0261](docs/adr/0261-recalled-facts-and-search-hits-name-their-source.md)); memory search stays on
   `text-embedding-3-small` until the owner picks another model ([ADR-0181](docs/adr/0181-memory-search-model-change-rebuilds-memory.md)); a group's recall, search and learning read
-  through a memory wall that only holds its own chats ([ADR-0286](docs/adr/0286-memory-walls.md)); "Retire old facts" (Honcho dreams) is an owner setting, off by default, and keeps retired facts hidden with "Bring back" ([ADR-0298](docs/adr/0298-retire-old-facts.md)), and so is "Hide unused facts" after a set number of days ([ADR-0299](docs/adr/0299-hide-unused-facts.md)); each project ticks which of its groups share memory ([ADR-0287](docs/adr/0287-projects-tick-the-groups-that-share-memory.md)).
+  through a memory wall that only holds its own chats ([ADR-0286](docs/adr/0286-memory-walls.md)); "Retire old facts" (Honcho dreams) is an owner setting, off by default, and keeps retired facts hidden with "Bring back" ([ADR-0298](docs/adr/0298-retire-old-facts.md)), and so is "Hide unused facts" after a set number of days ([ADR-0299](docs/adr/0299-hide-unused-facts.md)); each project ticks which of its groups share memory ([ADR-0287](docs/adr/0287-projects-tick-the-groups-that-share-memory.md)). Hermes's own notes
+  carry through safety changes, minus what rests on a hidden message, and start fresh only after a change that takes
+  something away from a chat ([ADR-0292](docs/adr/0292-chat-notes-carry-into-new-guard-epochs.md)).
 - People: the name the owner sets in Memory › People is the person's name everywhere, and each
   person has a private note only the owner reads
   ([ADR-0274](docs/adr/0274-people-names-everywhere-and-private-notes.md)). Honcho 3.6.2 reads
@@ -65,7 +67,14 @@ Nocheh is in development mode and not yet released. Everything below is built an
   grants every schedule change and fire, and Hermes's Cron page is read-only
   ([ADR-0290](docs/adr/0290-nocheh-grants-schedule-changes-and-fires.md)); an agent login replaces the master key in
   Hermes, which reaches only its own routes, and `rotate-keys` renews the master key, the agent login and Hermes's session token
-  ([ADR-0295](docs/adr/0295-agent-login-replaces-the-master-key-in-hermes.md)). Next: one-time keys per reply. A group's
+  ([ADR-0295](docs/adr/0295-agent-login-replaces-the-master-key-in-hermes.md)). Step 1, part B: every pass is a one-time key for one
+  reply or run, naming its person and the agent plugged in now, written as a row and closed once the reply is delivered or
+  the run ends; each kind of key reaches only its own routes, review and filter keys no data tool, and Hermes keeps no pass on
+  disk ([ADR-0305](docs/adr/0305-one-time-keys-per-reply.md)). Part C: machine runs search and are offered only their
+  card's chat and tools, each key's use is counted and logged with its person, and a
+  paused member's keys close ([ADR-0306](docs/adr/0306-close-key-read-gaps-and-log-key-use.md)); the dashboard's Keys page
+  lists each person's keys, and "Stop everything now" ends everything under way and gives the agent a new login
+  ([ADR-0307](docs/adr/0307-keys-list-and-stop-everything-now.md)). Next: app keys (step 2). A group's
   tools permission runs only what carries no data, within ten reads a message; the rest asks
   ([ADR-0291](docs/adr/0291-group-tools-run-only-what-carries-no-data.md)).
 - Dashboard: compact tables and sub-tabs on every page (table-first plan, steps 1 to 5);
@@ -93,8 +102,8 @@ Checks and follow-ups:
   one live check on the owner's install with the setting on: a typed command runs, and the same command after a
   forward in that day's conversation shows its card with the reason line.
 - Development startup order: a full tester run of `project_groups_stay_apart` alone.
-- Talk while it works ([ADR-0301](docs/adr/0301-a-message-joins-the-running-turn-in-its-chat.md)): a live check on the owner's install, two messages
-  in a row while the agent uses a tool, after the merge.
+- Talk while it works ([ADR-0301](docs/adr/0301-a-message-joins-the-running-turn-in-its-chat.md)): the tester covers it
+  (`message_joins_running_turn`); left is one check with the real model, two messages in a row while the agent uses a tool.
 - A project's tasks are one list ([ADR-0276](docs/adr/0276-a-projects-tasks-are-one-list.md)): a full tester run of
   `project_groups_stay_apart`, `member_private_chat_reads_joined_groups`, `member_app_tasks`,
   `member_app_drops_a_left_group` and `member_app_never_leaks`.

@@ -1,5 +1,7 @@
 import {blockingPublications} from './publications.js';
 import type pg from 'pg';
+import {randomBytes} from 'node:crypto';
+import {closeSubject} from './one-time-keys.js';
 import {admin,type Reader} from '../access.js';
 import {canonical,digest} from '../archive.js';
 import {HttpError,object,string} from '../http.js';
@@ -157,9 +159,14 @@ export class SharingContentRepository {
             await this.prepared.allow(actor,input.candidates);
             // The model sees only the words searched for, never the asker's sentence; the saved input keeps the raw query (ADR-0251).
             const payload=await this.prepared.prepare(actor,{query:await this.searchWords(input.query),instructions:input.rule.instructions,candidates:input.candidates},this.detect) as Record<string,unknown>;
-            const credential=await this.prepared.audience.turn(this.serviceToken,actor,actor.turnEvent!,Date.now()+180000);
-            await this.validate(input,binding);
-            const response=await this.call('memory.filter',{...payload,archive_credential:credential},120000);
+            // The filter's own one-time key, the owner's (ADR-0305): one per call, closed as soon as the call returns.
+            const credential=await this.prepared.audience.turn(this.serviceToken,actor,actor.turnEvent!,Date.now()+180000,
+              {kind:'filter',subject:id,attempt:randomBytes(8).toString('hex'),person:'owner'});
+            let response:Record<string,unknown>;
+            try {
+              await this.validate(input,binding);
+              response=await this.call('memory.filter',{...payload,archive_credential:credential},120000);
+            } finally {await closeSubject(this.stores.control,'filter',id,'filter_finished');}
             const producer=object(response.producer);
             for(const key of ['name','version','model','provider','api_mode'])if(!string(producer[key],200).trim())throw new HttpError(503,'filter_provenance_required');
             if(Object.keys(producer).some(key=>!['name','version','model','provider','api_mode'].includes(key)))throw new HttpError(503,'filter_provenance_rejected');
@@ -227,7 +234,8 @@ export class SharingContentRepository {
       await this.fence(db,input,binding);
       const release=digest(canonical(['sharing-release',binding.generation,operation]));
       await this.insertRelease(db,release,row,representation,binding,null);return {id:release,revision:1};
-    });
+    // An approval only lets more through (ADR-0292).
+    },{notes:'all'});
   }
   private async insertRelease(db:pg.PoolClient,id:string,row:Preview,representation:{revision:number|null;hash:string},binding:GuardBinding,expires:Date|null) {
     await db.query(`INSERT INTO sharing_releases(id,preview_id,rule_id,rule_revision,generation,guard_mode,guard_revision,text_hash,mode,expires_at)
@@ -241,7 +249,8 @@ export class SharingContentRepository {
       const row=(await db.query("UPDATE sharing_releases SET state='revoked',revision=revision+1,revoked_at=now() WHERE id=$1 AND revision=$2 AND state='active' RETURNING revision",
         [id,body.expected_revision])).rows[0];
       if(!row)throw new HttpError(409,'sharing_revision_conflict');return {id,revision:row.revision,state:'revoked'};
-    });
+    // A group may have noted what it can no longer read; the owner reads every chat (ADR-0292).
+    },{notes:'owner'});
   }
   async list(principal:Reader,after='') {
     admin(principal);if(after)identity(after);

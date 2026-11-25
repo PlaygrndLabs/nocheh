@@ -227,7 +227,7 @@ export class NativeMemoryRepository {
         attached_at=CASE WHEN $1 AND NOT attached AND NOT $3 THEN now() ELSE coalesce(attached_at,now()) END WHERE singleton`,
         [body.attached,body.include_history,body.catch_up]);
       return {revision:row.revision+1};
-    });return this.status();
+    },{notes:'all'});return this.status();
   }
   /** Honcho memory is on by default: an installation with Honcho enabled attaches it once,
    * unless the owner has already attached or detached it. Earlier history is not ingested. */
@@ -242,7 +242,7 @@ export class NativeMemoryRepository {
         await db.query(`UPDATE memory_engine_connection SET attached=true,include_history=false,revision=revision+1,
           attached_at=coalesce(attached_at,now()) WHERE singleton`);
         return {revision:1};
-      });
+      },{notes:'all'});
     } catch(error) {if(!(error instanceof HttpError&&error.code==='memory_connection_conflict'))throw error;}
     return this.status();
   }
@@ -760,6 +760,7 @@ export class NativeMemoryRepository {
     // requests pages the archive, and a retired or withdrawn message is refused as it is for any new write.
     const history=body.from_archive===true;
     // Only spaces Nocheh recorded as its own memory generations are deleted; anything else in the engine is left alone.
+    // Hermes notes do not rest on the memory engine, so chats keep them (ADR-0292).
     await new OwnerCommands(this.control).run(principal,string(body.operation_id,200),body,async db=>{
       const row=(await db.query('SELECT * FROM memory_engine_connection WHERE singleton FOR UPDATE')).rows[0];
       if(row.revision!==body.expected_revision)throw new HttpError(409,'memory_connection_conflict');
@@ -771,7 +772,7 @@ export class NativeMemoryRepository {
         await requestWorkflow(db,'honcho','retire:'+id);
       }
       return {revision:row.revision+1};
-    });
+    },{notes:'all'});
     return this.status();
   }
   private async attachedWorkspace() {
@@ -1525,6 +1526,14 @@ export class NativeMemoryRepository {
    * Only their ids leave here: the reader gets the messages back through the archive's own access check. */
   /** Archived messages by meaning, in the engine's order. `from` says, for each id, the receipt it came from and its
    *  position among that receipt's references, so the first few of each can be named (ADR-0261). */
+  /** The memory audiences a machine job's run may search, its card's chat first: a group's own id and its topics, the
+   * owner audience and the owner chat's topics for the owner's chat, none for any other chat (a private chat is never
+   * learned). */
+  private machineChats(chat:string):string[] {
+    const base=chats().parentOf(chat)??chat,group=chats().groupOf(base);
+    if(group!==null)return groupWithTopics(group)??[group];
+    return base===this.owner?['owner',...chats().topicsOf(base)]:[];
+  }
   async search(principal:Reader,query:string,count:number):Promise<{ids:string[];learned:boolean;syncing?:boolean;from?:{receipt:string;position:number}[]}> {
     string(query,2000);if(!query.trim())throw new HttpError(400,'empty_query');
     const binding=await this.prepared.audience.assert(principal),workspace=await this.workspace(binding);
@@ -1534,11 +1543,17 @@ export class NativeMemoryRepository {
     // A bound reader searches the sessions of every group of its bound reads, and no other (ADR-0249): a member's own
     // private chat and an asked member's chat are never learned, so they have none (step 4).
     const set=!principal.admin&&boundReader(principal)!==null?this.contexts.access.reads(principal)!:null,reads=set?readSetParam(set):null;
+    // A run of a job on the owner's machine searches only its card's chat (ADR-0306): that chat and its topics, inside
+    // their wall when it is a group, the owner's own sessions when it is the owner's chat, and nothing else. The card's
+    // period and approval cutoff are still checked on each message found, as on every read of the run.
+    const machine=!principal.admin&&principal.machineReads?this.machineChats(principal.machineReads.chat):null;
+    if(machine?.length===0)return {ids:[],learned:false};
     // A group searches inside the wall of the chats its recall reads, and a bound reader (a member's private chat and its
     // schedules, a private answer) inside the wall of its read set's groups (ADR-0286). The owner searches everything.
-    const chats=set?readSetIds(set):audience==='owner'?[]:group?[...group,audience]:[audience];
+    const chats=machine?(machine[0]==='owner'?[]:machine):set?readSetIds(set):audience==='owner'?[]:group?[...group,audience]:[audience];
     const walled=chats.length?await this.walls.open(id,chats):null;
-    const sessions=set?await this.provenance.readSetSessions(id,set,1000):audience==='owner'?null:walled?walled.sessions:await this.provenance.sessions(id,audience,1000,group);
+    const sessions=machine?walled?walled.sessions:await this.provenance.sessions(id,machine[0]!,1000,machine.slice(1)):
+      set?await this.provenance.readSetSessions(id,set,1000):audience==='owner'?null:walled?walled.sessions:await this.provenance.sessions(id,audience,1000,group);
     if(sessions?.length===0)return {ids:[],learned:false};
     // The question is checked for secrets before it reaches the engine, as a recall question is.
     const question=await this.prepared.prepare(actor,query,this.detect);
@@ -1548,8 +1563,8 @@ export class NativeMemoryRepository {
       if(!engineId(message.id)||!/^[a-f0-9]{64}$/.test(message.receipt))continue;
       const row=(await this.control.query(`SELECT source_reference,source_references FROM memory_ingestion_receipts
         WHERE id=$1 AND generation=$2 AND remote_id=$3 AND state='done' AND retired_at IS NULL
-        AND (CASE WHEN $6::text[] IS NOT NULL THEN ${readSetSql('audience',6)} ELSE ($4::text='owner' OR ${recallCondition('audience','$4','$5')}) END)`,
-        [message.receipt,id,message.id,audience,group,reads])).rows[0];
+        AND (CASE WHEN $6::text[] IS NOT NULL THEN ${readSetSql('audience',6)} ELSE ($4::text='owner' AND $7::text[] IS NULL OR ${recallCondition('audience','$4','$5')}) END)`,
+        [message.receipt,id,message.id,machine?machine[0]:audience,machine?machine.slice(1):group,reads,machine])).rows[0];
       if(!row)continue;
       for(const [position,reference] of (row.source_references?.length?row.source_references:[row.source_reference]).slice(0,30).entries())
         if(typeof reference?.id==='string'&&/^[a-f0-9]{64}$/.test(reference.id)&&!ids.includes(reference.id)){ids.push(reference.id);from.push({receipt:message.receipt,position});}

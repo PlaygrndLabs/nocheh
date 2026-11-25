@@ -18,6 +18,7 @@ import type {OwnerMemberAsk,OwnerMemberAskRepository} from './owner-member-asks.
 import type {PreparedContextRepository} from './prepared-context.js';
 import type {RuntimeTurnRepository} from './turns.js';
 import {closedTurnStates,currentTurn,dispatchPayload,terminalTurnStates,turnFence,type TurnInput} from './telegram-turn.js';
+import {closeSubject} from './one-time-keys.js';
 import {botReady,cancelReply,finishPresence,replyTarget,sendReply,showPresence,unansweredFinish} from './telegram-reply.js';
 
 const protocol='owner-member-ask-v1';
@@ -73,6 +74,9 @@ export class OwnerMemberAskTurns {
   /** The observation of an ask that just closed. An ask about a member removed meanwhile (its member_id cleared) is
    * removed now: it closed and the owner was told, and a removed member's asks are not kept. */
   private async closedNow(id:string):Promise<Observation> {
+    // Answered or not, the ask's one-time key closes (ADR-0305).
+    const answered=(await this.control.query("SELECT 1 FROM owner_member_asks WHERE id=$1 AND state='answered'",[id])).rowCount;
+    await closeSubject(this.control,'member_ask',id,answered?'delivered':'not_delivered');
     const observed=await this.observed(id);
     await this.control.query(`DELETE FROM owner_member_asks WHERE id=$1 AND member_id IS NULL AND state NOT IN ('queued','running')`,[id]);
     return observed;
@@ -119,12 +123,14 @@ export class OwnerMemberAskTurns {
     return bound;
   }
   /** A pass for the turn under the current binding, after the ask is bound again and the turn's source is checked. The
-   * pass must name this very ask; one that does not is never used (fail closed). */
-  private async credential(input:TurnInput):Promise<string> {
+   * pass must name this very ask; one that does not is never used (fail closed). It is the owner's one-time key for this
+   * attempt (ADR-0305). */
+  private async credential(input:TurnInput,attempts:number):Promise<string> {
     if(this.token.length<24)throw new HttpError(503,'service_credential_required');
-    const bound=await this.bound(input.principal);
+    const bound=await this.bound(input.principal),ask=input.principal.memberRead!;
     if(bound.memberChat!==input.principal.memberChat)throw new HttpError(409,'member_chat_closed');
-    const credential=await this.prepared.audience.turn(this.token,bound,input.principal.turnEvent!,Date.now()+600000);
+    const credential=await this.prepared.audience.turn(this.token,bound,input.principal.turnEvent!,Date.now()+600000,
+      {kind:'member_ask',subject:ask,attempt:askAttempt(ask,attempts),person:'owner'});
     if(passClaims(credential).member_read!==input.principal.memberRead)throw new HttpError(409,'member_chat_closed');
     await currentTurn(this,input);
     return credential;
@@ -140,13 +146,15 @@ export class OwnerMemberAskTurns {
     if(row.attempts>=maxAttempts)return this.fail(row,code,'failed');
     await this.control.query(`UPDATE owner_member_asks SET state='queued',error_code=NULL,next_attempt=now()+interval '5 seconds',updated_at=now()
       WHERE id=$1 AND state='running'`,[row.id]);
+    // This attempt's key closes; the next one gets its own (ADR-0305).
+    await closeSubject(this.control,'member_ask',row.id,'not_delivered');
     return this.observed(row.id);
   }
   /** The agent closed the turn: a done answer goes out as one separate member_read message, under its source line. */
   private async settle(row:OwnerMemberAsk,input:TurnInput,receipt:TurnReceipt):Promise<Observation> {
     const attempt=askAttempt(row.id,row.attempts),state=String(receipt.state);
     let credential:string|null=null;
-    try{credential=await this.credential(input);}catch(error){
+    try{credential=await this.credential(input,row.attempts);}catch(error){
       if(!(error instanceof HttpError)||![409,403].includes(error.status))throw error;
       // Never sent once the ask or its chat closed: the reply is withdrawn and the owner hears why.
       await cancelReply(this.call,row.owner_event,attempt);
@@ -192,7 +200,7 @@ export class OwnerMemberAskTurns {
         try{observed=await this.agent.observeTurn({channel:'telegram',event_id:row.owner_event,attempt});}
         catch{return observation('running','assistant',row.attempts,Date.now()+1000,'receipt_pending');}
         if(closedTurnStates.has(String(observed.state)))return await this.settle(row,input,observed);
-        try{credential=await this.credential(input);}catch(error){
+        try{credential=await this.credential(input,row.attempts);}catch(error){
           if(!(error instanceof HttpError)||![409,403].includes(error.status))throw error;
           // The ask or its chat closed while the turn ran: it is stopped and never answered.
           try{await this.agent.cancelTurn({channel:'telegram',event_id:row.owner_event,attempt});}catch{/* Its reply is withdrawn below. */}
@@ -261,7 +269,7 @@ export class OwnerMemberAskTurns {
         row=recorded;
         if(row.state!=='running')return this.observation(row);
       }
-      try{credential??=await this.credential(input);}catch(error){
+      try{credential??=await this.credential(input,row.attempts);}catch(error){
         if(!(error instanceof HttpError)||![409,403].includes(error.status))throw error;
         return this.closed(row,closedCodes.has(error.code)?error.code:'member_chat_closed');
       }

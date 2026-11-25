@@ -15,6 +15,7 @@ from unittest.mock import patch, AsyncMock
 from .turn_process import _run_process,run_process
 from .job_progress import run_tokens
 from .scopes import Scope,Scopes
+from .key_fixture import keyed
 from services.chats import Served
 
 class TurnProcessTests(unittest.IsolatedAsyncioTestCase):
@@ -42,14 +43,15 @@ class TurnProcessTests(unittest.IsolatedAsyncioTestCase):
         environment=patch.dict(os.environ,{'AGENT_KEY':self.secret})
         environment.start();self.addCleanup(environment.stop)
 
-    def review_body(self,purpose='memory-review',key=None):
+    def review_body(self,purpose='memory-review',key=None,**changes):
         claims={'scope':None,'space':'42','revision':1,'guard_epoch':1,'generation':'11111111-1111-1111-1111-111111111111',
                 'purpose':purpose,'event_id':'b'*64,'expires':int(time.time()*1000)+600000,'audience':'nocheh-assistant'}
-        encoded=base64.urlsafe_b64encode(json.dumps(claims).encode()).decode().rstrip('=')
+        # A review's pass is the owner's one-time review key (ADR-0305).
+        encoded=base64.urlsafe_b64encode(json.dumps(keyed(claims,**changes)).encode()).decode().rstrip('=')
         signature=base64.urlsafe_b64encode(hmac.new((key or self.secret).encode(),encoded.encode(),hashlib.sha256).digest()).decode().rstrip('=')
         return {'scope':'42','id':'a'*64,'event_id':'b'*64,'content':'synthetic','archive_credential':'turn.'+encoded+'.'+signature}
 
-    async def execute(self,source,cancel=None,delivery_allowed=True,extra=None,progress=None,scope=None,labels=None):
+    async def execute(self,source,cancel=None,delivery_allowed=True,extra=None,progress=None,scope=None,labels=None,memory=None):
         with tempfile.TemporaryDirectory() as folder:
             self.env=None;original=asyncio.create_subprocess_exec
             async def spawn(*args,**kwargs):
@@ -60,7 +62,7 @@ class TurnProcessTests(unittest.IsolatedAsyncioTestCase):
                 result=await _run_process(Path(folder),scope or Scope('-10','42',False,'group'),
                     {'event_id':'event','archive_credential':'scoped','text':'original','channel':'browser',**(extra or {})},'model',
                     SimpleNamespace(runtime=lambda:{'api_key':'ephemeral','base_url':'https://gateway.example.test/v1',
-                                                    'provider':'openai','api_mode':'chat_completions'}),'session',events.append,cancel,progress,labels)
+                                                    'provider':'openai','api_mode':'chat_completions'}),'session',events.append,cancel,progress,labels,memory=memory)
                 self.assertNotIn('SERVICE_TOKEN',self.env);self.assertNotIn('TELEGRAM_BOT_TOKEN',self.env);self.assertNotIn('OPENAI_API_KEY',self.env)
                 # Only the isolated mode's bridge gets the agent login (ADR-0295); a legacy model child gets no key.
                 self.assertNotIn('NOCHEH_HERMES_SESSION_TOKEN',self.env)
@@ -194,15 +196,24 @@ class TurnProcessTests(unittest.IsolatedAsyncioTestCase):
             counted.clear()
             await self.execute('import sys,json; body=json.load(sys.stdin); assert body["note_sources"]=={}; print(json.dumps({"state":"done","text":"hi"}))')
             self.assertEqual(counted,[('memory_read','done')])
+    async def test_the_long_term_memory_a_turn_was_given_reaches_the_parent_even_when_its_answer_is_dropped(self):
+        # ADR-0292: the ids come on their own line as soon as the turn reads its memory, so a turn whose answer the guard
+        # drops still leaves them for its notes; only well-formed ids count.
+        memory=[]
+        source=('import sys,json; sys.stdin.read(); print(json.dumps({"event":"memory_sources","ids":["'+'d'*64+'","not an id"]})); '
+                'print(json.dumps({"state":"done","text":"hi"}))')
+        result,_=await self.execute(source,delivery_allowed=False,memory=memory)
+        self.assertEqual(result['error_code'],'guard_context_changed');self.assertEqual(memory,['d'*64])
     async def test_the_parent_records_who_wrote_the_notes_a_turn_added_even_when_it_stopped(self):
         from . import note_sources
         event='e'*64
         for outcome in ('done','failed','raised'):
             with self.subTest(outcome=outcome),tempfile.TemporaryDirectory() as folder:
                 profile=Path(folder);(profile/'memories').mkdir()
-                async def child(*args):
+                async def child(*args,memory):
                     (profile/'memories'/'MEMORY.md').write_text('Learned in this turn.')
                     self.assertEqual(args[9],{'f'*64:{'from':'nocheh','label':'Nocheh\'s note'}},'the labels go to the turn')
+                    memory[:]=['d'*64]
                     if outcome=='raised':raise RuntimeError('assistant_process_failed')
                     return {'state':outcome}
                 with patch('services.hermes.assistant_gateway.prepare_profile',return_value=profile),patch('services.hermes.assistant_gateway.check_delivery_policy',return_value=True),\
@@ -214,6 +225,10 @@ class TurnProcessTests(unittest.IsolatedAsyncioTestCase):
                     else:await run_process(profile,Scope('42','42',True,'owner'),body,'model',None,'session')
                 origin=note_sources.load(profile)[note_sources.key('memory','Learned in this turn.')]['origins'][0]
                 self.assertEqual((origin['by'],origin['event'],origin['channel'],origin['complete']),('turn',event,'telegram',outcome=='done'))
+                # The note also rests on the turn's message and the long-term memory it was given (ADR-0292).
+                from .retired_history import load_dependencies
+                self.assertEqual(load_dependencies(profile)['entries'][note_sources.key('memory','Learned in this turn.')],
+                                 {'turn':[event],'sources':['d'*64]},'also when the turn stopped')
     async def test_the_parent_reports_the_owners_conversation_before_the_model_starts(self):
         """ "Do what I ask" learns what the conversation holds besides the owner's typed words before the model can act
         on it, and only from an owner's live turn (ADR-0293)."""
@@ -225,7 +240,7 @@ class TurnProcessTests(unittest.IsolatedAsyncioTestCase):
         for scope,channel,expected in cases:
             with self.subTest(scope=scope,channel=channel),tempfile.TemporaryDirectory() as folder:
                 profile=Path(folder);reported=[]
-                async def child(*args):
+                async def child(*args,**kwargs):
                     self.assertEqual(reported,expected,'reported before the model starts')
                     return {'state':'done'}
                 with patch('services.hermes.assistant_gateway.prepare_profile',return_value=profile),patch('services.hermes.assistant_gateway.check_delivery_policy',return_value=True),\
@@ -507,9 +522,12 @@ class TurnProcessTests(unittest.IsolatedAsyncioTestCase):
         # its signature part are refused before any profile is touched.
         ordinary=self.review_body('assistant');other=self.review_body();other['event_id']='c'*64
         unsigned=self.review_body();unsigned['archive_credential']=unsigned['archive_credential'].rsplit('.',1)[0]
+        # Its pass is a review key, the owner's, for this agent (ADR-0305).
+        keys=[self.review_body(key_kind=kind) for kind in ('turn','filter')]+[self.review_body(**change) for change in
+              ({'jti':None},{'person':'d'*64},{'agent':'another-agent'},{'key_kind':None})]
         with patch('services.hermes.review_worker.prepare_profile',side_effect=AssertionError('must not touch a profile')):
             for operation in (review,start):
-                for body in (ordinary,other,unsigned):
+                for body in (ordinary,other,unsigned,*keys):
                     with self.assertRaises(ValueError):operation(Path('/unused'),Scopes({'enabled':True},Served.of('42')),'model',None,body)
         # One signed with another key but carrying the review's own claims opens it: Nocheh's services check the signature.
         with patch('services.hermes.review_worker.prepare_profile',return_value=Path('/prepared')) as prepare:

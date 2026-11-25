@@ -1,4 +1,5 @@
-import {boundReader,memberClaimId,memberReadId,turnToken,type Reader} from '../access.js';
+import {boundReader,memberClaimId,memberReadId,turnToken,type KeyKind,type Reader} from '../access.js';
+import {activeAgent} from '../agent/agents.js';
 import {chats} from '../chats.js';
 import {HttpError} from '../http.js';
 import {otherPrivate,readSetIds} from '../spaces.js';
@@ -6,6 +7,14 @@ import {memberChatClosed} from './member-reads.js';
 import {appBindingOf} from '../frontdoor/telegram.js';
 import {GuardRepository,carriesForward,jobRun,type GuardBinding} from './guards.js';
 import {ProjectRepository} from './projects.js';
+import {OneTimeKeyRepository} from './one-time-keys.js';
+
+/**
+ * The one-time key a pass is (ADR-0305): what it is for (kind), what it answers (subject and attempt: the same reply signed
+ * again gets the same key), its person ('owner' or a members.id; null when nobody can be named, which refuses the pass)
+ * and, for a run made earlier, the agent its row was made for (undefined or null: none recorded).
+ */
+export type KeyRequest={kind:KeyKind;subject:string;attempt:string|number;person:string|null;agent?:string|null};
 
 /** Preserved signing credentials cannot revive capabilities after a content reset. */
 export class AudienceRepository {
@@ -36,9 +45,12 @@ export class AudienceRepository {
    * A private chat that is not the owner's gets a pass only as its own member's. `lane` (a member id) is signed on a
    * member's private pass (their own id) and on a group pass a member's message started; never on the owner's, an
    * answer's or an ask's, and a lane that fits none of these is left out, as it grants nothing.
+   * Every pass is a one-time key (ADR-0305): it names `key.person`, who must fit the pass (a member's own chat is that
+   * member's, a lane its member's, the owner's chat, an answer, an ask, a review and a filter the owner's), and the agent
+   * plugged in now; its row is written before it is signed. No person, no pass (409 one_time_key_person_required).
    */
   async turn(secret:string,principal:Pick<Reader,'scope'|'space'|'purpose'|'logical_profile'|'answer'|'reads'|'member'|'memberRead'|'memberChat'>&{lane?:string},
-    eventId:string,expires:number,own?:GuardBinding):Promise<string> {
+    eventId:string,expires:number,key:KeyRequest,own?:GuardBinding):Promise<string> {
     if(!principal.space)throw new HttpError(400,'conversation_required');
     const bound=boundReader(principal);
     // A private answer's pass names its record and reads as the asker's private chat, never as the owner (ADR-0249).
@@ -58,6 +70,16 @@ export class AudienceRepository {
     if(member===undefined&&(otherPrivate(principal.scope)||otherPrivate(principal.space)))throw new HttpError(409,memberChatClosed);
     const lane=principal.lane!==undefined&&memberClaimId.test(principal.lane)&&(member!==undefined?principal.lane===member:
       bound===null&&principal.scope!==null&&chats().groupOf(principal.scope)!==null)?principal.lane:undefined;
+    // Whose key it is (ADR-0305): somebody it can be named for, who fits the pass, for the agent plugged in now.
+    const person=key.person;
+    if(person===null)throw new HttpError(409,'one_time_key_person_required');
+    const owners=principal.scope===null||bound==='answer'||bound==='memberRead'||principal.purpose==='memory-review'||principal.purpose==='filter';
+    if(member!==undefined&&person!==member||lane!==undefined&&person!==lane||owners&&person!=='owner'||
+      person!=='owner'&&!memberClaimId.test(person))throw new HttpError(409,'one_time_key_person_mismatch');
+    if((principal.purpose==='memory-review')!==(key.kind==='review')||(principal.purpose==='filter')!==(key.kind==='filter')||
+      (memberRead!==undefined)!==(key.kind==='member_ask')||(key.kind==='scheduled'||key.kind==='background')&&!principal.logical_profile)
+      throw new HttpError(409,'one_time_key_kind_mismatch');
+    if(key.agent!==undefined&&key.agent!==null&&key.agent!==activeAgent)throw new HttpError(409,'one_time_key_agent_changed');
     const binding=own?(await this.guards.assertCarried(own),own):await this.guards.state();
     // The chat's active project gives the turn that project's role and skills; a private answer's, the project of its
     // record, while that project is active. A member's private chat and an ask about a member have none.
@@ -69,9 +91,12 @@ export class AudienceRepository {
     // and topic now, so a reply follows a group Telegram upgraded (ADR-0252). A chat the directory does not address
     // gets none, and no front door accepts a turn without it; storage itself does not require it, so job passes work.
     const app=appBindingOf(principal.space);
+    const jti=await new OneTimeKeyRepository(control).mint({kind:key.kind,subject:key.subject,attempt:String(key.attempt),person,agent:activeAgent,
+      event:eventId,expires});
     return turnToken(secret,principal.scope,expires,eventId,{space:principal.space,revision:binding.epoch,
       guard_epoch:binding.epoch,generation:binding.generation,...(principal.purpose?{purpose:principal.purpose}:{}),...(principal.logical_profile?{logical_profile:principal.logical_profile}:{}),
       ...(project?.state==='active'?{project:project.id}:{}),...(answer!==undefined?{answer}:{}),...(member!==undefined?{member}:{}),
-      ...(memberRead!==undefined?{memberRead}:{}),...(lane!==undefined?{lane}:{}),...(app?{app}:{})});
+      ...(memberRead!==undefined?{memberRead}:{}),...(lane!==undefined?{lane}:{}),...(app?{app}:{}),
+      agent:activeAgent,person,jti,kind:key.kind});
   }
 }

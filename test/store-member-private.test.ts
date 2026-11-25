@@ -280,13 +280,13 @@ test('a member\'s private chat: admission, its groups, the daily cap, its passes
       ['bound to another chat',{scope:MEMBER_NG_CHAT,space:MEMBER_NG_CHAT,member:MEMBER_NG_ID,memberChat:MEMBER_GP_CHAT,reads:readSet({home:MEMBER_NG_CHAT})}],
       ['a member claim in a group',{scope:NG1,space:NG1,member:MEMBER_NG_ID,memberChat:NG1,reads:readSet({home:NG1})}],
       ['an owner pass in a member chat',{scope:null,space:MEMBER_NG_CHAT}]] as const)
-      await assert.rejects(audience.turn(secret,principal as Reader,mine.id,later),{status:409,code:memberChatClosed},why);
+      await assert.rejects(audience.turn(secret,principal as Reader,mine.id,later,{kind:'turn',subject:mine.id,attempt:'refused',person:'owner'}),{status:409,code:memberChatClosed},why);
     const signed=claimsOf(await audience.turn(secret,{scope:MEMBER_NG_CHAT,space:MEMBER_NG_CHAT,member:MEMBER_NG_ID,memberChat:MEMBER_NG_CHAT,
-      reads:readSet({home:MEMBER_NG_CHAT,whole:[NG1]}),lane:'f'.repeat(64)},mine.id,later));
+      reads:readSet({home:MEMBER_NG_CHAT,whole:[NG1]}),lane:'f'.repeat(64)},mine.id,later,{kind:'turn',subject:mine.id,attempt:'member',person:MEMBER_NG_ID}));
     assert.deepEqual([signed.member,signed.lane],[MEMBER_NG_ID,undefined],'a lane that is not the member\'s own is left out');
-    const groupPass=claimsOf(await audience.turn(secret,{scope:GP1,space:GP1,lane:MEMBER_GP_ID},mine.id,later));
+    const groupPass=claimsOf(await audience.turn(secret,{scope:GP1,space:GP1,lane:MEMBER_GP_ID},mine.id,later,{kind:'turn',subject:mine.id,attempt:'group',person:MEMBER_GP_ID}));
     assert.deepEqual([groupPass.lane,groupPass.member],[MEMBER_GP_ID,undefined]);
-    const ownerPass=claimsOf(await audience.turn(secret,{scope:null,space:OWNER,lane:MEMBER_GP_ID},mine.id,later));
+    const ownerPass=claimsOf(await audience.turn(secret,{scope:null,space:OWNER,lane:MEMBER_GP_ID},mine.id,later,{kind:'turn',subject:mine.id,attempt:'owner',person:'owner'}));
     assert.equal(ownerPass.lane,undefined,'the owner\'s pass carries no lane');
   }finally{restore();await stores.close();await rm(root,{recursive:true,force:true});}
 });

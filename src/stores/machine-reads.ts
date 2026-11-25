@@ -19,4 +19,4 @@ export function assertMachineRunRoute(principal:Reader,method:string|undefined,p
   if(principal.machineReads&&!machineRunRoute(method??'',path))throw new HttpError(403,'machine_job_reads_card_only');
 }
 /** The data tools a machine job's run is offered (services/hermes/assistant_turn.py MACHINE_DATA_TOOLS, by their names here). */
-export const machineRunTools:ReadonlySet<string>=new Set(['archive_search','archive_read','archive_page','memory_search','action_request','mcp','notion','action_status']);
+export const machineRunTools:ReadonlySet<string>=new Set(['archive_search','archive_read','archive_page','memory_search','action_request','notion','action_status']);

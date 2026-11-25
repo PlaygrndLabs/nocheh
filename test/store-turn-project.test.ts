@@ -23,7 +23,7 @@ test('a turn in a chat of an active project carries that project, so the turn ge
   // The group and its topics, as the chat directory knows them (ADR-0252).
   const restore=installChatsForTest(seededDirectory(()=>({owner_id:'123',group_ids:[group]})));
   const claims=async(space:string)=>{
-    const token=await audience.turn('synthetic-secret',{scope:space.split('/topic/')[0]!,space},digest(key+space),Date.now()+60000);
+    const token=await audience.turn('synthetic-secret',{scope:space.split('/topic/')[0]!,space},digest(key+space),Date.now()+60000,{kind:'turn',subject:digest(key+space),attempt:1,person:'owner'});
     assert.equal(reader({headers:{authorization:'Bearer '+token}} as IncomingMessage,'synthetic-secret').space,space,'the token still reads');
     return JSON.parse(Buffer.from(token.split('.')[1]!,'base64url').toString());
   };

@@ -485,6 +485,37 @@ class Scenarios:
     def private_burst_in_order(self):
         self.burst_in_order(OWNER, None)
 
+    def message_joins_running_turn(self):
+        """Talk while it works (ADR-0301): a message the owner sends while the agent still works on an earlier one in the
+        same chat joins that turn. The agent reads it after a tool step and answers both in one reply; the joined message
+        closes as joined, gets no reply of its own and gets 👍. Each scripted answer waits, so the turn is still running."""
+        before = len(self.f.sent())
+        search = lambda mark: '[[tool:mcp__nocheh__archive_search '+json.dumps({'mode': 'text', 'query': mark, 'limit': 1})+']]'
+        first = self.f.message(OWNER, 'دو چیز را بگرد '+search('JOINMARKA1')+' '+search('JOINMARKB1')+' [[delay:12]]')
+        self.f.inject(first)
+        first_event = self.captured(first)
+        self.wait('agent_working', lambda: any(event.get('directive') == 'tool' and event.get('phase') == 'call'
+                                               and 'JOINMARKA1' in str(event.get('argument')) for event in self.f.agent()), 90)
+        second = self.f.message(OWNER, 'این را هم در همان جواب در نظر بگیر JOINEDNOTE7')
+        self.f.inject(second)
+        second_event = self.captured(second)
+        row = self.finished(first_event)
+        self.gate('first_dispatch_done', row['state'] == 'done', state=row['state'], error=row['error'])
+        row = self.finished(second_event)
+        self.gate('second_joined_the_running_turn', row['state'] == 'suppressed' and row['error'] == 'joined_turn',
+                  state=row['state'], error=row['error'])
+        self.gate('agent_read_the_joined_message', any(event.get('directive') == 'steer' and 'JOINEDNOTE7' in str(event.get('argument'))
+                                                       for event in self.f.agent()))
+        new = [row for row in self.replies(before, OWNER) if not self.is_card(row)]
+        targets = [json.loads(row['parameters'].get('reply_parameters', '{}') or '{}').get('message_id') for row in new]
+        self.gate('one_reply_for_both', bool(new) and targets[0] == first['message']['message_id']
+                  and second['message']['message_id'] not in targets, targets=targets)
+        text = ''.join(row['message']['text'] for row in new)
+        self.gate('reply_answers_the_joined_message', '[agent] joined: ' in text and 'JOINEDNOTE7' in text)
+        number = second['message']['message_id']
+        self.wait('joined_message_gets_thumbs_up',
+                  lambda: self.f.telegram().get('reactions', {}).get(f'{OWNER}:{number}') == ['\U0001f44d'], 30)
+
     def long_reply_chunks(self):
         topic = 14
         before = len(self.f.sent())
@@ -1396,7 +1427,7 @@ listed:listed.entries.filter(entry=>entry.name===name).map(entry=>entry.size),le
                   and all(stage['label'] in output.getvalue() for stage in sample['stages']))
 
 
-ORDER = ['reply_during_polling_reconnect', 'ordinary_private', 'hermes_is_locked_down', 'edit_is_silent', 'reaction_is_silent', 'general_after_topics', 'burst_in_order', 'private_burst_in_order', 'long_reply_chunks',
+ORDER = ['reply_during_polling_reconnect', 'ordinary_private', 'hermes_is_locked_down', 'edit_is_silent', 'reaction_is_silent', 'general_after_topics', 'burst_in_order', 'private_burst_in_order', 'message_joins_running_turn', 'long_reply_chunks',
          'intentional_silence', 'empty_answer_is_not_silence', 'private_fact_and_search', 'owner_private_context', 'group_cannot_see_private',
          'owner_recall', 'secret_is_guarded', 'document_reply', 'action_approval', 'action_denial', 'group_current_action', 'schedule_fires_and_sends_without_card', 'participant_not_permitted',
          'group_answers_only_when_addressed', 'unselected_group', 'retirement_hides_fact', 'voice_is_transcribed', 'long_voice_is_read_whole_from_everyone', 'photo_is_read',

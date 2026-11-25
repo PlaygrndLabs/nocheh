@@ -56,7 +56,7 @@ BOX_TOOLSETS=[name for name in BACKGROUND_TOOLSETS if name!='memory']+['terminal
 # archive tools and memory search, which storage narrows to its card's chat, period and approval, Notion for the pages
 # its card named, and its own messages and operations. No notes recall, owner views, tasks, GitHub, Gmail, knowledge,
 # member asks or chat lists; storage refuses those routes to it too (src/stores/machine-reads.ts).
-MACHINE_DATA_TOOLS={'mcp__nocheh__'+name for name in ('archive_search','archive_read','archive_page','memory_search','action_request','mcp','notion','action_status')}
+MACHINE_DATA_TOOLS={'mcp__nocheh__'+name for name in ('archive_search','archive_read','archive_page','memory_search','action_request','notion','action_status')}
 MACHINE_TOOLS=MACHINE_DATA_TOOLS|{'session_search','skills_list','skill_view','todo_list','terminal','process_manage','read_file','write_file','patch','search_files'}
 MACHINE_TOOLSETS=[name for name in BACKGROUND_TOOLSETS if name!='memory']+['terminal','file']
 
@@ -239,6 +239,10 @@ PROBLEMS=[]
 # The long-term memory context a turn read, which its parent compares with the notes the turn wrote (note_sources).
 CONTEXT=[]
 CONTEXT_LIMIT=256*1024
+# The ids the long-term memory this turn was given cites (nocheh:<kind>:<id>), sent to the parent as soon as it is read
+# (a memory_sources line), so the turn's notes rest on them even when the turn stops early (ADR-0292).
+CITED=re.compile(r'nocheh:[a-z_]+:([a-f0-9]{64})(?![a-f0-9])')
+SEND=None
 
 
 def conversation_result(result, session_id):
@@ -396,6 +400,7 @@ def run(body, emit=None, relay=None, feed=None):
             PROBLEMS.append('memory_read')
         long_term='\nPrimary memory context (derived inferences):\n'+json.dumps(memory,ensure_ascii=False)
         CONTEXT.append(json.dumps(memory,ensure_ascii=False)[:CONTEXT_LIMIT])
+        if SEND:SEND({'event':'memory_sources','ids':list(dict.fromkeys(CITED.findall(json.dumps(memory))))[:500]})
     record('memory_recall',phase);phase=perf_counter()
     session_id=body['session_id']
     history=prepare(native_store.conversation(database,session_id)) if native_store.session_row(database,session_id) else []
@@ -544,6 +549,8 @@ def main():
                     # A job run sends a line now and then, even during a long model call, so the bridge does not take silence for a lost turn.
                     while not finished.wait(20):emit({'event':'heartbeat'})
                 if body.get('heartbeat') is True:threading.Thread(target=heartbeat,daemon=True).start()
+                global SEND
+                SEND=emit
                 try:result=run(body, emit if body.get('stream') else None, emit if body.get('channel')=='background' else None, feed)
                 finally:finished.set()
     except Exception as error:

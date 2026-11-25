@@ -131,6 +131,9 @@ export class ControlledActionRepository {
     const memberRead=boundReader(principal)==='member'&&memberConnectorCall(value);
     if(!memberRead)assertActingReader(principal);
     const body=exact(value,['kind','arguments','summary']),note=summaryOf(body.summary);let raw=actionArguments(body.kind,body.arguments);
+    // A machine job's run proposes only what its card allows, a Notion read of its pages (machine jobs' reads): no command,
+    // browser or other service, so it makes no card the job's card did not show (ADR-0306).
+    if(principal.machineReads&&!(body.kind==='mcp'&&'connection' in raw&&raw.connection==='notion'))throw new HttpError(403,'machine_job_reads_card_only');
     const turn=await this.turns.binding(principal),current=await this.guards.state(),owner=ownerChat(this.access.policy());
     // A tool the owner turned off for this chat or topic is refused before anything is recorded or checked for secrets.
     // Its switch is the chat's, never the asking turn's: a job or a scheduled task follows the chat it belongs to.
@@ -192,10 +195,11 @@ export class ControlledActionRepository {
       const left=outward&&source.store==='archive'?await freeReadsLeft(db,source.id):null;
       // A repeat of the same request keeps the summary it was first asked with, so its card never changes.
       // A member's request keeps their account, so the claim checks them again before it runs (step 3).
-      await db.query(`INSERT INTO controlled_actions(id,event_id,source_reference,proposal_reference,binding,guard_revision,scope,space_id,profile,logical_profile,kind,fingerprint,arguments_hash,job_id,match_key,summary_reference,asker_account)
-        VALUES($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16,$17) ON CONFLICT DO NOTHING`,
+      // The asking key's person and agent are kept too (ADR-0305): its claim and its follow-up are for them.
+      await db.query(`INSERT INTO controlled_actions(id,event_id,source_reference,proposal_reference,binding,guard_revision,scope,space_id,profile,logical_profile,kind,fingerprint,arguments_hash,job_id,match_key,summary_reference,asker_account,person,agent)
+        VALUES($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16,$17,$18,$19) ON CONFLICT DO NOTHING`,
         [id,source.id,source,proposal,binding,representation.revision,turn.scope,principal.space,turn.profile,turn.logical_profile,body.kind,fingerprint,digest(canonical(args)),turn.job??null,
-          turn.job||followUp||left&&left.all<=0?null:ruleKey(body.kind as string,args),summary,asker&&!asker.owner?asker.account:null]);
+          turn.job||followUp||left&&left.all<=0?null:ruleKey(body.kind as string,args),summary,asker&&!asker.owner?asker.account:null,principal.person??null,principal.agent??null]);
       const row=(await db.query('SELECT * FROM controlled_actions WHERE id=$1',[id])).rows[0];
       if(row.fingerprint!==fingerprint)throw new HttpError(409,'action_proposal_changed');
       const grant=(await this.grants(row,db))[0];let decision=await evaluate(db,this.effect(row),row.state==='approved'?'exact_owner_approval':grant?.id);

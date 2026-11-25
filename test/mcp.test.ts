@@ -2,7 +2,8 @@ import {test} from 'node:test';
 import assert from 'node:assert/strict';
 import {createServer,type IncomingMessage,type Server} from 'node:http';
 import pg from 'pg';
-import {defaultAgent,reader,scopeToken,turnToken,type Reader} from '../src/access.js';
+import {defaultAgent,reader,turnToken,type Reader} from '../src/access.js';
+import {keyPass} from './one-time-key-pass.js';
 import {ingest} from '../src/archive.js';
 import {initialize} from '../src/database.js';
 import {HttpError,readJson} from '../src/http.js';
@@ -62,14 +63,14 @@ test('the data tools keep their names, closed schemas and engine-neutral words',
   assert.equal(relayedJobErrors,jobErrors);assert.ok(jobErrors.has('job_repo_not_allowed'));
 });
 
-test('a turn pass names its agent, and only a turn pass may',()=>{
+test('a turn pass names its agent, and only the agent plugged in now (ADR-0305)',()=>{
   const secret='synthetic-service-token-only-for-tests',request=(token:string)=>({headers:{authorization:'Bearer '+token}}) as unknown as IncomingMessage;
-  const pass=turnToken(secret,'-1001',Date.now()+60000,ID,{space:'-1001',revision:1});
+  const pass=keyPass(secret,'-1001',Date.now()+60000,ID,{space:'-1001',revision:1});
   assert.equal(defaultAgent,'hermes');assert.equal(reader(request(pass),secret).agent,'hermes');
-  assert.equal(reader(request(turnToken(secret,null,Date.now()+60000,ID,{space:'1',revision:1,agent:'other-agent'})),secret).agent,'other-agent');
-  assert.equal(reader(request(scopeToken(secret,'-1001',Date.now()+60000)),secret).agent,undefined);
-  for(const agent of ['Hermes','','1agent','a'.repeat(33),'two words'])
-    assert.throws(()=>reader(request(turnToken(secret,null,Date.now()+60000,ID,{space:'1',revision:1,agent})),secret),{code:'invalid_scope_token'});
+  for(const agent of ['other-agent','Hermes','','1agent','a'.repeat(33),'two words'])
+    assert.throws(()=>reader(request(keyPass(secret,null,Date.now()+60000,ID,{space:'1',revision:1,agent})),secret),{code:'invalid_scope_token'},agent);
+  // A pass signed without its key's claims is no pass.
+  assert.throws(()=>reader(request(turnToken(secret,'-1001',Date.now()+60000,ID,{space:'-1001',revision:1})),secret),{code:'invalid_scope_token'});
 });
 
 test('the MCP endpoint speaks JSON-only Streamable HTTP without sessions',async()=>{
@@ -663,7 +664,7 @@ test('PostgreSQL broker: the data tools reach each route through the broker\'s o
   try {
     await initialize(pool);
     const event=await ingest(pool,{version:1,key:'mcp-turn',origin:'live',kind:'message',channel:'browser',bot_id:'fixture',scope:'1',source_id:'1',revision:'0',occurred_at:null,text:'exact source',payload:{profile:'owner'}},false);
-    const base=await listen(server),credential=turnToken(token,null,Date.now()+600000,event.id,{space:'1',revision:1,guard_epoch:1});
+    const base=await listen(server),credential=keyPass(token,null,Date.now()+600000,event.id,{space:'1',revision:1,guard_epoch:1});
     const call=async(name:string,args:Record<string,unknown>,key=credential)=>{
       const response=await fetch(base+'/mcp',{method:'POST',headers:{authorization:'Bearer '+key,'content-type':'application/json'},body:JSON.stringify({jsonrpc:'2.0',id:1,method:'tools/call',params:{name,arguments:args}})});
       const body=await response.json() as any;return response.ok&&body.result?JSON.parse(body.result.content[0].text):{status:response.status,...body};

@@ -14,12 +14,14 @@ import type {OperationReference} from '../stores/operations.js';
 import {JobBoxRepository,boxTokenSet,boxTokenValid} from '../stores/job-box.js';
 import {MACHINE_BODY,MachineRepository,machineErrors} from '../stores/machines.js';
 import {RuntimeTurnRepository} from '../stores/turns.js';
-import {assertPrivateAnswerRoute} from '../stores/private-answers.js';
+import {assertKeyRoute} from '../stores/key-routes.js';
+import {assertMachineRunRoute} from '../stores/machine-reads.js';
 import {afterPending,jobRun} from '../stores/guards.js';
 import {elapsed,timedBody,type ModelTimings} from './timing.js';
 import {actionErrors,askErrors,jobErrors,taskErrors} from '../mcp/tools.js';
 import {loopback,selfBase,serveMcp} from '../mcp/server.js';
 import {longFetch} from '../long-fetch.js';
+import {relayRoutes} from './relay-routes.js';
 
 export interface TurnBinding {
   event_id:string;scope:string;profile:string;logical_profile:string;owner:boolean;
@@ -31,20 +33,21 @@ export interface BrokerStorage {
   turnFile(principal:Reader,hash:string):Promise<string>;
   /** An answer reader's read set from its record (ADR-0249); a reader without an answer comes back as it is. */
   bindReads?(principal:Reader):Promise<Reader>;
+  /** A pass's one-time key is open (ADR-0305). A broker without storage (unit tests only) checks no key. */
+  assertKey?(principal:Reader):Promise<void>;
+  /** What a run of a job on the owner's machine may read, from its job's row (machine jobs' reads, ADR-0306); any other
+   * reader comes back as it is. */
+  bindMachine?(principal:Reader):Promise<Reader>;
 }
 /** `agentKey` is the agent login (ADR-0295): the broker calls Hermes with it and takes it on POST /v1/guard alone; without it
  * no agent login is accepted and no transport call is sent. */
 export interface BrokerOptions {pool:pg.Pool; token:string; agentKey?:string; archive:string; prepare:(principal:Reader|AgentLogin,input:unknown)=>Promise<any>; hermes:string; model:string; backupModel?:string; fetch?:typeof fetch;storage?:BrokerStorage;assertActive?:()=>void;assertReady?:()=>Promise<void>;health?:()=>Promise<unknown>;}
-/** Why Nocheh did not save a schedule a turn set (ADR-0290); any other refusal stays opaque. */
+/** Why Nocheh did not save a schedule a turn set (ADR-0290), or saves it only paused (ADR-0294); any other refusal stays opaque. */
 export const scheduleErrors=new Set(['schedule_turn_required','schedule_turn_not_allowed','schedule_limit_reached','schedule_cron_unsupported',
   'invalid_schedule_definition','invalid_schedule_prompt','invalid_schedule_preference','profile_scope_denied','schedule_sequence_conflict',
-  'schedule_execution_version_conflict']);
+  'schedule_execution_version_conflict','schedule_start_needed']);
 /** A fixed label for preparation-only guard requests; nothing is sent there. */
 const PREPARATION_DESTINATION='https://preparation.nocheh.invalid';
-const relayRoutes:[string,RegExp][]=[
-  ['GET',/^\/v1\/(search|archive\/page|imports\/pending|events\/[a-f0-9]{64}|artifacts\/[a-f0-9]{64}\/bytes|memory\/check|memory\/context|memory\/(shared|filtered|grants)\/[a-f0-9]{64}|memory\/learned\/[a-f0-9]{64}\/[1-9][0-9]{0,8}|memory\/notes\/[a-f0-9]{12}|memory\/facts\/[a-f0-9]{64}(?:\/[1-9][0-9]{0,2})?|knowledge\/(context|proposals\/[a-f0-9]{64})|owner\/(conversations|conversation-context|projects|project-assignments|people|telegram-identities|memory-map|tasks(?:\/[a-f0-9]{64})?)|tools\/actions(?:\/[a-f0-9]{64})?|telegram\/destinations|notion\/connections|github\/repos)$/],
-  ['POST',/^\/v1\/(context\/prepare|memory\/(recall|longterm\/(recall|context|search))|jobs\/(start|status|stop)|machines\/exec|tools\/propose|knowledge\/proposals|action-requests|member-asks|schedules\/(turn(?:\/definition)?|time-zone)|owner\/tasks(?:\/[a-f0-9]{64}(?:\/comments)?)?)$/],
-];
 export function scopedRoute(method:string,path:string):boolean {return relayRoutes.some(([m,re])=>method===m&&re.test(path));}
 /** The installation rehearsal's fixture provider; accepted only when the fixture flag is set. */
 export const FIXTURE_PROVIDER_URL='http://model-fixture:8317/v1';
@@ -102,7 +105,10 @@ export class ProviderFailure extends HttpError {
 export {jobErrors};
 /** What a proposal may be told: the owner turned this tool off for the chat, the member who asked may not use web pages
  * and outside tools (ADR-0260), or a machine job's card named no such Notion page (machine jobs' reads). */
-const proposeErrors=new Set(['tool_disabled_by_owner','tool_not_permitted','notion_page_not_on_card']);
+/** What an effect's log rows name of the key that asked (ADR-0306): its agent, person and key id, never the pass itself. */
+const keyOf=(principal:Reader):Pick<Effect,'agent'|'person'|'key'>=>({...(principal.agent?{agent:principal.agent}:{}),
+  ...(principal.person?{person:principal.person}:{}),...(principal.jti?{key:principal.jti}:{})});
+const proposeErrors=new Set(['tool_disabled_by_owner','tool_not_permitted','notion_page_not_on_card','machine_job_reads_card_only']);
 /** What a machine command may be told, as services/hermes/machine_box.py names it: a refusal or a failure on the machine's side. */
 export {machineErrors};
 /** The error code in a refused archive answer, read within a small bound; null when there is none. */
@@ -182,12 +188,18 @@ export function brokerServer(options:BrokerOptions) {
     // call, or refused without one, and reaches its read routes only (ADR-0249, ADR-0262). A pass for a topic the app
     // recorded a moment ago is read once this service's chat directory has looked again (ADR-0252).
     const parsed=await currentReader(req,options.token),bound=boundReader(parsed);
+    // Every pass is a one-time key, open until its reply is delivered or its run ends (ADR-0305): checked before anything
+    // else is done for it, and again with every audience check below.
+    if(!parsed.admin)await options.storage?.assertKey?.(parsed);
     if(bound!==null&&!options.storage?.bindReads)throw new HttpError(409,bound==='answer'?'private_answer_closed':'member_chat_closed');
     const principal=bound!==null?await options.storage!.bindReads!(parsed):parsed,job=jobRun(principal);
-    assertPrivateAnswerRoute(principal,req.method,path);
+    // Each key reaches only its kind's routes; a bound reader keeps its read-only codes (ADR-0249, ADR-0305).
+    assertKeyRoute(principal,req.method,path);
     await afterPending(job,async()=>options.assertReady?.());
     // Nocheh's data tools: each call comes back to this broker's own routes with the turn's pass, so it meets every check below (ADR-0233).
-    if(path==='/mcp')return serveMcp(req,res,{principal,call:loopback(selfBase(req),req.headers.authorization!),isolated:true});
+    // A machine job's run is offered and runs only its card's tools, as storage would (ADR-0306).
+    if(path==='/mcp')return serveMcp(req,res,{principal:!principal.admin&&options.storage?.bindMachine?await options.storage.bindMachine(principal):principal,
+      call:loopback(selfBase(req),req.headers.authorization!),isolated:true});
     // The box's chat copy also needs the launcher's box token, and is never read with an owner credential.
     const copy=path==='/v1/box/chat'&&req.method==='GET';
     if(copy&&(principal.admin||!box||!boxTokenValid(req.headers['x-nocheh-box-token'])))throw new HttpError(403,'job_box_not_allowed');
@@ -208,7 +220,7 @@ export function brokerServer(options:BrokerOptions) {
     let trace:{effect:Effect;decision:Decision;started:boolean;closed:boolean}|undefined;
     const timings:ModelTimings={};
     const authorizeEffect=async(kind:Effect['kind'],value:unknown)=>{
-      const effect:Effect={id:randomUUID(),kind,scope:binding.scope,profile:binding.logical_profile,fingerprint:fingerprint(value),...(binding.job?{job:binding.job}:{}),...(principal.agent?{agent:principal.agent}:{})};
+      const effect:Effect={id:randomUUID(),kind,scope:binding.scope,profile:binding.logical_profile,fingerprint:fingerprint(value),...(binding.job?{job:binding.job}:{}),...keyOf(principal)};
       const decision=await evaluate(options.pool,effect);
       trace={effect,decision,started:false,closed:false};
       await recordEffect(options.pool,effect,'proposed',decision,binding.reference??binding.event_id);
@@ -245,6 +257,9 @@ export function brokerServer(options:BrokerOptions) {
       }
       if(copy&&!await box!.binding(binding))throw new HttpError(403,'job_box_not_allowed');
       if(copy||scopedRoute(req.method??'',relay)) {
+        // A machine job's run reaches only its card's routes here too, so a route storage would refuse is neither relayed
+        // nor logged (ADR-0306).
+        if(!principal.admin&&options.storage?.bindMachine)assertMachineRunRoute(await options.storage.bindMachine(principal),req.method,relay);
         // Only the box route reads whole texts; no other read can ask for them.
         if(!copy&&url.searchParams.has('full'))url.searchParams.delete('full');
         // The owner's ask about a member (step 4b) is the owner's live private turn's too, read as the owner's memory.
@@ -303,7 +318,7 @@ export function brokerServer(options:BrokerOptions) {
         if(payload.model!==options.model&&!(options.backupModel&&payload.model===options.backupModel))throw new HttpError(403,'model_configuration_mismatch');
       }catch(error){
         if(error instanceof HttpError){
-          const effect:Effect={id:randomUUID(),kind:'model.request',scope:binding.scope,profile:binding.logical_profile,fingerprint:fingerprint(input),...(binding.job?{job:binding.job}:{}),...(principal.agent?{agent:principal.agent}:{})};
+          const effect:Effect={id:randomUUID(),kind:'model.request',scope:binding.scope,profile:binding.logical_profile,fingerprint:fingerprint(input),...(binding.job?{job:binding.job}:{}),...keyOf(principal)};
           const current=await evaluate(options.pool,effect);
           const decision:Decision={outcome:'deny',origin:'mandatory',revision:current.revision,rule:error.code};
           await recordEffect(options.pool,effect,'proposed',decision,binding.reference??binding.event_id);

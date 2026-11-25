@@ -179,7 +179,9 @@ class ManagedAsync:
         immutable_file(self.directory,identity(body)+'.context',canonical(context))
         if not claim.get('claimed'):
             return {'state':claim['state'] if claim['state'] in CLOSED else 'ambiguous'}
-        claims=check_claims(claim['archive_credential'],scope,context['event_id'])
+        # The claim's pass is the run's one-time key, kept only in memory: a run interrupted by a restart is never claimed again.
+        # A browser run has none: that channel is off (ADR-0289).
+        claims=check_claims(claim['archive_credential'],scope,context['event_id'],{'scheduler':('scheduled',),'background':('background',)}.get(channel,()))
         if not scope.owner and claims.get('revision')!=scope.revision:raise ValueError('browser_audience_changed')
         stopped=threading.Event();lost=threading.Event()
         # A background run's progress lines reach its heartbeat and receipt through the relay.

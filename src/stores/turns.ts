@@ -11,6 +11,7 @@ import type {GuardBinding} from './guards.js';
 import {albumMembers} from './albums.js';
 import {defaultLogicalProfile,runtimeProfile} from './runtime-profile.js';
 import {ownerChat} from '../assistant-policy.js';
+import {OneTimeKeyRepository} from './one-time-keys.js';
 
 export const runtimeTurnSchema=`
 CREATE TABLE IF NOT EXISTS runtime_turns (
@@ -25,7 +26,18 @@ const sourceProcessing=(principal:Reader)=>!principal.logical_profile&&['memory-
 /** Runtime authority uses original references or explicit control operations, never generated archive events. */
 export class RuntimeTurnRepository implements BrokerStorage {
   constructor(readonly access:SourceAccessRepository,readonly prepared:PreparedContextRepository){}
+  /** The keys passes are checked against (ADR-0305). */
+  get keys():OneTimeKeyRepository {return new OneTimeKeyRepository(this.access.stores.control);}
+  /** A pass's one-time key is open (ADR-0305): every request that brings a pass, before anything else is read for it.
+   * The request is counted on the key's row (ADR-0306). */
+  async assertKey(principal:Reader):Promise<void> {
+    if(principal.admin)return;
+    await this.keys.use(principal);
+  }
   async assertAudience(principal:Reader):Promise<GuardBinding> {
+    // A reader made from a pass is checked against its key every time, so a key closed mid-turn ends the turn's reads,
+    // its model stream and its binding. Readers Nocheh builds itself carry no key and never came from a bearer.
+    if(!principal.admin&&principal.jti!==undefined)await this.keys.assertOpen(principal);
     const binding=await this.prepared.audience.assert(principal),own=this.own(principal,binding);
     if(principal.turnEvent) {
       const managed=(await this.access.stores.control.query('SELECT state,generation,guard_epoch,logical_profile,reference FROM runtime_turns WHERE id=$1',[principal.turnEvent])).rows[0];
@@ -66,6 +78,8 @@ export class RuntimeTurnRepository implements BrokerStorage {
   }
   /** An answer reader's read set from its record, for the broker (ADR-0249). */
   bindReads(principal:Reader):Promise<Reader> {return this.access.bindReads(principal);}
+  /** A machine job's run's reads from its job's row, for the broker (ADR-0306). */
+  bindMachine(principal:Reader):Promise<Reader> {return this.access.bindMachine(principal);}
   async close(id:string):Promise<void> {
     await this.access.stores.control.query("UPDATE runtime_turns SET state='closed',closed_at=now() WHERE id=$1 AND state='open'",[id]);
   }
@@ -98,6 +112,11 @@ export class RuntimeTurnRepository implements BrokerStorage {
     const managed=reference.store==='archive'&&sourceProcessing(principal)?null:
       (await this.access.stores.control.query('SELECT * FROM runtime_turns WHERE id=$1',[reference.id])).rows[0];
     if((reference.store==='control'||principal.logical_profile!==undefined)&&!managed)throw new HttpError(403,'runtime_turn_not_admitted');
+    // A run made for one person and agent is never driven by a key for another (ADR-0305).
+    if(principal.jti!==undefined) {
+      const run=(await this.access.stores.control.query<{person:string|null;agent:string|null}>('SELECT person,agent FROM managed_runs WHERE event_id=$1',[principal.turnEvent])).rows[0];
+      if(run&&(run.person!==null&&run.person!==principal.person||run.agent!==null&&run.agent!==principal.agent))throw new HttpError(409,'one_time_key_person_changed');
+    }
     if(managed&&(managed.generation!==own.generation||Number(managed.guard_epoch)!==own.epoch||managed.space_id!==principal.space||
       managed.owner!==(principal.scope===null)||managed.state!=='open'||canonical(managed.reference)!==canonical(reference)))
       throw new HttpError(409,'runtime_turn_changed');

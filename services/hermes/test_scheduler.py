@@ -9,6 +9,7 @@ from .native_admin import Administration
 from .native_cron import manage,inspect,store,turn_capture
 from .scheduler import Scheduler,now
 from .scopes import Scopes
+from .key_fixture import keyed
 from services.chats import Served
 
 
@@ -73,8 +74,10 @@ class SchedulerTests(unittest.TestCase):
         if route=='input':self.inputs[body['id']]=body;return {'event_id':body['id']}
         if route=='claim':
             if body['event_id'] in self.finished:return {'claimed':False,'state':self.finished[body['event_id']]['state']}
-            claims={'scope':None,'event_id':body['event_id'],'audience':'nocheh-assistant','space':'42','revision':1,'expires':(time.time()+600)*1000}
-            encoded=base64.urlsafe_b64encode(json.dumps(claims).encode()).decode().rstrip('=')
+            # The run's one-time key names the profile it runs in (ADR-0305).
+            claims={'scope':None,'event_id':body['event_id'],'audience':'nocheh-assistant','space':'42','revision':1,'expires':(time.time()+600)*1000,
+                    'generation':'12345678-1234-1234-1234-123456789abc','guard_epoch':1,'logical_profile':body['profile']}
+            encoded=base64.urlsafe_b64encode(json.dumps(keyed(claims,'scheduled')).encode()).decode().rstrip('=')
             signature=base64.urlsafe_b64encode(hmac.new(b'fixture-pass-signer',encoded.encode(),hashlib.sha256).digest()).decode().rstrip('=')
             return {**body,'claimed':True,'archive_credential':'turn.'+encoded+'.'+signature,'text':self.inputs[body['event_id']]['text']}
         if route=='finish':self.finished[body['event_id']]=body;return {'state':body['state']}
@@ -550,7 +553,7 @@ class StoreSchedulerTests(SchedulerTests):
             claims={'scope':None,'event_id':body['event_id'],'audience':'nocheh-assistant','space':'42',
                 'revision':self.control.epoch,'guard_epoch':self.control.epoch,'generation':self.control.generation,
                 'logical_profile':body['profile'],'expires':(time.time()+600)*1000}
-            encoded=base64.urlsafe_b64encode(json.dumps(claims).encode()).decode().rstrip('=')
+            encoded=base64.urlsafe_b64encode(json.dumps(keyed(claims,'scheduled')).encode()).decode().rstrip('=')
             signature=base64.urlsafe_b64encode(hmac.new(b'fixture-pass-signer',encoded.encode(),hashlib.sha256).digest()).decode().rstrip('=')
             result['archive_credential']='turn.'+encoded+'.'+signature
         return result

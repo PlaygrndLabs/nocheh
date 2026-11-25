@@ -3,7 +3,7 @@ import assert from 'node:assert/strict';
 import {mkdtemp,rm} from 'node:fs/promises';
 import {tmpdir} from 'node:os';
 import {join} from 'node:path';
-import {scopeToken} from '../src/access.js';
+import {keyPass} from './one-time-key-pass.js';
 import type {Settings} from '../src/config.js';
 import {storageServer} from '../src/stores/server.js';
 import type {StorageServices} from '../src/stores/services.js';
@@ -20,7 +20,7 @@ test('owner runtime status names the plugged-in agent, reports Telegram polling 
     return {ok:true,service:'telegram',telegram:'connected',telegram_details:{last_poll_at:'2026-09-25T11:44:49Z'}};
   };
   const capabilities={'guard.detect':true,'image.read':false,'telegram.status':true},access={bindReads:async(principal:unknown)=>principal,bindMachine:async(principal:unknown)=>principal};
-  const server=storageServer({agent,access} as unknown as StorageServices,config,bot,undefined,undefined,capabilities);
+  const server=storageServer({agent,access,turns:{assertKey:async()=>{}}} as unknown as StorageServices,config,bot,undefined,undefined,capabilities);
   await new Promise<void>(resolve=>server.listen(0,'127.0.0.1',resolve));
   try{
     const address=server.address();assert.ok(address&&typeof address==='object');
@@ -42,8 +42,8 @@ test('owner runtime status names the plugged-in agent, reports Telegram polling 
       const answer=await (await fetch(`http://127.0.0.1:${port}/v1/runtime`,{headers:{authorization:'Bearer '+token}})).json() as {status:unknown};
       assert.deepEqual(answer.status,{ok:false,error:'agent_unavailable'});
     }finally{await new Promise<void>(resolve=>down.close(()=>resolve()));}
-    const scoped=await fetch(url,{headers:{authorization:'Bearer '+scopeToken(token,'owner',Date.now()+60_000)}});
-    assert.equal(scoped.status,403);
+    const scoped=await fetch(url,{headers:{authorization:'Bearer '+keyPass(token,null,Date.now()+60_000)}});
+    assert.equal(scoped.status,403);assert.deepEqual(await scoped.json(),{error:'one_time_key_route_denied'},'a reply\'s key reaches no dashboard route');
   }finally{
     await new Promise<void>(resolve=>server.close(()=>resolve()));
     await rm(dataDir,{recursive:true,force:true});

@@ -140,6 +140,13 @@ test('Telegram workflow dispatch uses current prepared derivatives and durable s
       {chat:group,message:String((generalValue.payload as any).message.message_id),topic:undefined,key:generalValue.key,text:'Fixture reply',session:'fixture-session',notify:false,presence:true,class:'reply'});
     assert.equal(answer.id,digest(general.id+':1'),'one reply id per attempt, shared with its presence');assert.equal(generalSends[0]!.input.id,answer.id);
     assert.equal(reader({headers:{authorization:'Bearer '+answer.archive_credential}} as any,token).space,group,'the send carries a pass for the same conversation');
+    // One key for the attempt (ADR-0305): the agent's and the send's pass carry the same jti, signed for the member who
+    // wrote, and the delivered reply closes it for good.
+    const agentPass=reader({headers:{authorization:'Bearer '+generalCalls[0]!.input.archive_credential}} as any,token),sendPass=reader({headers:{authorization:'Bearer '+answer.archive_credential}} as any,token);
+    assert.equal(sendPass.jti,agentPass.jti);assert.equal(agentPass.keyKind,'turn');assert.match(agentPass.person!,/^[a-f0-9]{64}$/,'a group message is its sender\'s');
+    assert.deepEqual((await stores.control.query('SELECT kind,subject,attempt,person,closed_reason,closed_at IS NOT NULL AS closed FROM one_time_keys WHERE jti=$1',[agentPass.jti])).rows,
+      [{kind:'turn',subject:general.id,attempt:'1',person:agentPass.person,closed_reason:'delivered',closed:true}]);
+    await assert.rejects(services.turns.assertKey(agentPass),{status:409,code:'one_time_key_closed'});
     assert.equal((await advance(general.id)).state,'completed');
     assert.equal(calls.filter(c=>c.input.event_id===general.id&&c.operation==='run.start').length,1);
     const timed=(id:string)=>stores.control.query('SELECT stage,attempt,category FROM stage_timings WHERE event_id=$1 ORDER BY stage',[id]).then(r=>r.rows);
@@ -187,6 +194,28 @@ test('Telegram workflow dispatch uses current prepared derivatives and durable s
     assert.equal((await run(unstarted.reference.id)).state,'retryable_failed');
     await due(unstarted.reference.id);mode='done';assert.equal((await run(unstarted.reference.id)).state,'completed');
     assert.deepEqual(calls.filter(c=>c.input.event_id===unstarted.reference.id&&c.operation==='run.start').map(c=>c.input.attempt),[1,2]);
+    // "Stop everything now" closes a running reply's key (ADR-0307): the turn is cancelled, its reply never sent, and it is
+    // not run again under a new key.
+    const halted=await capture('Running when everything stops');await prepare(halted.reference.id);mode='running';
+    assert.equal((await run(halted.reference.id)).state,'running');
+    await services.keys.stop({scope:null,admin:true} as any,{operation_id:'stop:'+base});
+    await due(halted.reference.id);await run(halted.reference.id);
+    assert.ok(calls.some(c=>c.input.event_id===halted.reference.id&&c.operation==='run.cancel'),'the running turn is cancelled');
+    assert.equal((await stores.control.query('SELECT state FROM dispatches WHERE event_id=$1',[halted.reference.id])).rows[0].state,'cancelled');
+    await due(halted.reference.id);await run(halted.reference.id);
+    assert.equal(calls.filter(c=>c.input.event_id===halted.reference.id&&c.operation==='run.start').length,1,'never run again');
+    assert.ok(!sends.some(item=>item.operation==='telegram.reply'&&item.input.event_id===halted.reference.id),'no reply is sent');
+    // One that the closed key made fail ends the same way, and is not run again under a new key either.
+    const failing=await capture('Failing when everything stops');await prepare(failing.reference.id);
+    assert.equal((await run(failing.reference.id)).state,'running');
+    await services.keys.stop({scope:null,admin:true} as any,{operation_id:'stop-failed:'+base});
+    native.set(failing.reference.id,{state:'failed',error_code:'one_time_key_closed'});
+    await due(failing.reference.id);await run(failing.reference.id);
+    assert.equal((await stores.control.query('SELECT state FROM dispatches WHERE event_id=$1',[failing.reference.id])).rows[0].state,'cancelled');
+    await due(failing.reference.id);await run(failing.reference.id);
+    assert.equal(calls.filter(c=>c.input.event_id===failing.reference.id&&c.operation==='run.start').length,1,'never run again');
+    assert.ok(!sends.some(item=>item.operation==='telegram.reply'&&item.input.event_id===failing.reference.id),'no reply is sent');
+    mode='done';
     // A reaction while a reply runs waits to advance the epoch, so it never revokes that reply.
     const busy=await capture('Reply running during a reaction');await prepare(busy.reference.id);mode='running';
     assert.equal((await run(busy.reference.id)).state,'running');
@@ -219,6 +248,8 @@ test('Telegram workflow dispatch uses current prepared derivatives and durable s
     assert.equal((await run(silent.reference.id)).state,'skipped');
     const silentCalls:number=calls.length;await due(silent.reference.id);await run(silent.reference.id);assert.equal(calls.length,silentCalls,'terminal execution cannot automatically restart');
     assert.deepEqual(sends.filter(item=>item.input.event_id===silent.reference.id).map(item=>item.input.finish??null),[null,'clear'],'no answer clears the working reaction');
+    assert.deepEqual((await stores.control.query("SELECT closed_reason FROM one_time_keys WHERE kind='turn' AND subject=$1",[silent.reference.id])).rows,[{closed_reason:'not_delivered'}],
+      'a turn that ends without a reply closes its key too');
     // A message that joined the turn running in its chat is answered by that turn's reply: 👍, no reply of its own (ADR-0301).
     const joined=await capture('Joined the running turn');await prepare(joined.reference.id);mode='joined';
     assert.equal((await run(joined.reference.id)).state,'skipped');
@@ -251,6 +282,8 @@ test('Telegram workflow dispatch uses current prepared derivatives and durable s
     assert.ok(Number(failedRetry.rows[0].delay)<=11,'the first safe retry should be due in about ten seconds');
     assert.equal(calls.filter(c=>c.input.event_id===failed.reference.id&&c.operation==='run.start').length,1);
     await due(failed.reference.id);mode='done';assert.equal((await run(failed.reference.id)).state,'completed');
+    assert.deepEqual((await stores.control.query("SELECT attempt,closed_reason FROM one_time_keys WHERE kind='turn' AND subject=$1 ORDER BY attempt",[failed.reference.id])).rows,
+      [{attempt:'1',closed_reason:'not_delivered'},{attempt:'2',closed_reason:'delivered'}],'a failed attempt\'s key closes when it fails, the retry\'s with its reply');
     const retried=calls.filter(c=>c.input.event_id===failed.reference.id&&c.operation==='run.start');
     assert.deepEqual(retried.map(c=>c.input.attempt),[1,2]);
     const reaction={...envelope(''),payload:{update_id:++serial,message_reaction:{chat:{id:Number(group)},message_id:1,date:1700000000,user:{id:9},old_reaction:[],new_reaction:[]}}};

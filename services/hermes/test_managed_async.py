@@ -7,6 +7,7 @@ from .managed_async import ManagedAsync,ServiceError
 from .async_runs import identity
 from .job_progress import run_cost
 from .scopes import Scope,Scopes
+from .key_fixture import keyed
 from services.chats import Served
 
 
@@ -16,29 +17,35 @@ class ManagedAsyncTests(unittest.TestCase):
         self.scope=Scope('42','42',True,'owner','42',1)
         self.admin=SimpleNamespace(root=self.root,model='model',agent_key='fixture-agent-key-not-a-real-credential',
             profile=lambda name:(name,self.root),binding=lambda name:self.scope,policy=Scopes({'enabled':True},Served.of('42',groups=['-123'],topics=[['-123/topic/7','-123','7']])))
-        self.body={'channel':'browser','event_id':'a'*64,'attempt':1,'owner_epoch':2}
-        self.context={'event_id':'a'*64,'actor':'run_'+'a'*64,'scope':'42','profile':'owner','conversation':'native-session','owner_epoch':2}
+        # A background job's run: the browser channel is off (ADR-0289) and its runs never take a key (ADR-0305).
+        self.body={'channel':'background','event_id':'a'*64,'attempt':1,'owner_epoch':2};self.kind='background';self.key={}
+        self.context={'event_id':'a'*64,'actor':'run_'+'a'*64,'scope':'42','profile':'owner','conversation':'native-session','owner_epoch':2,
+            'background':{'job_id':'c'*64,'attempt':1,'max_iterations':300,'box':False,'soft_deadline':1793796300,'hard_deadline':1793796480,
+                          'rates':{'input':2,'output':10,'cache_read':0.2,'cache_write':2.5,'request':None},'cost_limit_usd':5,'prior_cost_usd':0}}
         self.state='captured';self.finished=None;self.count=0;self.failed=None;self.visible=True;self.release=threading.Event();self.release.set()
-        self.runtime=ManagedAsync(self.admin,lambda:object(),self.call,self.runner)
+        self.runtime=self.managed()
+    def managed(self):return ManagedAsync(self.admin,lambda:object(),self.call,self.runner,background_call=self.call)
     def tearDown(self):self.release.set();self.runtime.stop();self.temp.cleanup()
     def call(self,route,body):
         if route==self.failed:raise RuntimeError('private provider outage canary')
         if route=='workflow-context':return self.context
         if route=='claim':
             self.state='running'
-            claims={'scope':None,'event_id':body['event_id'],'audience':'nocheh-assistant','space':'42','revision':1,'expires':(time.time()+600)*1000}
+            # The run's one-time key names the profile it runs in (ADR-0305).
+            claims={'scope':None,'event_id':body['event_id'],'audience':'nocheh-assistant','space':'42','revision':1,'expires':(time.time()+600)*1000,
+                    'generation':'12345678-1234-1234-1234-123456789abc','guard_epoch':1,'logical_profile':'owner'}
             if self.context.get('storage_layout')=='original-only-v1':
                 claims.update(generation='12345678-1234-1234-1234-123456789abc',guard_epoch=self.context['revision'],revision=self.context['revision'],
                     logical_profile=self.context['profile'],space=self.context['space'],scope=None if self.context['scope']=='42' else self.context['scope'])
-            encoded=base64.urlsafe_b64encode(json.dumps(claims).encode()).decode().rstrip('=')
+            encoded=base64.urlsafe_b64encode(json.dumps(keyed(claims,self.kind,**self.key)).encode()).decode().rstrip('=')
             signature=base64.urlsafe_b64encode(hmac.new(b'fixture-pass-signer',encoded.encode(),hashlib.sha256).digest()).decode().rstrip('=')
             return {**body,'claimed':True,'archive_credential':'turn.'+encoded+'.'+signature,'text':'private prompt canary'}
         if route=='prepare':return {'files':[],'transcripts':[]}
         if route=='finish':self.finished=body;self.state=body['state'];return {'state':self.state}
         if route=='observe':return {'state':self.state,'visible':self.visible,'text':self.finished['text'] if self.finished and self.visible else ''}
         return {}
-    async def runner(self,root,scope,body,model,credentials,session,emit,cancelled):
-        self.count+=1;self.assertEqual(session,'native-session');emit('private stream canary')
+    async def runner(self,root,scope,body,model,credentials,session,emit,cancelled,progress=None):
+        self.count+=1;self.assertEqual(session,'native-session');self.assertIsNone(emit,'a job run streams nothing to a browser')
         while not self.release.is_set() and not cancelled.is_set():await asyncio.sleep(.01)
         return {'state':'cancelled' if cancelled.is_set() else 'done','text':'private result canary','session_id':session}
     def settle(self):
@@ -47,22 +54,32 @@ class ManagedAsyncTests(unittest.TestCase):
             if result['state'] in ('done','failed','ambiguous','cancelled'):return result
             time.sleep(.01)
         self.fail('native async run did not finish')
-    def test_stream_and_receipt_stay_private_and_resume_never_reexecutes(self):
+    def test_receipt_stays_private_and_resume_never_reexecutes(self):
         self.runtime.runs.start(self.body);self.assertEqual(self.settle()['state'],'done')
-        self.assertEqual(self.runtime.events({**self.context,'after':0})['events'][0]['text'],'private stream canary')
-        self.assertEqual(self.runtime.events({**self.context,'after':1})['events'],[])
         self.assertNotIn('private',json.dumps(self.runtime.runs.events(self.body)))
         self.assertNotIn('private',self.runtime.path(self.body,'.result').read_text())
-        self.runtime=ManagedAsync(self.admin,lambda:object(),self.call,self.runner)
+        # The claim's pass is held only in memory: no file of the run keeps it.
+        for path in self.runtime.directory.iterdir():self.assertNotIn('turn.',path.read_text(),path.name)
+        self.runtime=self.managed()
         self.assertEqual(self.runtime.runs.resume(self.body)['state'],'done');self.assertEqual(self.count,1)
-        self.visible=False;self.assertEqual(self.runtime.events(self.context)['events'],[])
+    def test_a_run_takes_only_a_one_time_key_of_its_own_kind_for_this_agent(self):
+        # ADR-0305: a background run's claim brings a background key, a schedule's a scheduled key; a browser run none.
+        for number,(kind,key) in enumerate((('scheduled',{}),('turn',{}),('background',{'agent':'another-agent'}),('background',{'jti':None}),
+                                             ('background',{'person':None}),('background',{'logical_profile':None}),('background',{}))):
+            with self.subTest(kind=kind,key=key):
+                self.kind,self.key=kind,key;self.body['event_id']=self.context['event_id']=format(number+1,'x')*64
+                self.runtime.runs.start(self.body)
+                self.assertEqual(self.settle()['state'],'done' if number==6 else 'ambiguous')
+        self.assertEqual(self.count,1,'only the run with its own key ran')
+        self.count=0;self.kind,self.key='background',{};self.body={**self.body,'channel':'browser','event_id':'f'*64};self.context['event_id']='f'*64
+        self.runtime.runs.start(self.body);self.assertEqual(self.settle()['state'],'ambiguous');self.assertEqual(self.count,0)
     def test_lost_receipt_ack_reconciles_without_replacement_effect(self):
         original=self.call;failed=[False]
         def call(route,body):
             result=original(route,body)
             if route=='finish' and not failed[0]:failed[0]=True;raise OSError('ack lost')
             return result
-        self.runtime.call=call;self.runtime.runs.start(self.body)
+        self.runtime.background_call=call;self.runtime.runs.start(self.body)
         self.assertEqual(self.settle()['state'],'done');self.assertEqual(self.count,1)
         self.assertTrue(self.runtime.path(self.body,'.receipt').is_file())
     def test_restart_after_claim_closes_uncertainty_and_cancellation_stops_same_run(self):
@@ -193,15 +210,6 @@ class ManagedAsyncTests(unittest.TestCase):
         with patch.object(managed_async,'HEARTBEAT_SECONDS',.01):
             finished=self.background(runner,lambda body:{'event_id':body['event_id'],'state':'running','cancel_requested':True})
         self.assertEqual(finished['state'],'cancelled')
-    def test_a_browser_run_is_lost_at_its_first_failed_heartbeat(self):
-        self.release.clear();original=self.call
-        def call(route,body):
-            if route=='heartbeat':raise ServiceError(503)
-            return original(route,body)
-        self.runtime.call=call
-        with patch.object(managed_async,'HEARTBEAT_SECONDS',.01):
-            self.runtime.runs.start(self.body);self.assertEqual(self.settle()['state'],'ambiguous')
-        self.assertEqual(self.finished['state'],'interrupted')
     def test_flush_retires_browser_receipts_and_one_refused_receipt_holds_back_no_other(self):
         # ADR-0289: Nocheh refuses the browser channel for good, so its leftover receipt is retired without a call.
         def write(body):

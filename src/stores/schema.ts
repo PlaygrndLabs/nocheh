@@ -9,6 +9,8 @@ import {derivedLearnedSchema} from './learned-schema.js';
 import {controlOperationSchema} from './operations.js';
 import {runtimeContextSchema} from './prepared-context.js';
 import {runtimeTurnSchema} from './turns.js';
+import {oneTimeKeySchema} from './one-time-keys.js';
+import {keyStopSchema} from './keys.js';
 import {managedStorageSchema} from './browser-runs.js';
 import {scheduleStorageSchema} from './schedules.js';
 import {scheduleNoticeSchema} from './schedule-notices.js';
@@ -156,6 +158,8 @@ ${controlEntitySchema}
 ${controlMemorySchema}
 ${controlOperationSchema}
 ${runtimeTurnSchema}
+${oneTimeKeySchema}
+${keyStopSchema}
 ${runtimeProfileSchema}
 ${managedStorageSchema}
 ${scheduleStorageSchema}

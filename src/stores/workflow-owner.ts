@@ -1,6 +1,7 @@
 import type pg from 'pg';
 import {admin,type Reader} from '../access.js';
 import {HttpError,object} from '../http.js';
+import {closeEvent} from './one-time-keys.js';
 import {workflowIdentity} from '../workflows/client.js';
 import {hash} from '../workflows/store.js';
 import {workflowDetail,workflowView} from '../workflows/owner.js';
@@ -126,6 +127,7 @@ export async function controlStorageWorkflow(pool:pg.Pool,principal:Reader,id:st
           const event=row.family==='browser'?job:job.slice(4);
           changed=(await db.query("UPDATE managed_runs SET state='cancelled',cancel_requested=true,error_code='owner_cancelled',revision=revision+1,updated_at=now() WHERE event_id=$1 AND state='captured' AND actor IS NULL",[event])).rowCount??0;
           await db.query("UPDATE runtime_turns SET state='closed',closed_at=now() WHERE id=$1 AND state='open'",[event]);
+          await closeEvent(db,event,['scheduled','background'],'owner_changed');
         }
         if(row.family==='memory_review'&&job.startsWith('native:'))changed=(await db.query("UPDATE native_review_jobs SET paused=true,state='paused',error_code='owner_cancelled',revision=revision+1,updated_at=now() WHERE id=$1 AND state IN ('pending','paused') AND attempts=0",[job.slice(7)])).rowCount??0;
         if(!changed)throw new HttpError(409,'workflow_domain_changed');
