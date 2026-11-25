@@ -98,6 +98,8 @@ test('send records drain once from the spool, list newest first with chat names,
       record({at:ago(60*24*30),state:'failed',status:403,error_code:'bot_blocked',chat:'123'}),
       record({at:ago(50),chat:group}),record({at:ago(40),chat:group,thread:'7'}),
       record({at:ago(30),kind:'reaction',method:'setMessageReaction',detail:'👀',state:'failed',status:400,error_code:'reaction_not_allowed',chat:group,reference:null}),
+      // A reaction to a message its sender deleted first is listed, never a problem; a reply to a missing message stays one below.
+      record({at:ago(28),kind:'reaction',method:'setMessageReaction',detail:'👍',state:'failed',status:400,error_code:'message_not_found',chat:group,reference:null}),
       record({at:ago(25),kind:'card_update',method:'editMessageText',state:'failed',status:400,error_code:'message_not_modified',chat:other}),
       record({at:ago(20),kind:'button_answer',method:'answerCallbackQuery',state:'failed',status:400,error_code:'button_answer_expired',chat:null,message_id:null}),
       record({at:ago(15),state:'not_sent',status:0,error_code:'rate_limited',chat:other}),
@@ -118,7 +120,7 @@ test('send records drain once from the spool, list newest first with chat names,
     const ids=new Map((await stores.control.query('SELECT external_id,chat_id FROM chat_ids WHERE external_id=ANY($1::text[])',[[group,other]])).rows.map(row=>[row.external_id,row.chat_id]));
     assert.equal(ids.size,2);
     const summary=await sends.summary(new Date(now));
-    assert.deepEqual({...summary,latest_problems:undefined},{window_hours:24,sent:2,failed:3,uncertain:2,not_sent:1,problems:2,
+    assert.deepEqual({...summary,latest_problems:undefined},{window_hours:24,sent:2,failed:4,uncertain:2,not_sent:1,problems:2,
       problem_kinds:{reply:1,setup:1},last_problem_at:ago(5),latest_problems:undefined});
     assert.deepEqual(summary.latest_problems.map(row=>[row.kind,row.error_code,row.chat_title]),
       [['setup','server_error',null],['reply','timed_out','Other group']]);
@@ -138,8 +140,10 @@ test('send records drain once from the spool, list newest first with chat names,
     assert.equal(new Set(all.map(row=>row.id)).size,rows.length);
     const inTopic=all.find(row=>row.thread==='7');
     assert.deepEqual([inTopic?.topic,inTopic?.chat_title,inTopic?.chat_id],[7,'Captured name',ids.get(group)],'a topic with no row is its chat');
-    const reaction=all.find(row=>row.kind==='reaction');
+    const reactions=all.filter(row=>row.kind==='reaction'),reaction=reactions.find(row=>row.detail==='👀');
     assert.deepEqual([reaction.detail,reaction.message_id,reaction.chat_title,reaction.problem],['👀','7','Captured name',false]);
+    assert.deepEqual(reactions.map(row=>[row.detail,row.state,row.error_code,row.problem]),
+      [['👍','failed','message_not_found',false],['👀','failed','reaction_not_allowed',false]],'kept in the records, never a problem');
     // A send drained once its chat is recorded holds the chat in its row.
     const known=record({at:ago(1),chat:group,thread:'7'});await write(known);
     assert.deepEqual(await sends.drain(root),{recorded:1,rejected:0});
@@ -160,7 +164,7 @@ test('send records drain once from the spool, list newest first with chat names,
     assert.equal(await sends.expire(now,0),0);assert.equal(await count(),rows.length);
     assert.equal(await sends.expire(now,14),1);
     assert.deepEqual((await sends.list(owner,{filter:'problems'})).records.map(row=>row.error_code),['server_error','timed_out']);
-    assert.equal(await sends.prune(new Date(Date.parse(ago(22)))),4);assert.equal(await sends.prune(new Date(Date.parse(ago(22)))),0,'a repeated pass is a no-op');
+    assert.equal(await sends.prune(new Date(Date.parse(ago(22)))),5);assert.equal(await sends.prune(new Date(Date.parse(ago(22)))),0,'a repeated pass is a no-op');
     assert.deepEqual((await sends.list(owner)).records.map(row=>row.at),[ago(5),ago(10),ago(15),ago(20)]);
     assert.equal(await sends.prune(new Date(now),2),2,'one batch is bounded');
 

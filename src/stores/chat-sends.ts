@@ -48,6 +48,9 @@ export const sendKinds=['reply','approved_send','approval_card','card_update','b
 export const sendStates=['sent','failed','uncertain','not_sent'] as const;
 /** Expected no-ops, a chat's own choice not to take reactions, and a leave that found Nocheh gone: listed, never counted as problems. */
 export const harmlessSendCodes=['message_not_modified','button_answer_expired','reaction_not_allowed','already_left'] as const;
+/** A reaction to a message that is gone, most often one its sender deleted before the reaction went (ADR-0310): listed,
+ *  never a problem. Another send to a missing message stays one. */
+export const harmlessReactionCodes=['message_not_found'] as const;
 /**
  * One send record. Version 2 (ADR-0252) names the app's chat, its thread (a Telegram topic, a Slack thread) and the
  * message as the app writes them, as text; version 1, which older front doors wrote, named the topic and message as
@@ -77,8 +80,9 @@ const recovered=(s:string)=>`(${s}.state IN ('failed','uncertain') AND ${s}.refe
   AND r.channel=${s}.channel AND r.chat IS NOT DISTINCT FROM ${s}.chat AND r.method=${s}.method AND ${sameSend('r.reference')}=${sameSend(`${s}.reference`)})
   OR ${s}.kind='leave' AND EXISTS (SELECT 1 FROM chat_state_events e WHERE e.event_id=substring(${s}.reference from '^leave:([a-f0-9]{64}):[a-f0-9]{32}$')
   AND e.action='leave' AND e.outcome='left')))`;
-const problem=(s:string)=>`(${s}.state IN ('failed','uncertain') AND coalesce(${s}.error_code,'') NOT IN (${harmlessSendCodes.map(code=>`'${code}'`).join(',')})
-  AND NOT ${recovered(s)})`;
+const codes=(list:readonly string[])=>list.map(code=>`'${code}'`).join(',');
+const problem=(s:string)=>`(${s}.state IN ('failed','uncertain') AND coalesce(${s}.error_code,'') NOT IN (${codes(harmlessSendCodes)})
+  AND NOT (${s}.kind='reaction' AND coalesce(${s}.error_code,'') IN (${codes(harmlessReactionCodes)})) AND NOT ${recovered(s)})`;
 const text=(value:unknown,pattern:RegExp)=>typeof value==='string'&&pattern.test(value);
 const integer=(value:unknown,min:number,max:number)=>Number.isSafeInteger(value)&&(value as number)>=min&&(value as number)<=max;
 /** A version 1 number as the text version 2 holds. */
