@@ -323,6 +323,10 @@ test('separated application captures through control outages, exposes owner repo
     await request('/internal/chats/leave',{id:'a'.repeat(64),chat_id:'-1009999999999'},401,credential);
     assert.deepEqual(await request('/internal/chats/leave',{id:'a'.repeat(64),chat_id:'-1009999999999'}),{valid:false});
     await request('/internal/chats/leave',{id:'a'.repeat(64)},400);
+    // The daily backup's clock: the owner's time zone, behind the service token only.
+    assert.deepEqual(await request('/internal/owner-time-zone'),{time_zone:'UTC'});
+    await request('/internal/owner-time-zone',undefined,401,credential);
+    refused(await request('/internal/owner-time-zone',undefined,403,agentKey));
     assert.equal((await request('/v1/exports/sources?limit=1')).format,'nocheh-sources-v1');
     assert.ok(Array.isArray((await request('/v1/workflows?limit=1')).workflows));
     assert.ok(Array.isArray((await request('/v1/workflows/health')).workers));

@@ -525,10 +525,11 @@ for this machine" (`machine_key_missing`), and from then on the machine shows Te
 failed, so no new job can ask for it: remove each machine, add it again and put its
 new public key on the machine.
 
-The dashboard also backs up automatically once a day, by default at 04:00 UTC,
-through the same path as System › Backups › Back up now. Settings › Privacy &
-data turns this off or sets the time, time zone and number of automatic backups
-kept (default 7). Older automatic backups are deleted; backups started by hand
+The dashboard also backs up automatically once a day, by default at 04:00 in the
+owner's time zone (Settings › General; UTC until set), through the same path as
+System › Backups › Back up now. Settings › Privacy & data turns this off or sets
+the time and number of automatic backups kept (default 7). While Nocheh cannot
+answer, the schedule uses the time zone it last read. Older automatic backups are deleted; backups started by hand
 are never deleted. A machine that was off at the set time backs up at the
 dashboard's next five-minute check, and a backup is skipped while free disk
 space is under twice the newest automatic backup (at least 1 GiB). Copies stay
