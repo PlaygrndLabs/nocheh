@@ -15,6 +15,12 @@ test('Members is its own page, right after Chats, and opens a member or the add 
  assert.equal(href('members',{add:'b'.repeat(64)}),'#members?add='+'b'.repeat(64));
 });
 
+test('Keys is its own page, right after Members',()=>{
+ assert.equal(pageIds.indexOf('keys'),pageIds.indexOf('members')+1);
+ assert.deepEqual(resolveRoute('#keys'),{page:'keys',hash:null});
+ assert.equal(href('keys'),'#keys');
+});
+
 test('links Nocheh already sent keep working, with their details',()=>{
  assert.deepEqual(resolveRoute('#inbox?kind=memory_access&decision=abc'),{page:'inbox',hash:null});
  assert.deepEqual(resolveRoute('#inbox?action=abc'),{page:'inbox',hash:null});

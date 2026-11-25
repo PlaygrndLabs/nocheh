@@ -22,6 +22,8 @@ import {accountIdFor,chatDirectory,chatIdFor,chatShortId,chats,conversationField
 import {memberIdFor} from '../src/members.js';
 import type {MemberGroup,MemberGroupRef,MemberItem,MemberList,MemberPerson} from '../src/member-wire.js';
 import {memberAddRequest,memberChangeRequest,memberRemoveRequest,memberSettingsRequest} from '../src/stores/member-api.js';
+import type {KeyList,KeyStopCounts,KeyStopResult} from '../src/key-wire.js';
+import {keyStopRequest} from '../src/stores/keys.js';
 import type {ChatState} from '../src/chat-wire.js';
 import {labeledPlaceholders,memberPrivateDailyLimitReply,memberReadFrame,memberReadTexts,membersLocalLaws,notAllowedPrivateReply,promptProblem,promptSchema,reminderTexts,scheduleNoticeTexts,sourceTexts} from '../src/prompts.js';
 import {matchesArchiveFilters} from '../src/archive-filters.js';
@@ -157,6 +159,29 @@ function memberRoute(route:string,body:unknown):unknown {
   for(const [chat,on] of Object.entries(groups??{}))member.switches.set(chat,on);
   memberRevision++;return {revision:memberRevision,member:memberItem(member)};
  });
+}
+/*
+ * The Keys list and "Stop everything now" (ADR-0307), in memory, with the real body check (src/stores/keys.ts): the owner
+ * with two keys open, then each member as storage lists them, Mira with one open. Stop ends them all and is kept as the
+ * last stop; the same operation id answers the same. The new agent login is a job like Apply: it restarts for a few
+ * seconds, goes back to the old login in the `login-rollback` scenario, waits for another task in `login-busy`, and in
+ * `login-lost` starts but loses its answer, so the page finds it in the job list.
+ */
+const keyOpen=new Map<string,number>([['owner',2],[previewMembers[0]!.id,1]]);
+const keyUse=new Map<string,string>([['owner',new Date(Date.now()-4*60000).toISOString()],[previewMembers[0]!.id,new Date(Date.now()-2*3600000).toISOString()]]);
+let keyStopped:({at:string}&KeyStopCounts)|null=null;
+const keyReceipts=new Map<string,KeyStopResult>();
+// The new agent login under way, if any.
+let agentLogin:any=null;
+function keyList():KeyList {
+ const person=(id:string)=>({open:keyOpen.get(id)??0,last_use:keyUse.get(id)??null});
+ return {people:[{person:'owner',name:null,username:null,state:'on',...person('owner')},
+  ...previewMembers.map(member=>({person:member.id,name:member.name,username:member.username,state:member.state==='paused'?'paused' as const:'on' as const,...person(member.id)}))],stopped:keyStopped};
+}
+function keyStop(body:unknown):KeyStopResult {
+ const request=keyStopRequest(body),seen=keyReceipts.get(request.operation_id);if(seen)return seen;
+ const counts={keys:[...keyOpen.values()].reduce((a,b)=>a+b,0),cards:1,follow_ups:0,runs:1,jobs:0,grants:0};keyOpen.clear();
+ const result={stopped_at:new Date().toISOString(),...counts};keyStopped={at:result.stopped_at,...counts};keyReceipts.set(request.operation_id,result);return result;
 }
 /** Past conversations of a notes profile, latest first, a page at a time as Hermes lists them: one titled after its chat
  * with its first message, one named only by its first message, and older ones to page through. */
@@ -847,6 +872,7 @@ const server=createServer((req,res)=>{void(async()=>{
   if(route==='/status')return json(res,200,{archive:{events:1842,artifacts:[{state:'ready',count:28}],dispatches:[{state:'done',count:86}],transcriptions:[{state:'done',count:12}],actions:[],managed_runs:[{event_id:id,state:'done',created_at:new Date().toISOString(),channel:'browser',profile,scope:'42'},{event_id:voiceId,state:'failed',error_code:'provider_timeout',created_at:new Date(Date.now()-86400000).toISOString(),channel:'scheduler',job_id:'morning-check',job_name:'Morning aurora check',profile,scope:'42'}]},guard_mode:'on',services:[]});
   if(route==='/settings')return json(res,200,settingsView(mode));
   if(route==='/members')return json(res,200,memberList());
+  if(route==='/keys')return json(res,200,keyList());
   if(route==='/telegram/identities')return json(res,200,{groups:[
     // Omar is a member carried from the lists before step 3 who never wrote: Telegram named him (member true), and he is
     // not seen in the group's own messages.
@@ -1234,6 +1260,13 @@ const server=createServer((req,res)=>{void(async()=>{
     if(own)Object.assign(own,next);else assignments.push(next);
    }
    return json(res,200,{chat_id:chat,state:body.state,project_id:projectId});}
+  if(route==='/keys/stop')return json(res,200,keyStop(body));
+  if(route==='/keys/agent-login'){if(applying||agentLogin||mode==='login-busy')throw new HttpError(409,'wait_for_active_jobs');
+   const job:any={id:randomUUID(),kind:'settings.agent_login',state:'running',step:'restarting',created_at:new Date().toISOString()};jobs.unshift(job);agentLogin=job;
+   if(mode==='login-rollback'){setTimeout(()=>{job.step='rolling_back';},1500);setTimeout(()=>{job.state='failed';job.error='operation_failed';job.result={status:'apply_failed',rolled_back:true};agentLogin=null;},3000);}
+   else setTimeout(()=>{job.state='complete';job.result={status:'applied'};agentLogin=null;},3000);
+   if(mode==='login-lost')throw new HttpError(502,'bad_gateway');
+   return json(res,202,job);}
   // The Members routes: each change at once, with its operation id (step 3).
   if(route==='/members'||route.startsWith('/members/')){const answer=memberRoute(route,body);if(answer)return json(res,200,answer);}
   // A topic is named by its group's Nocheh id and its number in Telegram, or by a topic link the server reads (ADR-0252).

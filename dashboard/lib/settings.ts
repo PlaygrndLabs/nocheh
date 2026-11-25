@@ -140,8 +140,9 @@ export function discardSettings() {
 
 const sleep = (ms: number) => new Promise(resolve => setTimeout(resolve, ms));
 
-type ApplyJob = {id: string; state: string; step?: string; created_at?: string; result?: any; error?: string};
-type ApplyOutcome = {job: ApplyJob; ended: 'finished' | 'too_long' | 'unreachable'};
+/** A job the dashboard follows to its end: a settings apply, or the new agent login of "Stop everything now". */
+export type ApplyJob = {id: string; state: string; step?: string; created_at?: string; result?: any; error?: string};
+export type ApplyOutcome = {job: ApplyJob; ended: 'finished' | 'too_long' | 'unreachable'};
 // The server bounds every apply step (each restart, a rollback and the memory
 // refresh), about 40 minutes at the very worst; past this the page stops waiting.
 const APPLY_LIMIT = 45 * 60_000;
@@ -151,25 +152,30 @@ const UNREACHABLE_LIMIT = 2 * 60_000;
 const settled = new Set<string>();
 let following: string | null = null;
 
-/** Waits for an apply to end, reporting its step, and never longer than the limits above. */
-async function followApply(job: ApplyJob, started: number): Promise<ApplyOutcome> {
-  following = job.id;
+/** Waits for an apply-like job to end, reporting each step it reaches, and never longer than the limits above. */
+export async function followJob(job: ApplyJob, started: number, onStep: (step: string) => void): Promise<ApplyOutcome> {
   let current = job;
   let answered = Date.now();
-  try {
-    while (['running', 'queued'].includes(current.state)) {
-      update({progress: {step: current.step || 'starting', started}});
-      if (Date.now() - started > APPLY_LIMIT) return {job: current, ended: 'too_long'};
-      await sleep(1500);
-      try {
-        current = await apiGet<ApplyJob>('/jobs/' + encodeURIComponent(job.id));
-        answered = Date.now();
-      } catch (error) {
-        if ((error as ApiError).status === 404) return {job: {...current, state: 'interrupted'}, ended: 'finished'};
-        if (Date.now() - answered > UNREACHABLE_LIMIT) return {job: current, ended: 'unreachable'};
-      }
+  while (['running', 'queued'].includes(current.state)) {
+    onStep(current.step || 'starting');
+    if (Date.now() - started > APPLY_LIMIT) return {job: current, ended: 'too_long'};
+    await sleep(1500);
+    try {
+      current = await apiGet<ApplyJob>('/jobs/' + encodeURIComponent(job.id));
+      answered = Date.now();
+    } catch (error) {
+      if ((error as ApiError).status === 404) return {job: {...current, state: 'interrupted'}, ended: 'finished'};
+      if (Date.now() - answered > UNREACHABLE_LIMIT) return {job: current, ended: 'unreachable'};
     }
-    return {job: current, ended: 'finished'};
+  }
+  return {job: current, ended: 'finished'};
+}
+
+/** Waits for an apply to end, showing its step in the save controls. */
+async function followApply(job: ApplyJob, started: number): Promise<ApplyOutcome> {
+  following = job.id;
+  try {
+    return await followJob(job, started, step => update({progress: {step, started}}));
   } finally {
     following = null;
     settled.add(job.id);
