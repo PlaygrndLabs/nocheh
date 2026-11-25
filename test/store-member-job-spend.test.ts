@@ -14,6 +14,7 @@ import type {AssistantPolicy} from '../src/assistant-policy.js';
 import {chatDirectory,chatIdFor,installChatsForTest} from '../src/chats.js';
 import {NG2,NG2_OLD_TG,NG2_TG,NG_GROUP_IDS,OWNER,fixtureChats} from './fixture-groups.js';
 import {grantMembers} from './fixture-member-grants.js';
+import {setOwnerTimeZone} from '../src/stores/task-settings.js';
 
 test('a member\'s job cap is to the cent; members\' daily job spend gets one notice, pauses at the high mark, and a pause only holds jobs members approved',
  {skip:process.env.NOCHEH_STORES_FIXTURE!=='1',timeout:240000},async()=>{
@@ -125,6 +126,7 @@ test('a member\'s job cap is to the cent; members\' daily job spend gets one not
     assert.equal((await tick(asked.id)).state,'completed');
 
     // A member approves their own job: its spend counts, and the owner gets one notice with a Pause button at the first mark.
+    await setOwnerTimeZone(stores.control,'UTC');
     const own=await s.jobs.start(await actor((await message('own')).id),{title:'Own read',instruction:'Read the made-up receipts.'});
     await s.actionCommands.offer('background',own);
     assert.equal(last('card').chat_id,group,'the card stays in the group');
@@ -137,16 +139,19 @@ test('a member\'s job cap is to the cent; members\' daily job spend gets one not
     assert.equal(notices.length,1);
     const spend=notices[0]!;
     assert.equal(spend.chat_id,'123');assert.deepEqual(spend.buttons,[{text:'⏸ Pause member jobs',callback:'njp'}]);
-    assert.ok(spend.text.startsWith('💸 Jobs that members approved themselves spent $1.20 today (UTC), past your notice mark of $1.00.\n• Member in a group: $1.20\n'),spend.text);
-    assert.match(spend.text,/At \$3\.00 today, member jobs pause by themselves until 00:00 UTC\.$/);
+    assert.ok(spend.text.startsWith('💸 Jobs that members approved themselves spent $1.20 since 00:00 UTC, past your notice mark of $1.00.\n• Member in a group: $1.20\n'),spend.text);
+    assert.match(spend.text,/At \$3\.00, member jobs pause by themselves until 00:00 UTC\.$/);
     await tick(own.id);assert.equal(notices.length,1,'one notice a day at that mark');
     assert.equal(await s.jobs.members.pause(),null,'nothing changes unless the owner taps');
 
-    // Past the high mark member jobs pause by themselves until 00:00 UTC, with one notice that has Resume.
+    // Past the high mark member jobs pause by themselves until the UTC day ends, with one notice that has Resume; it
+    // names that moment on the owner's clock.
+    await setOwnerTimeZone(stores.control,'Asia/Kolkata');
     await beat(reading,counts(1600000));await tick(own.id);
     assert.equal(notices.length,2);
     const pause=notices[1]!;
-    assert.ok(pause.text.startsWith('⏸ Member jobs are paused until 00:00 UTC: jobs that members approved themselves spent $3.20 today, past your high mark of $3.00.'),pause.text);
+    assert.ok(pause.text.startsWith('⏸ Member jobs are paused until 05:30: jobs that members approved themselves spent $3.20 since the last 05:30, past your high mark of $3.00.'),pause.text);
+    await setOwnerTimeZone(stores.control,'UTC');
     assert.deepEqual(pause.buttons,[{text:'▶\ufe0f Resume member jobs',callback:'nju'}]);
     const held=await s.jobs.members.pause(),midnight=new Date();midnight.setUTCHours(24,0,0,0);
     assert.deepEqual([held?.by,held?.until],['auto',midnight.toISOString()]);
@@ -215,7 +220,7 @@ test('a member\'s job cap is to the cent; members\' daily job spend gets one not
     oldGateway=true;
     settings=await s.jobs.saveSettings(owner,{...(await s.jobs.settings()),member_notice_usd:3.5,member_pause_usd:1000});
     await tick(own.id);
-    assert.equal(notices.at(-1)!.buttons,undefined);assert.match(notices.at(-1)!.text,/spent \$4\.00 today \(UTC\), past your notice mark of \$3\.50\./);
+    assert.equal(notices.at(-1)!.buttons,undefined);assert.match(notices.at(-1)!.text,/spent \$4\.00 since 00:00 UTC, past your notice mark of \$3\.50\./);
     oldGateway=false;
 
     // A pause notice that did not go is sent on the tick of a member job it holds, when no member job runs any more.
@@ -238,7 +243,7 @@ test('a member\'s job cap is to the cent; members\' daily job spend gets one not
     assert.equal((await tick(waits.id)).state,'waiting');
     assert.deepEqual([(await job(waits.id)).held,await step(waits.id)],[true,undefined],'held: no run starts');
     assert.equal(notices.length,told+1,'the held job\'s tick sends the pause notice');
-    assert.ok(notices.at(-1)!.text.startsWith('⏸ Member jobs are paused until 00:00 UTC: jobs that members approved themselves spent $4.00 today, past your high mark of $3.90.'),notices.at(-1)!.text);
+    assert.ok(notices.at(-1)!.text.startsWith('⏸ Member jobs are paused until 00:00 UTC: jobs that members approved themselves spent $4.00 since the last 00:00 UTC, past your high mark of $3.90.'),notices.at(-1)!.text);
     assert.deepEqual(notices.at(-1)!.buttons,[{text:'▶\ufe0f Resume member jobs',callback:'nju'}]);
     assert.equal((await paused()).pause_sent,true);
     await tick(waits.id);assert.equal(notices.length,told+1,'it is sent once');
