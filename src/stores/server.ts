@@ -99,6 +99,11 @@ export function storageServer(s:StorageServices,config:Settings,call:RuntimeCall
       if(owner)zones[owner]=zone;
       return json(res,200,{zones});
     }
+    if(req.method==='GET'&&path==='/internal/owner-time-zone') {
+      // The dashboard's daily backup runs at its set time in the owner's time zone (Settings › General), like the rest.
+      authorize(req,config.token);
+      return json(res,200,{time_zone:await ownerTimeZone(s.stores.control)});
+    }
     if(req.method==='POST'&&path==='/internal/spending-pause') {
       // The dashboard's spending check (ADR-0298): the month the monthly limit was reached, or null once it is not.
       // The security service reads it before each model call.

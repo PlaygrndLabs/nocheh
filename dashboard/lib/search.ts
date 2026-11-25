@@ -34,6 +34,7 @@ const text = (value: string): SearchTarget => ({text: value});
 
 /** Settings by plain name. Each target is checked in a real browser (test/dashboard-pages.browser.mjs). */
 const settings: Setting[] = [
+  ['Your time zone', 'general', null, id('owner-time-zone'), 'timezone clock time zone'],
   ['Telegram on/off', 'telegram', null, id('telegram-enabled'), 'bot connect turn on off'],
   ['Bot token', 'telegram', null, id('telegram-token'), 'telegram key botfather'],
   ['Your Telegram user ID', 'telegram', null, id('telegram-owner'), 'owner account'],
@@ -78,7 +79,6 @@ const settings: Setting[] = [
   ['Built-in instructions', 'assistant', 'instructions', text('Built-in instructions'), 'prompts wording texts'],
   ['Task statuses', 'tasks', null, text('Statuses'), 'to do in progress done'],
   ['Task priorities', 'tasks', 'priorities', text('Priorities'), 'urgent high low'],
-  ['Time zone', 'tasks', 'priorities', text('Time zone'), 'timezone clock'],
   ['Task columns', 'tasks', 'columns', text('Your columns'), 'fields'],
   ['Machine control', 'machines', null, id('machine-control'), 'vm ssh computer'],
 ];

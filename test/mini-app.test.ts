@@ -41,13 +41,13 @@ test('the mini app reaches only home, Inbox decisions, tasks with their chats an
     ['POST','/tools/telegram-decision'],['POST','/tools/resolve'],['POST','/tools/telegram-resolve'],['POST','/memory-access/requests/'+id+'/decide'],['POST','/knowledge/proposals/'+id+'/undo'],
     ['GET','/monitoring'],['POST','/workflows/retry-failed'],['GET','/entities/suggestions'],['POST','/entities/'+id+'/fold'],['POST','/entities/'+id+'/split'],
     // A task's move names who will see it first (ADR-0248).
-    ['GET','/tasks/'+id+'/audience'],
-    // The owner's own time zone, from the Schedules tab (ADR-0282).
-    ['POST','/tasks/time-zone']])
+    ['GET','/tasks/'+id+'/audience']])
     assert.equal(miniAppRoute(method!,route!),true,method+' '+route);
   for(const [method,route] of [['POST','/settings'],['POST','/settings/apply'],['GET','/database-browser'],['POST','/shutdown'],['POST','/tools/revoke'],
     ['GET','/storage'],['POST','/memory/longterm/fresh-start'],['GET','/tasks/'+id+'/../../settings'],['POST','/entities/'+id+'/merge'],
-    ['POST','/workflows/'+id+'/cancel'],['GET','/workflows'],['POST','/monitoring'],['POST','/tasks/'+id+'/audience'],['POST','/tasks/settings'],['GET','/tasks/time-zone']])
+    ['POST','/workflows/'+id+'/cancel'],['GET','/workflows'],['POST','/monitoring'],['POST','/tasks/'+id+'/audience'],['POST','/tasks/settings'],['GET','/tasks/time-zone'],
+    // The owner's time zone is set in the dashboard's Settings › General only (ADR-0312).
+    ['POST','/tasks/time-zone']])
     assert.equal(miniAppRoute(method!,route!),false,method+' '+route);
 });
 

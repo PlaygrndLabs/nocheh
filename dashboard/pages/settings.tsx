@@ -10,6 +10,7 @@ import {SpeedSettings, speedKeys} from './settings/speed';
 import {PrivacySettings, privacyKeys} from './settings/privacy';
 import {AssistantSettings} from './settings/assistant';
 import {TaskSettingsPanel} from './settings/tasks';
+import {GeneralSettings} from './settings/general';
 import {MachineSettings} from './settings/machines';
 import {AdvancedSettings, advancedKeys} from './settings/advanced';
 import {loadSettings} from '../lib/settings';
@@ -40,7 +41,8 @@ export default function Settings() {
   const editedIn = new Set(edited.map(sectionOf));
 
   let body: React.ReactNode;
-  if (view === 'assistant') body = <AssistantSettings />;
+  if (view === 'general') body = <GeneralSettings />;
+  else if (view === 'assistant') body = <AssistantSettings />;
   else if (view === 'tasks') body = <TaskSettingsPanel />;
   else if (view === 'machines') body = <MachineSettings />;
   else if (!settings.data)

@@ -186,7 +186,7 @@ export function issues(m: any): Issue[] {
       tone: 'bad',
       text: 'Telegram isn’t receiving messages',
       detail: telegramReason(m.runtime?.status?.telegram_details?.error_code) || state?.label,
-      link: href('settings'),
+      link: href('settings', {view: 'telegram'}),
       action: 'Telegram settings',
     });
   }

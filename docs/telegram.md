@@ -96,7 +96,7 @@ Every archive search hit and every message the assistant opens names who wrote
 it, where and when, in a tag Nocheh's code builds
 ([ADR-0261](adr/0261-recalled-facts-and-search-hits-name-their-source.md)):
 `“Bob” (@bob) · this chat · 2026-11-03 14:12 UTC` in a group, and in the
-owner's own chats the owner's Settings › Tasks time zone and, for someone the
+owner's own chats the owner's time zone (Settings › General) and, for someone the
 owner renamed in People, `saved as “Brother”`. In a group the owner's own
 messages read by the owner's Telegram name, with `by=owner`; a member never
 reads another group, the owner's private chat, a People name, a topic name only

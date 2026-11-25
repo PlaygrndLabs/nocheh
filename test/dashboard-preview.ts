@@ -284,7 +284,7 @@ let settingsChanges:Record<string,unknown>={};
 let applying:any=null;
 // Saved settings that work at once, as LIVE in tools/operations/installation/settings.py; any other saved setting waits
 // for Apply, as on the real server, so the dashboard offers it. An apply that never finished leaves it waiting.
-const liveSettings=new Set(['NOCHEH_BACKUP_SCHEDULE','NOCHEH_BACKUP_TIME','NOCHEH_BACKUP_TIME_ZONE','NOCHEH_BACKUP_KEEP','TELEGRAM_PROBLEM_NOTICES','NOCHEH_MONTHLY_LIMIT_USD',
+const liveSettings=new Set(['NOCHEH_BACKUP_SCHEDULE','NOCHEH_BACKUP_TIME','NOCHEH_BACKUP_KEEP','TELEGRAM_PROBLEM_NOTICES','NOCHEH_MONTHLY_LIMIT_USD',
   'NOCHEH_OFFSITE','NOCHEH_OFFSITE_PROVIDER','NOCHEH_OFFSITE_ENDPOINT','NOCHEH_OFFSITE_BUCKET','NOCHEH_OFFSITE_REGION','NOCHEH_OFFSITE_ACCESS_KEY_ID',
   'NOCHEH_OFFSITE_SECRET_ACCESS_KEY','NOCHEH_OFFSITE_PASSPHRASE','NOCHEH_OFFSITE_KEEP']);
 let applyPending=false;

@@ -42,7 +42,6 @@ export const settingLabels: Record<string, string> = {
   NOCHEH_HERMES_JOURNAL_RETENTION_DAYS: 'Keep delivery logs',
   NOCHEH_BACKUP_SCHEDULE: 'Automatic backups',
   NOCHEH_BACKUP_TIME: 'Backup time',
-  NOCHEH_BACKUP_TIME_ZONE: 'Backup time zone',
   NOCHEH_BACKUP_KEEP: 'Automatic backups kept',
   NOCHEH_OFFSITE: 'Off-site copies',
   NOCHEH_OFFSITE_PROVIDER: 'Off-site storage',
