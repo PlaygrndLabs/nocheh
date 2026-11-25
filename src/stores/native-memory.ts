@@ -1334,7 +1334,11 @@ export class NativeMemoryRepository {
       // what is missing, and the stores count it for the owner's notice. Any other failed ask fails the recall, as before.
       const responses=await Promise.all(asked.map(item=>{
         const ask=this.engine.ask(id,item.peer,String(question),{sessions,...wall?{wall}:{},evidence:true});
-        return item.peer===materialPeer?ask.then(response=>typeof response.text==='string'?response:null,()=>null):ask;
+        // Why, by code and status only, so a failed ask can be traced (the count alone says nothing of the cause).
+        const failed=(error:unknown)=>{console.warn(JSON.stringify({event:'memory_forwards_ask_failed',engine:this.engine.id,
+          code:error instanceof HttpError?error.code:error instanceof Error&&/^[a-z_]{3,80}$/.test(error.message)?error.message:'memory_forwards_ask_error',
+          status:error instanceof HttpError?error.status:null,question_length:String(question).length}));return null;};
+        return item.peer===materialPeer?ask.then(response=>typeof response.text==='string'?response:failed(new HttpError(502,'memory_forwards_no_text')),failed):ask;
       }));
       const read=asked.flatMap((item,index)=>responses[index]?[{item,response:responses[index]!}]:[]);
       const forwards=asked.some(item=>item.peer===materialPeer)?read.some(({item})=>item.peer===materialPeer):null;
