@@ -23,7 +23,8 @@ EMPTY=(None,'',False,[],{})
 RUN_REFUSED=("Nocheh runs each schedule at its own time and sends the result to this chat; it cannot run one inside this "
              "reply. To change when it runs, update its schedule.")
 OPTION_REFUSED="Nocheh runs a schedule only as a prompt on its schedule, sent to this chat. Leave out: {names}."
-UNBOUND="Schedules can be set only from the owner's own message in their private chat, or a member's own in theirs."
+UNBOUND=("Schedules can be set only from the owner's own typed message in their private chat, or a member's own in theirs, "
+         "not from a forwarded message or one answered later. Ask them to send what they want as their own message.")
 ZONE_REFUSED="{zone} is not a time zone name. Use one such as Europe/Berlin, or leave it out for the owner's own."
 LIMIT="This chat already has {count} schedules, the most allowed. Remove one first."
 # What a schedule Nocheh saved paused says instead of its note (ADR-0294).

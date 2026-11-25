@@ -102,7 +102,7 @@ class ProfileConfigurationTests(unittest.TestCase):
                                    'compression': {'threshold_tokens': 5000, 'enabled': True}}, 'reply-model')
                 self.assertEqual(config['compression'], {'threshold_tokens': 100000, 'enabled': True}, 'the threshold is kept over the YAML')
                 self.assertEqual(config['model'], {'provider': provider, 'default': 'reply-model'})
-                self.assertEqual(config['prompt_caching'], {'cache_ttl': '5m'})
+                self.assertEqual(config['prompt_caching'], {'cache_ttl': 'auto'})
                 # One-shot helper calls keep the broker's chat route.
                 self.assertEqual(config['auxiliary'], {task: {'provider': 'openai', 'model': 'reply-model'}
                                                        for task in ('session_search', 'compression', 'title_generation')})

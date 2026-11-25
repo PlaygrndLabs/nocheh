@@ -167,6 +167,56 @@ class MemoryEvidenceTests(unittest.TestCase):
         self.assertEqual(chat[0],{'role':'system','content':'instructions'});self.assertEqual(chat[2:],history)
         self.assertTrue(chat[1]['content'].startswith(evidence.PREFIX))
 
+    def test_a_replys_evidence_follows_its_own_message_so_the_conversation_before_stays_cached(self):
+        # ADR-0307: on the Messages API a reply's evidence goes right after the turn's own message, after Hermes's
+        # cache mark on it. The next turn sends the same conversation, that message included, byte for byte.
+        def call(memory,payload,text,anthropic=True,placement='after'):
+            with patch.multiple(evidence,_active=True,_native=[],_recalled={'memory':memory},_placement=placement,
+                                _anchor=evidence.anchor(text) if placement=='after' else None):
+                return evidence.inject(copy.deepcopy(payload),anthropic)
+        def text(n):return f'message {n}\n\n[Archive source: nocheh:event:e{n}]'
+        system=[{'type':'text','text':'instructions'}]
+        one={'role':'user','content':[{'type':'text','text':text(1),'cache_control':{'type':'ephemeral'}}]}
+        first=call('turn one',{'system':system,'messages':[one]},text(1))
+        self.assertEqual(first['system'],system)
+        self.assertEqual(first['messages'][0]['content'][0],one['content'][0],'the turn\'s message and its cache mark come first')
+        self.assertTrue(first['messages'][0]['content'][1]['text'].startswith(evidence.PREFIX))
+        self.assertNotIn('cache_control',first['messages'][0]['content'][1],'the evidence is after the mark, never under one')
+        # The tool loop: the evidence stays after the turn's message; tool results come after it, unchanged.
+        loop=[{'role':'assistant','content':[{'type':'tool_use','id':'c','name':'f','input':{}}]},
+              {'role':'user','content':[{'type':'tool_result','tool_use_id':'c','content':'result'}]}]
+        again=call('turn one',{'system':system,'messages':[one,*loop]},text(1))
+        self.assertEqual(again['messages'][0],first['messages'][0]);self.assertEqual(again['messages'][1:],loop)
+        # The next turn, with new memory: the conversation up to and including the earlier message is what was sent
+        # before, so the cache reads it; the new evidence follows the new message.
+        stored={'role':'user','content':text(1)}
+        answer={'role':'assistant','content':[{'type':'text','text':'answer'}]}
+        two={'role':'user','content':[{'type':'text','text':text(2)}]}
+        second=call('turn two',{'system':system,'messages':[stored,answer,two]},text(2))
+        self.assertEqual(second['messages'][:2],[stored,answer])
+        self.assertEqual(second['messages'][2]['content'][0],two['content'][0])
+        self.assertEqual(json.loads(second['messages'][2]['content'][1]['text'][len(evidence.PREFIX):])['entries'][0]['content'],{'memory':'turn two'})
+        # A plain string message, and one with a picture: the evidence still follows it.
+        bare=call('m',{'messages':[{'role':'user','content':text(3)}]},text(3))['messages'][0]['content']
+        self.assertEqual(bare[0],{'type':'text','text':text(3)});self.assertTrue(bare[1]['text'].startswith(evidence.PREFIX))
+        picture=[{'type':'text','text':text(4)},{'type':'image','source':{'type':'base64','media_type':'image/png','data':'AA=='}}]
+        shown=call('m',{'messages':[{'role':'user','content':picture}]},text(4))['messages'][0]['content']
+        self.assertEqual(shown[:2],picture);self.assertTrue(shown[2]['text'].startswith(evidence.PREFIX))
+        # Without the turn's message (a compaction summed it up) or its source line, the evidence goes first again.
+        for anchor_text in (text(9),'no source line'):
+            lost=call('m',{'messages':[{'role':'user','content':'summary'}]},anchor_text)['messages'][0]['content']
+            self.assertTrue(lost[0]['text'].startswith(evidence.PREFIX));self.assertEqual(lost[1],{'type':'text','text':'summary'})
+        # The OpenAI-compatible route keeps its own message before the conversation, whatever the placement.
+        chat=call('m',{'messages':[{'role':'system','content':'instructions'},{'role':'user','content':text(5)}]},text(5),anthropic=False)['messages']
+        self.assertTrue(chat[1]['content'].startswith(evidence.PREFIX));self.assertEqual(chat[2],{'role':'user','content':text(5)})
+
+    def test_the_turns_own_source_line_is_the_last_one_and_placement_is_checked(self):
+        self.assertEqual(evidence.anchor('quoted [Archive source: nocheh:event:old]\nnew\n\n[Archive source: nocheh:event:new]'),
+                         '[Archive source: nocheh:event:new]')
+        self.assertIsNone(evidence.anchor('no line'));self.assertIsNone(evidence.anchor(None))
+        with self.assertRaises(ValueError):evidence.install(None,{},'last')
+        self.assertFalse(evidence._active)
+
     def test_native_rebuild_refreshes_evidence_and_missing_transport_fails_closed(self):
         from agent import system_prompt,context_compressor
         original=context_compressor.SUMMARY_PREFIX

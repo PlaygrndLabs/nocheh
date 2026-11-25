@@ -118,6 +118,11 @@ test('a member\'s own schedules: captured only with Personal assistant on, run a
     await stores.control.query('UPDATE member_directory_state SET member_schedules=2 WHERE singleton');
     assert.equal((await scheduleTurn(live,member)).limit,2);
     assert.equal((await scheduleTurn(live,{...member,scope:MEMBER_NG_CHAT,space:MEMBER_NG_CHAT} as any)).allowed,false,'only her own chat');
+    assert.notEqual((await scheduleTurn(live,{...member,scope:MEMBER_NG_CHAT,space:MEMBER_NG_CHAT} as any)).offered,true,'nor offered there');
+    // A forward in her chat may set none, but her chat still offers schedules, so her replies keep the same tools (ADR-0307).
+    const forwardedLive={...live,stores:{...live.stores,archive:{query:async()=>({rows:[{payload:Buffer.from(JSON.stringify({message:{message_id:1,forward_origin:{type:'hidden_user'},text:'x'}}))}]})} as any}};
+    const declined=await scheduleTurn(forwardedLive,member);
+    assert.deepEqual([declined.allowed,declined.offered,(await scheduleTurn(live,member)).offered],[false,true,true]);
     // Set by asking (ADR-0290): the allowed turn leaves a turn grant, and Hermes's post from inside it records the schedule
     // as hers, within her cap, with its message in her chat once. Without the grant, or past her cap, nothing is recorded.
     const profile='nocheh-'+digest(MEMBER_GP_CHAT).slice(0,24),announced:unknown[]=[];
@@ -233,6 +238,7 @@ test('a member\'s own schedules: captured only with Personal assistant on, run a
     await stores.control.query('UPDATE members SET assistant=false WHERE id=$1',[MEMBER_GP_ID]);
     restore();restore=installMembersForTest(fixtureMemberDirectory());
     assert.equal((await scheduleTurn(live,member)).allowed,false);
+    assert.notEqual((await scheduleTurn(live,member)).offered,true,'her chat no longer has schedules');
     await assert.rejects(capture(MEMBER_GP_CHAT),refusedProfile);
     assert.equal(seen.length,1,'nothing more ran');
   } finally {restore();await stores.close();await rm(root,{recursive:true,force:true});}

@@ -71,10 +71,12 @@ SCHEDULE_TOOLSETS=TURN_TOOLSETS+['cronjob']
 
 
 def schedule_turn(body,profile,review=False,background=False,box=False,machine=False,answer=False,member=False,member_read=False):
-    """Whether this turn offers Hermes's schedule tool: the owner's own live Telegram turn, or a member's own in their
-    private chat (members' schedules), isolated, with the chat's schedule store mounted, and Nocheh's word that the
-    message is the owner's or that member's own (not forwarded) and, for a member, that they have Personal assistant on.
-    Fails closed."""
+    """Whether this turn offers Hermes's schedule tool: a Telegram turn in the owner's private chat, or in a member's
+    own with Personal assistant on (members' schedules), isolated, with the chat's schedule store mounted, on Nocheh's
+    word that the chat has schedules. The tool may set one only when Nocheh also says the message is the owner's or that
+    member's own, live and not forwarded: only then is the schedule gate bound, and an unbound gate refuses every call.
+    Offering it in every such turn keeps the reply's tools and instructions the same from message to message, and so the
+    prompt cache (ADR-0307). Fails closed."""
     # Exactly one of the two: the owner's own turn, or a member's own (never a member flag on an owner's turn).
     if ((body.get('owner') is True)==bool(member) or body.get('channel','telegram')!='telegram' or review or background or box or machine
             or answer or member_read or os.environ.get('NOCHEH_ISOLATED_TURN')!='1'):return False
@@ -87,12 +89,13 @@ def schedule_turn(body,profile,review=False,background=False,box=False,machine=F
         from .archive_tools import request
         rules=request('/v1/schedules/turn',{})
     except Exception:return False
-    if not isinstance(rules,dict) or rules.get('allowed') is not True:return False
-    # Where Nocheh records what this turn sets (ADR-0290): the chat's logical profile and the chat itself.
-    if not isinstance(rules.get('profile'),str) or not re.fullmatch(r'nocheh-[a-f0-9]{24}',rules['profile']):return False
-    if not isinstance(rules.get('scope'),str) or not 0<len(rules['scope'])<=64:return False
-    from services.hermes import schedule_gate
-    schedule_gate.bind(rules.get('time_zone'),rules.get('limit'),rules.get('count'),profile=rules['profile'],scope=rules['scope'],home=profile)
+    if not isinstance(rules,dict) or rules.get('offered') is not True and rules.get('allowed') is not True:return False
+    if rules.get('allowed') is True:
+        # Where Nocheh records what this turn sets (ADR-0290): the chat's logical profile and the chat itself.
+        if not isinstance(rules.get('profile'),str) or not re.fullmatch(r'nocheh-[a-f0-9]{24}',rules['profile']):return False
+        if not isinstance(rules.get('scope'),str) or not 0<len(rules['scope'])<=64:return False
+        from services.hermes import schedule_gate
+        schedule_gate.bind(rules.get('time_zone'),rules.get('limit'),rules.get('count'),profile=rules['profile'],scope=rules['scope'],home=profile)
     # Hermes offers its schedule tool only in a messaging gateway's session, which this turn is.
     os.environ['HERMES_GATEWAY_SESSION']='1'
     return True
@@ -403,7 +406,10 @@ def run(body, emit=None, relay=None, feed=None):
     from . import memory_evidence
     placement=body.get('memory_context','legacy')
     if placement not in ('legacy','evidence'):raise ValueError('invalid_memory_context')
-    restore_evidence=memory_evidence.install(memory if not review else None,body.get('note_sources') or {}) if placement=='evidence' else lambda:None
+    # A chat's replies keep one session, so their evidence goes after the turn's own message, where it leaves the
+    # conversation before it to the prompt cache (ADR-0307). Reviews, schedules and jobs each run once and keep it first.
+    after='after' if not (review or background) and body.get('channel','telegram') in ('telegram','browser') else 'first'
+    restore_evidence=memory_evidence.install(memory if not review else None,body.get('note_sources') or {},after,body['text']) if placement=='evidence' else lambda:None
     if placement=='evidence':long_term='\n'+prompt('memory.evidence')
     schedules=schedule_turn(body,profile,review,background,box,machine,answer,member,member_read)
     if background:
