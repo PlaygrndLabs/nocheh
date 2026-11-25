@@ -315,6 +315,11 @@ test('only the owner\'s own request in their private chat or an active project\'
     // Notion only for pages its card named: this card named none, so every read is refused, and never offered as a card.
     const notionRead=await read(a.credential,'/v1/tools/propose',{kind:'mcp',arguments:{connection:'notion',tool:'notion-search',input:{query:'walnut'}}});
     assert.deepEqual([notionRead.status,notionRead.body.error],[403,'notion_page_not_on_card']);
+    // No command, browser or other service either: its run makes no card its job's card did not show (ADR-0306).
+    for(const proposal of [{kind:'shell',arguments:{command:'printf made-up'}},{kind:'browser',arguments:{url:'https://example.com/'}}]) {
+      const refused=await read(a.credential,'/v1/tools/propose',proposal);
+      assert.deepEqual([refused.status,refused.body.error],[403,'machine_job_reads_card_only'],proposal.kind);
+    }
     assert.equal((await s.machines.list(owner)).machines.find(row=>row.id===build)!.jobs,1,'its running job is counted');
     // machineJob: the run of a running job the owner asked for and approved, while the switch, the machine and its pin hold.
     const reference={store:'control',id:a.step},profile='job-'+asked.id.slice(0,24),turn={job:asked.id,logical_profile:profile};

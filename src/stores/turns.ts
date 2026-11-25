@@ -28,10 +28,11 @@ export class RuntimeTurnRepository implements BrokerStorage {
   constructor(readonly access:SourceAccessRepository,readonly prepared:PreparedContextRepository){}
   /** The keys passes are checked against (ADR-0305). */
   get keys():OneTimeKeyRepository {return new OneTimeKeyRepository(this.access.stores.control);}
-  /** A pass's one-time key is open (ADR-0305): every request that brings a pass, before anything else is read for it. */
+  /** A pass's one-time key is open (ADR-0305): every request that brings a pass, before anything else is read for it.
+   * The request is counted on the key's row (ADR-0306). */
   async assertKey(principal:Reader):Promise<void> {
     if(principal.admin)return;
-    await this.keys.assertOpen(principal);
+    await this.keys.use(principal);
   }
   async assertAudience(principal:Reader):Promise<GuardBinding> {
     // A reader made from a pass is checked against its key every time, so a key closed mid-turn ends the turn's reads,
@@ -77,6 +78,8 @@ export class RuntimeTurnRepository implements BrokerStorage {
   }
   /** An answer reader's read set from its record, for the broker (ADR-0249). */
   bindReads(principal:Reader):Promise<Reader> {return this.access.bindReads(principal);}
+  /** A machine job's run's reads from its job's row, for the broker (ADR-0306). */
+  bindMachine(principal:Reader):Promise<Reader> {return this.access.bindMachine(principal);}
   async close(id:string):Promise<void> {
     await this.access.stores.control.query("UPDATE runtime_turns SET state='closed',closed_at=now() WHERE id=$1 AND state='open'",[id]);
   }
