@@ -4827,7 +4827,6 @@ class ProductScenarios(Scenarios):
         # Personal assistant off it does not run. The member deletes it with the Delete button on its notice.
         person, number = self.fresh_person(), str(self.f.ids())
         mark, name = 'MEMBERSCHED'+number, 'Member reminder '+number
-        chat = self.f.chat(person)
         item = self.add_member(person, (GROUP,))
         job = None
         try:
@@ -4837,6 +4836,8 @@ class ProductScenarios(Scenarios):
             known, before = {row['id'] for row in self.proposals()}, len(self.f.sent())
             self.private_turn(person, 'هر دقیقه یادم بنداز '+self.schedule_request({'action': 'create', 'name': name, 'prompt': 'یادآوری '+mark,
                                                                                     'schedule': 'every 1m', 'repeat': 3}))
+            # Their private chat is in Nocheh's chat list once they wrote to it.
+            chat = self.f.chat(person)
             job = next((row for row in self.schedules_listed() if row['name'] == name), None)
             self.gate('schedule_set_in_member_chat', job is not None and job['scope'] == chat and job['deliver'] == 'telegram',
                       job=job and {key: job.get(key) for key in ('id', 'scope', 'deliver')})
