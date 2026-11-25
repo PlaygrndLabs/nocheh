@@ -156,6 +156,10 @@ test('the Members routes check each body\'s shape before the repository sees it'
   assert.deepEqual(memberChangeRequest({operation_id:'op-3',changes:{state:'paused',talk:false,jobs:true,post:false,tools:true,tasks:'read',groups:{[GP3]:true}}}),
     {operation_id:'op-3',changes:{state:'paused',talk:false,jobs:true,post:false,tools:true,tasks:'read',groups:{[GP3]:true}}});
   assert.deepEqual(memberChangeRequest({operation_id:'op-4',changes:{groups:{[NG2]:false}}}),{operation_id:'op-4',changes:{groups:{[NG2]:false}}});
+  // A member's own time zone from the owner: a zone, or null or empty for the owner's (ADR-0281).
+  assert.deepEqual(memberChangeRequest({operation_id:'op-tz',changes:{time_zone:'Asia/Kolkata'}}).changes,{time_zone:'Asia/Kolkata'});
+  assert.deepEqual(memberChangeRequest({operation_id:'op-tz',changes:{time_zone:''}}).changes,{time_zone:null});
+  for(const zone of ['Mars/Base','../etc',3])assert.throws(()=>memberChangeRequest({operation_id:'op',changes:{time_zone:zone}}),{code:'invalid_time_zone'},String(zone));
   for(const [body,code] of [[{operation_id:'op',changes:{}},'member_change_empty'],[{operation_id:'op',changes:{groups:{}}},'member_change_empty'],
     [{operation_id:'op',changes:{state:'removed'}},'invalid_member_request'],[{operation_id:'op',changes:{tasks:'none'}},'invalid_member_request'],
     [{operation_id:'op',changes:{talk:'on'}},'invalid_member_request'],[{operation_id:'op',changes:{owner:true}},'unknown_member_field'],

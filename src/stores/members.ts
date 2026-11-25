@@ -126,7 +126,7 @@ export async function memberView(db:Db,owner:string|null,only:string|null=null,w
   const groups=new Map<string,GroupRow>(groupRows.map(row=>[row.id as string,{chat_id:row.id,title:chatLabel(row,row.username,row.external_id),state:row.state}]));
   const isIn=(group:GroupRow|undefined)=>!!group&&!['left','removed','archived'].includes(group.state);
   const ref=(group:GroupRow):MemberGroupRef=>({chat_id:group.chat_id,title:group.title,state:group.state});
-  const memberRows=(await db.query(`SELECT id,state,group_talk,group_jobs,group_post_other,group_tools,tasks,private_chat,reminders,assistant,added_at FROM members
+  const memberRows=(await db.query(`SELECT id,state,group_talk,group_jobs,group_post_other,group_tools,tasks,private_chat,reminders,assistant,time_zone,added_at FROM members
     WHERE $1::text IS NULL OR id=$1 ORDER BY added_at,id`,[only])).rows;
   const accountRows=(await db.query(`SELECT a.id,a.member_id,a.external_id,a.display_name,a.username FROM chat_accounts a
     WHERE a.member_id IS NOT NULL AND ($1::text IS NULL OR a.member_id=$1) ORDER BY a.id`,[only])).rows;
@@ -150,7 +150,7 @@ export async function memberView(db:Db,owner:string|null,only:string|null=null,w
       owner_linked:owner!==null&&accounts.some(account=>account.id===owner),added_at:new Date(row.added_at).toISOString(),
       permissions:{talk:row.group_talk,jobs:row.group_jobs,post:row.group_post_other,tools:row.group_tools,tasks:row.tasks,private_chat:row.private_chat,
         reminders:row.reminders,assistant:row.assistant},
-      groups:memberGroups};
+      groups:memberGroups,time_zone:row.time_zone??null};
   });
   const people:MemberPerson[]=[];
   if(withPeople) {
@@ -284,6 +284,10 @@ export class Members implements MemberRepository {
       if(Object.entries(next).some(([key,value])=>row[key]!==value))await db.query(`UPDATE members SET state=$2,group_talk=$3,group_jobs=$4,group_post_other=$5,group_tools=$6,
         tasks=$7,private_chat=$8,reminders=$9,assistant=$10,app_since=CASE WHEN state='paused' AND $2='active' THEN now() ELSE app_since END,revision=revision+1,updated_at=now() WHERE id=$1`,
         [id,next.state,next.group_talk,next.group_jobs,next.group_post_other,next.group_tools,next.tasks,next.private_chat,next.reminders,next.assistant]);
+      // Their own time zone, set by the owner as the member sets it themselves (ADR-0281): new schedules, quiet hours,
+      // reminders and their chat's day follow it; schedules already set keep theirs.
+      if(c.time_zone!==undefined&&c.time_zone!==(row.time_zone??null))
+        await db.query('UPDATE members SET time_zone=$2,revision=revision+1,updated_at=now() WHERE id=$1',[id,c.time_zone]);
       // A paused member's keys close with the pause, so a reply or run of theirs under way reads nothing more (ADR-0306).
       if(next.state==='paused'&&row.state!=='paused')await closePerson(db,id,'member_paused');
       if(c.groups) {

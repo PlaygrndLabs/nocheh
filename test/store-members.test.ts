@@ -71,7 +71,7 @@ test('the owner adds, changes and removes members and sets the daily cap: idempo
     assert.equal(added.revision,before.revision+1);
     const {added_at,...shown}=added.member;assert.ok(!Number.isNaN(Date.parse(added_at)));
     assert.deepEqual(shown,{id:memberIdFor(sam),account_id:sam,state:'active',name:'Sam',username:null,telegram_id:'801',owner_linked:false,permissions:allOn,
-      groups:[group(GP1,'GP1',true,'in'),group(GP2,'GP2',false,'left')]});
+      groups:[group(GP1,'GP1',true,'in'),group(GP2,'GP2',false,'left')],time_zone:null});
     assert.deepEqual([GP1,GP2,GP3].map(chat=>members().talks(sam,chat)),[true,false,true],'the member talks at once, in this process');
     assert.deepEqual([GP1,GP3].map(chat=>members().reaches(sam,chat)),[true,false],'reaching a group still needs Telegram\'s row');
     assert.equal(members().revision,added.revision);
@@ -153,6 +153,11 @@ test('the owner adds, changes and removes members and sets the daily cap: idempo
     assert.equal(members().assistant(sam),false,'no assistant without private chat');
     await change('sam-assistant-back',samId,{private_chat:true,assistant:false});
     assert.equal(members().assistant(sam),false);
+    // Their own time zone, set by the owner here as they set it themselves (ADR-0281); null is the owner's again.
+    assert.equal(helped.member.time_zone,null);
+    assert.equal((await change('sam-zone',samId,{time_zone:'Asia/Kolkata'})).member.time_zone,'Asia/Kolkata');
+    assert.equal((await db.query('SELECT time_zone FROM members WHERE id=$1',[samId])).rows[0].time_zone,'Asia/Kolkata');
+    assert.equal((await change('sam-zone-owner',samId,{time_zone:null})).member.time_zone,null);
 
     // Remove: the member and its switches go, its account stays and is unlinked, and it talks nowhere at once.
     const removed=await repo.remove(owner,memberIdFor(fresh),{operation_id:'remove-fresh'});
@@ -182,9 +187,9 @@ test('the list shows each member\'s groups with New here, and a member account\'
       .sort((a,b)=>a.telegram_id!.localeCompare(b.telegram_id!));
     assert.deepEqual(shown,[
       {id:MEMBER_GP_ID,account_id:MEMBER_GP_ACCOUNT,state:'active',name:null,username:null,telegram_id:MEMBER_GP,owner_linked:false,permissions:allOn,
-        groups:[group(GP1,'GP1',true,'in'),group(GP2,'GP2',true,'left'),group(GP3,'GP3',false,'in'),group(UNSERVED,'Unserved',true,'in',true,'off')]},
+        groups:[group(GP1,'GP1',true,'in'),group(GP2,'GP2',true,'left'),group(GP3,'GP3',false,'in'),group(UNSERVED,'Unserved',true,'in',true,'off')],time_zone:null},
       {id:MEMBER_NG_ID,account_id:MEMBER_NG_ACCOUNT,state:'active',name:null,username:null,telegram_id:MEMBER_NG,owner_linked:false,permissions:allOn,
-        groups:[group(NG1,'NG1',true,'in'),group(NG2,'NG2',true,'in',true)]},
+        groups:[group(NG1,'NG1',true,'in'),group(NG2,'NG2',true,'in',true)],time_zone:null},
     ],'a group Telegram says they are in with no row is New here, and counts as on');
 
     // Captured updates: Telegram's rows for a member account move the member revision and reload this process's directory.

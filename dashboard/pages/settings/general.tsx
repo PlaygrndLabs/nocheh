@@ -5,7 +5,7 @@ import {useDraftSource} from '../../lib/drafts';
 import {refreshResources, useResource} from '../../lib/resource';
 import {Badge, Button, Card, CardHeader, LoadError, LoadingRows, Select} from '../../ui/core';
 
-function knownZones(): string[] {
+export function knownZones(): string[] {
   try {
     return (Intl as unknown as {supportedValuesOf(key: string): string[]}).supportedValuesOf('timeZone');
   } catch {
