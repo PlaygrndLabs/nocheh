@@ -25,6 +25,7 @@ import {SelectionRepository} from './selections.js';
 import {ReprocessingRepository,archivedVoice,documentExtraction,voiceTranscription,type DerivationEngine} from './reprocessing.js';
 import {PreparationRepository} from './preparation.js';
 import {SourceAccessRepository} from './access.js';
+import {KeyRepository} from './keys.js';
 import {SourceRepository} from './retrieval.js';
 import {ProjectRepository,SharingPolicyRepository} from './projects.js';
 import {LearnedMemoryRepository} from './learned.js';
@@ -245,7 +246,8 @@ export function storageServices(stores:StorePools,options:{dataDir:string;detect
   const voices={transcribe:()=>preparation.transcribeArchived(async()=>(await options.runtime('voice.transcribe',{check:true},10000)).configured===true)};
   // The owner's Members routes (step 3, src/stores/member-api.ts).
   const members:MemberRepository=new Members(stores.control,options.policy);
-  return {agent:options.agent,actionBecause,chats,chatAdds,scheduleNotices,members,jobs,machines,ownerAutonomy,notion,chatTools,tasks,prompts,telegramChats,telegramTopics,stores,archive,operations,derived,guards,selections,attachments,reprocessing,preparation,voices,prepared,turns,access,retirements,reactions,sources,projects,entities,sharing,learned,contexts,provenance,
+  const keys=new KeyRepository(stores.control,options.policy,jobs);
+  return {agent:options.agent,actionBecause,chats,chatAdds,scheduleNotices,members,keys,jobs,machines,ownerAutonomy,notion,chatTools,tasks,prompts,telegramChats,telegramTopics,stores,archive,operations,derived,guards,selections,attachments,reprocessing,preparation,voices,prepared,turns,access,retirements,reactions,sources,projects,entities,sharing,learned,contexts,provenance,
     configuration:new RuntimeConfigurationRepository(stores.control),
     browserCapture:new BrowserCaptureRepository(options.dataDir,options.policy),
     browserDelivery,

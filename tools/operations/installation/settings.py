@@ -323,6 +323,24 @@ def rotate_keys(state, print=print):
     return 1
 
 
+def rotate_agent_login(state, progress=lambda step: None):
+    """The dashboard's "Stop everything now" (ADR-0307): a new agent login alone, applied at once. The master key and
+    Hermes's session token stay, so the dashboard and executor keep working and need no restart; Hermes and the services
+    that check the agent login restart with the new one. Apply rolls back to the old login when they do not come back."""
+    import secrets
+    directory = Path(state) / 'admin'; directory.mkdir(exist_ok=True, mode=0o700)
+    with (directory / 'settings.lock').open('a') as lock:
+        fcntl.flock(lock, fcntl.LOCK_EX)
+        current = load(state)
+        previous = directory / 'previous.env'
+        # The last applied baseline stays when unapplied settings already left one.
+        if not previous.exists(): write_env(previous, current)
+        updated = {**current, 'AGENT_KEY': secrets.token_hex(32)}
+        validate(updated)
+        write_env(env_path(state), updated)
+    return apply(state, progress)
+
+
 def telegram_api(token, method, **params):
     from tools.operations.archive.telegram_directory import _bot_api
     return _bot_api(token, method, **params)
