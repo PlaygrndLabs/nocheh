@@ -57,6 +57,9 @@ class ProblemNoticeTests(unittest.TestCase):
         self.outcome = 'done'
         self.edits = []
         self.edit_outcome = 'done'
+        # No Nocheh answers here: times read UTC unless a test gives the owner's time zone.
+        zone = patch('tools.operations.installation.owner_zone.ask', side_effect=OSError('no nocheh'))
+        zone.start(); self.addCleanup(zone.stop)
 
     def check(self, now, state=None, usage=(), enabled=True, outcome=None, values=None):
         def send(body):
@@ -308,6 +311,21 @@ class ProblemNoticeTests(unittest.TestCase):
         self.check(NOW + 720, monitoring())
         self.assertEqual(len(self.edits), 3)
         self.assertEqual(len(self.sent), 1)
+
+    def test_times_read_in_the_owners_time_zone_and_name_utc_only_before_one_is_known(self):
+        down = {**monitoring(), 'telegram_incident': {'at': '2026-10-28T11:50:00+00:00', 'error_code': 'telegram_network_error'}}
+        with patch('tools.operations.installation.owner_zone.ask', return_value='Asia/Kolkata'):
+            self.check(NOW, down)
+            # 11:50 UTC is 17:20 in Kolkata (UTC+05:30); the owner's own clock needs no zone name.
+            self.assertEqual(self.sent[-1]['problems'], ['Telegram stopped working at 2026-10-28 17:20: it couldn’t reach Telegram.'])
+            self.check(NOW + 120, {**down, 'telegram_incident': None, 'runtime': {'status': {'telegram': 'connected'}}})
+        self.assertRegex(self.edits[-1]['resolved'][0], r'^Fixed at \d\d:\d\d$')
+        # A time on another day in the owner's zone names its date.
+        self.assertEqual(problems.text({'kind': 'telegram', 'count': 1, 'at': '2026-10-28T23:00:00Z'}, 0, 'Asia/Kolkata'),
+                         'Telegram stopped working at 2026-10-29 04:30: the connection failed.')
+        # While Nocheh can't answer, the zone it gave last still holds.
+        from tools.operations.installation.owner_zone import owner_zone
+        self.assertEqual(owner_zone(self.state), 'Asia/Kolkata')
 
     def test_a_telegram_outage_clears_once_telegram_is_connected(self):
         down = {**monitoring(), 'telegram_incident': {'at': '2026-10-28T11:50:00+00:00', 'error_code': 'telegram_network_error'}}

@@ -38,7 +38,9 @@ export interface MemberGroup {chat_id:string;title:string|null;state:ChatState;o
  * (null when unknown: the dashboard fills names from /telegram/identities). `owner_linked` warns that the account is
  * the owner's own: the directory never treats it as a member. */
 export interface MemberItem {id:string;account_id:string;state:MemberState;name:string|null;username:string|null;telegram_id:string|null;
-  owner_linked:boolean;added_at:string;permissions:MemberPermissions;groups:MemberGroup[]}
+  owner_linked:boolean;added_at:string;permissions:MemberPermissions;groups:MemberGroup[];
+  /** Their own time zone (members.time_zone), or null for the owner's (ADR-0281); the owner sees and sets it here. */
+  time_zone:string|null}
 /** A person who is not a member, seen 'in' (Telegram's newest row) in groups Nocheh is in: a human account, never the
  * owner, a bot or a proxy account. */
 export interface MemberPerson {account_id:string;name:string|null;username:string|null;telegram_id:string|null;groups:MemberGroupRef[]}
@@ -53,7 +55,9 @@ export interface MemberList {revision:number;daily_messages:number;member_schedu
 export interface MemberAddRequest {operation_id:string;account_id:string|null;telegram_id:string|null;groups:Record<string,boolean>}
 /** The changes POST /v1/members/:id may carry; at least one. `groups` switches groups on (true) or off (false). */
 export interface MemberChanges {state?:MemberState;talk?:boolean;jobs?:boolean;post?:boolean;tools?:boolean;tasks?:MemberTasks;private_chat?:boolean;
-  reminders?:boolean;assistant?:boolean;groups?:Record<string,boolean>}
+  reminders?:boolean;assistant?:boolean;groups?:Record<string,boolean>;
+  /** A time zone such as Europe/Berlin, or null for the owner's. */
+  time_zone?:string|null}
 /** POST /v1/members/:id: change a member. */
 export interface MemberChangeRequest {operation_id:string;changes:MemberChanges}
 /** POST /v1/members/:id/remove. */

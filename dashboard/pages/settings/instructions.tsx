@@ -277,12 +277,12 @@ export const instructions: {key: string; title: string; hint: string}[] = [
   {
     key: 'background.member_spend',
     title: 'Member jobs: spend notice',
-    hint: 'Sent to your private chat, with a Pause button, once a UTC day when jobs members approved themselves pass your notice mark (Settings › Assistant › Background jobs). {spent} is what they spent today, {mark} the notice mark, {pause_mark} the mark where member jobs pause by themselves, and {members} one line for each member in each group.',
+    hint: 'Sent to your private chat, with a Pause button, once a UTC day when jobs members approved themselves pass your notice mark (Settings › Assistant › Background jobs). {spent} is what they spent that day, {mark} the notice mark, {pause_mark} the mark where member jobs pause by themselves, {reset} the moment the day starts again in your time zone, and {members} one line for each member in each group.',
   },
   {
     key: 'background.member_paused',
     title: 'Member jobs: paused by themselves',
-    hint: 'Sent to your private chat, with a Resume button, when member jobs pause by themselves past your pause mark, until 00:00 UTC. {spent}, {mark} (the pause mark) and {members} are filled in as in the spend notice.',
+    hint: 'Sent to your private chat, with a Resume button, when member jobs pause by themselves past your pause mark, until the UTC day ends. {spent}, {mark} (the pause mark), {reset} and {members} are filled in as in the spend notice.',
   },
   {
     key: 'schedules.notice_texts',

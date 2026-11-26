@@ -1,6 +1,6 @@
 import {test} from 'node:test';
 import assert from 'node:assert/strict';
-import {cents,memberCostLimit,memberDecided,memberPause,memberResume} from '../src/stores/member-job-spend.js';
+import {cents,dayResetText,memberCostLimit,memberDecided,memberPause,memberResume} from '../src/stores/member-job-spend.js';
 import {backgroundMemberPaused,backgroundMemberSpend,backgroundMemberTexts,backgroundTexts,fillTemplate,labeledLines,promptKeys,promptProblem} from '../src/prompts.js';
 
 test('a member\'s job cap is the owner\'s limit or half again over its estimate, in whole cents',()=>{
@@ -37,12 +37,21 @@ test('the member spend notices, their buttons and the paused card line are the o
   assert.ok(lines.pause!.length<=40&&lines.resume!.length<=40);
   assert.ok([lines.paused,lines.resumed,lines.only_owner].every(line=>Array.from(line!).length<=200),'each answer fits a button press answer');
   const members=[fillTemplate(lines.member!,{name:'Sam',group:'“Made-up group”',spent:'$12.10'}),fillTemplate(lines.more!,{count:'3',spent:'$8.00'})].join('\n');
-  assert.equal(fillTemplate(backgroundMemberSpend,{spent:'$20.10',mark:'$20.00',pause_mark:'$100.00',members}),
-    '💸 Jobs that members approved themselves spent $20.10 today (UTC), past your notice mark of $20.00.\n• Sam in “Made-up group”: $12.10\n• 3 more: $8.00\n\n'+
+  assert.equal(fillTemplate(backgroundMemberSpend,{spent:'$20.10',mark:'$20.00',pause_mark:'$100.00',reset:'05:30',members}),
+    '💸 Jobs that members approved themselves spent $20.10 since 05:30, past your notice mark of $20.00.\n• Sam in “Made-up group”: $12.10\n• 3 more: $8.00\n\n'+
     'Pause holds approved member jobs that have not started until you resume them. Members can still ask and approve, running jobs finish, and your own jobs never wait. '+
-    'At $100.00 today, member jobs pause by themselves until 00:00 UTC.');
-  assert.ok(fillTemplate(backgroundMemberPaused,{spent:'$100.40',mark:'$100.00',members}).startsWith(
-    '⏸ Member jobs are paused until 00:00 UTC: jobs that members approved themselves spent $100.40 today, past your high mark of $100.00.\n• Sam'));
+    'At $100.00, member jobs pause by themselves until 05:30.');
+  assert.ok(fillTemplate(backgroundMemberPaused,{spent:'$100.40',mark:'$100.00',reset:'05:30',members}).startsWith(
+    '⏸ Member jobs are paused until 05:30: jobs that members approved themselves spent $100.40 since the last 05:30, past your high mark of $100.00.\n• Sam'));
   assert.equal(labeledLines(backgroundTexts,undefined).paused,'⏸ Approved. Member jobs are paused for now; it starts when they resume.');
   assert.equal(labeledLines(backgroundTexts,'running: Runs.').paused,labeledLines(backgroundTexts,undefined).paused,'an older saved text keeps the new line\'s default');
+});
+
+test('the spend notices name the UTC day\'s reset on the owner\'s clock, and UTC only while the owner\'s zone is UTC',()=>{
+  const now=new Date('2026-10-28T21:00:00Z');
+  assert.equal(dayResetText('UTC',now),'00:00 UTC');
+  assert.equal(dayResetText('Asia/Kolkata',now),'05:30');
+  assert.equal(dayResetText('Asia/Tokyo',now),'09:00');
+  assert.equal(dayResetText('America/New_York',now),'20:00','the reset can fall in the owner\'s evening');
+  assert.equal(dayResetText('Not/AZone',now),'00:00 UTC');
 });

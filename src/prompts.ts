@@ -391,14 +391,15 @@ export const backgroundTexts=['running: ⏳ Approved. It runs now and reports he
   'report_private: ✅ Done: the job you asked for here finished. Its report is in your private chat.',
   'limited_private: ⏱ The job you asked for here stopped at its limit. A short note is in your private chat.'].join('\n');
 /** The owner's notice when jobs that members approved themselves pass the notice mark in a UTC day (ADR-0251): {spent}
- *  is what they spent today, {mark} the notice mark, {pause_mark} the high mark and {members} one line for each member in
- *  each group. Its button pauses member jobs. */
-export const backgroundMemberSpend=['💸 Jobs that members approved themselves spent {spent} today (UTC), past your notice mark of {mark}.','{members}','',
+ *  is what they spent that day, {mark} the notice mark, {pause_mark} the high mark, {reset} the moment the day starts
+ *  again on the owner's clock ("04:00", or "00:00 UTC" before the owner sets a time zone) and {members} one line for each
+ *  member in each group. Its button pauses member jobs. */
+export const backgroundMemberSpend=['💸 Jobs that members approved themselves spent {spent} since {reset}, past your notice mark of {mark}.','{members}','',
   'Pause holds approved member jobs that have not started until you resume them. Members can still ask and approve, running jobs finish, and your own jobs never wait. '+
-  'At {pause_mark} today, member jobs pause by themselves until 00:00 UTC.'].join('\n');
-/** The owner's notice when member jobs paused by themselves at the high mark, until 00:00 UTC (ADR-0251). {spent},
- *  {mark} (the high mark) and {members} as in the spend notice. Its button resumes member jobs. */
-export const backgroundMemberPaused=['⏸ Member jobs are paused until 00:00 UTC: jobs that members approved themselves spent {spent} today, past your high mark of {mark}.','{members}','',
+  'At {pause_mark}, member jobs pause by themselves until {reset}.'].join('\n');
+/** The owner's notice when member jobs paused by themselves at the high mark, until the UTC day ends (ADR-0251).
+ *  {spent}, {mark} (the high mark), {reset} and {members} as in the spend notice. Its button resumes member jobs. */
+export const backgroundMemberPaused=['⏸ Member jobs are paused until {reset}: jobs that members approved themselves spent {spent} since the last {reset}, past your high mark of {mark}.','{members}','',
   'Members can still ask and approve. Approved member jobs start when the pause ends or when you tap Resume; running jobs finish, and your own jobs never wait.'].join('\n');
 /** One "name: text" line each for the member lines of those notices, their Pause and Resume buttons, and the short
  *  answers to a press, which the notice then shows under its text. */

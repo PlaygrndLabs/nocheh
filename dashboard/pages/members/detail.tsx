@@ -12,6 +12,8 @@ import {cn} from '../../lib/utils';
 import {Badge, Button, Card, CardHeader, Notice, Segmented, Select, Switch} from '../../ui/core';
 import {SubPanel, SubTabs} from '../../ui/page';
 import {useFeedback} from '../../ui/overlay';
+import {useResource} from '../../lib/resource';
+import {knownZones, zoneName} from '../settings/general';
 import {ActionError, chatHref, useAction} from '../chats/shared';
 import {byName, memberError, personMeta, personName, presenceLabel, type MemberAnswer} from './model';
 
@@ -266,6 +268,17 @@ export function MemberDetail({
                     )
                   }
                 />
+                <MemberTimeZone
+                  value={member.time_zone}
+                  disabled={busy}
+                  onChange={zone =>
+                    void change(
+                      'time_zone',
+                      {time_zone: zone},
+                      zone ? `${name}’s time zone is ${zoneName(zone)}.` : `${name} uses your time zone again.`,
+                    )
+                  }
+                />
               </div>
             </Card>
             <Card>
@@ -392,6 +405,51 @@ function Row({
         <p className="text-[13px] text-muted">{hint}</p>
       </div>
       <Switch id={id} label={title} checked={checked} disabled={disabled} onChange={onChange} />
+    </div>
+  );
+}
+
+/**
+ * A member's own time zone (ADR-0281), which the owner sees and sets here as the member does in the members' app or by
+ * asking: their new schedules, quiet hours, reminders and the 4 AM start of their chat's day follow it. Empty is the
+ * owner's own.
+ */
+function MemberTimeZone({
+  value,
+  disabled,
+  onChange,
+}: {
+  value: string | null;
+  disabled: boolean;
+  onChange: (zone: string | null) => void;
+}) {
+  const owner = useResource<{time_zone: string}>('/tasks/settings').data?.time_zone;
+  const zones = [...new Set(['UTC', ...knownZones(), ...(value ? [value] : [])])].sort();
+  return (
+    <div className="flex flex-wrap items-center justify-between gap-x-4 gap-y-2 border-t border-line py-2.5 pr-5 pl-5">
+      <div className="min-w-0">
+        <label htmlFor="member-time-zone" className="text-sm font-medium">
+          Time zone
+        </label>
+        <p className="text-[13px] text-muted">
+          Their new schedules, quiet hours, reminders and the 4 AM start of their chat’s day follow it. They can change
+          it too, in the members’ app or by asking.
+        </p>
+      </div>
+      <Select
+        id="member-time-zone"
+        value={value ?? ''}
+        disabled={disabled}
+        className="w-full sm:w-56"
+        onChange={event => onChange(event.target.value || null)}
+      >
+        <option value="">Same as yours{owner ? ` (${zoneName(owner)})` : ''}</option>
+        {zones.map(zone => (
+          <option key={zone} value={zone}>
+            {zoneName(zone)}
+          </option>
+        ))}
+      </Select>
     </div>
   );
 }

@@ -80,7 +80,7 @@ installChats(previewDirectory());
  * tasks. Nia (in two groups) and Rosa are seen in groups and aren't members; Sam left Garden swap, so he is no one to add.
  */
 type PreviewMember={id:string;account:string;telegram:string;name:string|null;username:string|null;state:'active'|'paused';added_at:string;
- permissions:MemberItem['permissions'];switches:Map<string,boolean>;presence:Map<string,'in'|'left'>};
+ permissions:MemberItem['permissions'];switches:Map<string,boolean>;presence:Map<string,'in'|'left'>;time_zone?:string|null};
 const joinedGroups=()=>previewChats.filter(chat=>chat.kind==='group'&&!['left','removed','archived'].includes(chatStates.get(chat.id)!));
 const groupRef=(chat:string):MemberGroupRef=>({chat_id:chat,title:previewChats.find(item=>item.id===chat)?.title??null,state:chatStates.get(chat)!});
 const byGroupTitle=(a:MemberGroupRef,b:MemberGroupRef)=>(a.title??'￿').localeCompare(b.title??'￿')||(a.chat_id<b.chat_id?-1:1);
@@ -104,7 +104,7 @@ function memberItem(member:PreviewMember):MemberItem {
  const groups:MemberGroup[]=[...listed].map(chat=>({...groupRef(chat),on:member.switches.get(chat)??true,telegram:member.presence.get(chat)??null,
   new:member.presence.get(chat)==='in'&&!member.switches.has(chat)})).sort(byGroupTitle);
  return {id:member.id,account_id:member.account,state:member.state,name:member.name,username:member.username,telegram_id:member.telegram,owner_linked:false,
-  added_at:member.added_at,permissions:{...member.permissions},groups};
+  added_at:member.added_at,permissions:{...member.permissions},groups,time_zone:member.time_zone??null};
 }
 function memberList():MemberList {
  const joined=new Set(joinedGroups().map(chat=>chat.id)),linked=new Set(previewMembers.map(member=>member.account));
@@ -149,12 +149,13 @@ function memberRoute(route:string,body:unknown):unknown {
  const request=memberChangeRequest(body);
  return memberCommand(request.operation_id,{id:one[1],...request},()=>{
   const member=previewMembers[at];if(!member)throw new HttpError(404,'member_not_found');
-  const {state,talk,jobs,post,tools,tasks,private_chat,reminders,assistant,groups}=request.changes;
+  const {state,talk,jobs,post,tools,tasks,private_chat,reminders,assistant,groups,time_zone}=request.changes;
   for(const [chat,on] of Object.entries(groups??{})){
    if(!joined(chat))throw new HttpError(400,'member_group_invalid');
    if(on&&!member.switches.has(chat)&&member.presence.get(chat)!=='in')throw new HttpError(409,'member_group_not_seen');
   }
   if(state)member.state=state;
+  if(time_zone!==undefined)member.time_zone=time_zone;
   Object.assign(member.permissions,Object.fromEntries(Object.entries({talk,jobs,post,tools,tasks,private_chat,reminders,assistant}).filter(([,value])=>value!==undefined)));
   for(const [chat,on] of Object.entries(groups??{}))member.switches.set(chat,on);
   memberRevision++;return {revision:memberRevision,member:memberItem(member)};

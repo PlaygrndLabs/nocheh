@@ -5,6 +5,7 @@ import {ownerChat,type AssistantPolicy} from '../assistant-policy.js';
 import {telegramAddress,telegramChat} from '../frontdoor/telegram.js';
 import {HttpError} from '../http.js';
 import type {RuntimeCall} from '../runtime.js';
+import {ownerTimeZone} from './task-settings.js';
 import {backgroundMemberPaused,backgroundMemberSpend,backgroundMemberTexts,fillTemplate,labeledLines,ownerPrompts} from '../prompts.js';
 
 /**
@@ -51,6 +52,14 @@ const activeSql="paused_by IS NOT NULL AND (paused_until IS NULL OR paused_until
 /** SQL: the start of today, and of tomorrow, in UTC. */
 const dayStart="(date_trunc('day',now() AT TIME ZONE 'UTC') AT TIME ZONE 'UTC')";
 const nextDay="((date_trunc('day',now() AT TIME ZONE 'UTC')+interval '1 day') AT TIME ZONE 'UTC')";
+/** When the next UTC day starts, on the owner's clock ("04:00"), or "00:00 UTC" while the owner's zone is UTC: what the
+ *  spend notices say about the day's reset. The day itself stays a UTC day. */
+export function dayResetText(zone:string,now=new Date()):string {
+  if(zone==='UTC')return '00:00 UTC';
+  const next=new Date(now);next.setUTCHours(24,0,0,0);
+  try{return new Intl.DateTimeFormat('en-GB',{timeZone:zone,hour:'2-digit',minute:'2-digit',hourCycle:'h23'}).format(next);}
+  catch{return '00:00 UTC';}
+}
 // At most this many members are named on a notice; the rest are summed in one line.
 const NAMED=10;
 /** At most `size` UTF-16 units of a text, as Telegram counts, never cut inside a character; with the line Pause or Resume
@@ -138,17 +147,18 @@ export class MemberJobSpend {
     const row=(await this.control.query(`SELECT *,${activeSql} AS active FROM member_job_pause WHERE singleton`)).rows[0];
     if(!row)return;
     const prompts=await ownerPrompts(this.control),lines=labeledLines(backgroundMemberTexts,prompts['background.member_texts']);
+    const reset=dayResetText(await ownerTimeZone(this.control));
     if(row.pause_id===marks.pauseId&&!row.pause_sent) {
       // Resumed before it could be told: nothing holds any more, so nothing is said.
       if(!(row.active&&row.paused_by==='auto')){await this.control.query('UPDATE member_job_pause SET pause_sent=true WHERE singleton AND pause_id=$1',[marks.pauseId]);return;}
-      const text=cut(fillTemplate(prompts['background.member_paused']??backgroundMemberPaused,{spent:cents(spend.spent),mark:cents(marks.high),
+      const text=cut(fillTemplate(prompts['background.member_paused']??backgroundMemberPaused,{spent:cents(spend.spent),mark:cents(marks.high),reset,
         members:await this.members(spend.spenders,lines)}),3800);
       if(await this.send(marks.pauseId,text,this.button(true,lines)))
         await this.control.query('UPDATE member_job_pause SET pause_sent=true,shown=$2,updated_at=now() WHERE singleton AND pause_id=$1',[marks.pauseId,{id:marks.pauseId,text}]);
       return;
     }
     if(row.notice_id!==marks.noticeId||row.notice_sent)return;
-    const text=cut(fillTemplate(prompts['background.member_spend']??backgroundMemberSpend,{spent:cents(spend.spent),mark:cents(marks.notice),pause_mark:cents(marks.high),
+    const text=cut(fillTemplate(prompts['background.member_spend']??backgroundMemberSpend,{spent:cents(spend.spent),mark:cents(marks.notice),pause_mark:cents(marks.high),reset,
       members:await this.members(spend.spenders,lines)}),3800);
     if(await this.send(marks.noticeId,text,this.button(!!row.active,lines)))
       await this.control.query('UPDATE member_job_pause SET notice_sent=true,shown=$2,updated_at=now() WHERE singleton AND notice_id=$1',[marks.noticeId,{id:marks.noticeId,text}]);

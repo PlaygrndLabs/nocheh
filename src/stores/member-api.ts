@@ -2,6 +2,7 @@ import type {Reader} from '../access.js';
 import {isTelegramAccount} from '../chats-telegram.js';
 import {isChatId} from '../chats.js';
 import {HttpError,object,string} from '../http.js';
+import {timeZone} from './task-settings.js';
 import {DAILY_MESSAGES_MAX,DAILY_MESSAGES_MIN,MEMBER_SCHEDULES_MAX,MEMBER_SCHEDULES_MIN,memberStates,memberTaskModes,type MemberAddRequest,type MemberChangeRequest,type MemberChanges,
   type MemberList,type MemberRemoved,type MemberRemoveRequest,type MemberResult,type MemberSettingsRequest,type MemberSettingsResult} from '../member-wire.js';
 
@@ -60,10 +61,15 @@ export function memberAddRequest(input:unknown):MemberAddRequest {
   if(!Object.values(groups).includes(true))throw new HttpError(400,'member_group_required');
   return {operation_id:operation(body.operation_id),account_id:account as string|null,telegram_id:telegram as string|null,groups};
 }
+/** A member's own time zone: a zone this server's clock knows, or null (or empty) for the owner's. */
+function memberZone(value:unknown):string|null {
+  if(value===null||value==='')return null;
+  try{return timeZone(value);}catch{throw new HttpError(400,'invalid_time_zone');}
+}
 /** POST /v1/members/:id: at least one change. */
 export function memberChangeRequest(input:unknown):MemberChangeRequest {
   const body=exact(input,['operation_id','changes']),raw=object(body.changes),changes:MemberChanges={};
-  if(Object.keys(raw).some(key=>!['state','talk','jobs','post','tools','tasks','private_chat','reminders','assistant','groups'].includes(key)))throw new HttpError(400,'unknown_member_field');
+  if(Object.keys(raw).some(key=>!['state','talk','jobs','post','tools','tasks','private_chat','reminders','assistant','groups','time_zone'].includes(key)))throw new HttpError(400,'unknown_member_field');
   if(raw.state!==undefined){if(!(memberStates as readonly unknown[]).includes(raw.state))throw new HttpError(400,'invalid_member_request');changes.state=raw.state as MemberChanges['state'] & string;}
   if(raw.talk!==undefined)changes.talk=flag(raw.talk);
   if(raw.jobs!==undefined)changes.jobs=flag(raw.jobs);
@@ -74,6 +80,7 @@ export function memberChangeRequest(input:unknown):MemberChangeRequest {
   if(raw.reminders!==undefined)changes.reminders=flag(raw.reminders);
   if(raw.assistant!==undefined)changes.assistant=flag(raw.assistant);
   if(raw.groups!==undefined)changes.groups=groupSwitches(raw.groups);
+  if(raw.time_zone!==undefined)changes.time_zone=memberZone(raw.time_zone);
   if(!Object.keys(changes).length||changes.groups&&!Object.keys(changes.groups).length&&Object.keys(changes).length===1)throw new HttpError(400,'member_change_empty');
   return {operation_id:operation(body.operation_id),changes};
 }

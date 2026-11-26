@@ -24,7 +24,7 @@ class BackupScheduleTests(unittest.TestCase):
         self.disk = patch('tools.operations.installation.backup_schedule.shutil.disk_usage', return_value=Usage(0, 0, 50 * 1024 ** 3))
         self.disk.start()
         # No Nocheh answers here: the schedule keeps UTC unless a test gives the owner's time zone.
-        self.zone = patch('tools.operations.installation.backup_schedule._ask_owner_zone', side_effect=OSError('no nocheh'))
+        self.zone = patch('tools.operations.installation.owner_zone.ask', side_effect=OSError('no nocheh'))
         self.zone.start()
 
     def tearDown(self):
@@ -54,7 +54,7 @@ class BackupScheduleTests(unittest.TestCase):
 
     def test_time_follows_the_owners_time_zone(self):
         self.settings({'NOCHEH_BACKUP_TIME': '05:30'})
-        with patch('tools.operations.installation.backup_schedule._ask_owner_zone', return_value='Asia/Kolkata'):
+        with patch('tools.operations.installation.owner_zone.ask', return_value='Asia/Kolkata'):
             backup_schedule.due(self.state, at('2026-10-28T12:00:00'))
             # 05:30 in Kolkata (UTC+05:30) is midnight UTC.
             self.assertFalse(backup_schedule.due(self.state, at('2026-10-28T23:59:00'))['due'])
@@ -64,18 +64,18 @@ class BackupScheduleTests(unittest.TestCase):
 
     def test_keeps_the_last_owner_time_zone_while_nocheh_cannot_answer(self):
         self.settings({'NOCHEH_BACKUP_TIME': '05:30'})
-        with patch('tools.operations.installation.backup_schedule._ask_owner_zone', return_value='Asia/Kolkata'):
+        with patch('tools.operations.installation.owner_zone.ask', return_value='Asia/Kolkata'):
             backup_schedule.due(self.state, at('2026-10-28T12:00:00'))
         # A restart at the set time: the zone read before still holds, so the backup neither moves nor runs early.
-        with patch('tools.operations.installation.backup_schedule._ask_owner_zone', side_effect=OSError('refused')):
+        with patch('tools.operations.installation.owner_zone.ask', side_effect=OSError('refused')):
             self.assertFalse(backup_schedule.due(self.state, at('2026-10-28T23:59:00'))['due'])
             self.assertTrue(backup_schedule.due(self.state, at('2026-10-29T00:00:00'))['due'])
         # An answer that is no time zone counts as no answer.
-        with patch('tools.operations.installation.backup_schedule._ask_owner_zone', return_value='Mars/Base'):
+        with patch('tools.operations.installation.owner_zone.ask', return_value='Mars/Base'):
             self.assertEqual(backup_schedule.status(self.state, at('2026-10-29T00:00:00'))['time_zone'], 'Asia/Kolkata')
 
     def test_utc_until_nocheh_has_answered_once(self):
-        with patch('tools.operations.installation.backup_schedule._ask_owner_zone', side_effect=OSError('refused')):
+        with patch('tools.operations.installation.owner_zone.ask', side_effect=OSError('refused')):
             self.assertEqual(backup_schedule.status(self.state, at('2026-10-28T12:00:00'))['time_zone'], 'UTC')
 
     def test_off_never_runs(self):

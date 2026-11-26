@@ -3631,6 +3631,26 @@ test('a member’s private chat with Nocheh is its own switch, kept apart from g
   await page.close();
 });
 
+test('the owner sets a member’s own time zone on their page, or gives them the owner’s again', async () => {
+  const {page, problems} = await open('members?member=' + MIRA);
+  const posts = memberPosts(page);
+  await page.getByRole('heading', {name: 'Mira Chen', level: 2}).waitFor();
+  await memberPart(page, 'Private chat and groups');
+  const zone = page.getByLabel('Time zone', {exact: true});
+  assert.equal(await zone.inputValue(), '');
+  assert.match(await zone.locator('option').first().textContent(), /^Same as yours/);
+  await zone.selectOption('Asia/Tokyo');
+  await page.getByRole('status').filter({hasText: 'Mira Chen’s time zone is Asia/Tokyo.'}).last().waitFor();
+  await zone.selectOption('');
+  await page.getByRole('status').filter({hasText: 'Mira Chen uses your time zone again.'}).last().waitFor();
+  assert.deepEqual(
+    posts.map(({body}) => body.changes),
+    [{time_zone: 'Asia/Tokyo'}, {time_zone: null}],
+  );
+  assert.deepEqual(problems, []);
+  await page.close();
+});
+
 test('Personal assistant is a member’s own switch under Private chat, and the schedule cap is saved for every member', async () => {
   const {page, problems} = await open('members?member=' + MIRA);
   const posts = memberPosts(page);
