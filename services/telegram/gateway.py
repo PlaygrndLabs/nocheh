@@ -458,7 +458,8 @@ class TelegramService:
     async def send_approval(self, body):
         """Approve and Reject buttons on an exact pending action, in the owner's
         private chat or, for a message its requester reviews, in an allowed
-        group and topic where it was asked.
+        group and topic where it was asked. A press's answer may also go to a
+        member's own private chat.
 
         Pressing one is captured like any update; storage verifies who pressed
         it and decides. These calls only show the card and the decision on it.
@@ -470,7 +471,11 @@ class TelegramService:
         served=await asyncio.to_thread(self.policy.current,None,5.0,known)
         owner=bool(chat) and chat==served.owner_external()
         group=None if owner else served.group(served.resolve(chat))
-        if (not owner and (group is None or served.address(group)[0]!=chat) or
+        # A press answer, and only that, may also go to a member's own private chat open now: the presser alone sees it, as a
+        # short popup under the press, such as on their schedule message's Pause or Delete (members' schedules).
+        local=None if owner or group is not None or topic else served.resolve(chat)
+        member=body.get('kind')=='answer' and local is not None and served.member_private(local) and (served.address(local) or (None,))[0]==chat
+        if (not owner and not member and (group is None or served.address(group)[0]!=chat) or
                 topic and (owner or not re.fullmatch(r'[1-9]\d{0,15}',topic) or served.resolve(chat,topic) is None)):raise ValueError('approval_chat_not_allowed')
         text=body.get('text')
         if not isinstance(text,str) or not 0<len(text.encode('utf-16-le'))//2<=4096:raise ValueError('invalid_approval')
