@@ -93,7 +93,7 @@ is not what Nocheh runs: Nocheh keeps the bot, the sealed runs and the archive.
    (2026-11-26). A scheduled run now reads its chat's or topic's context, and in the owner's
    private chat the forwards-and-files block too, through the newest message in that chat
    or topic. If nothing has been said there yet, it reads none, and that is not a failure.
-   Any other turn whose message is missing still fails as before. (Owner's choice, 2026-11-26.)
+   Any other turn whose message is missing still fails as before.
 
 ## Consequences
 
