@@ -1130,7 +1130,8 @@ class ProductScenarios(Scenarios):
         # GP1 and GP2 in one project with "Share group chats" off, GP4 in none. Honcho learns each as a conclusion about
         # the owner (LEARNMARK, installation-provider.py PrivacyCanary), so a wall that holds the wrong chats, or a read that
         # skips its wall, lists another group's fact. With sharing off, recall and search by meaning in each group find
-        # that group's own fact and no other's; a member who joined only GP1 finds GP1's alone in their private chat.
+        # that group's own fact and no other's; a member who joined only GP1 finds GP1's alone by meaning in their private
+        # chat, which offers no recall tool.
         # With sharing on, GP1 finds GP2's fact too, never GP4's. Each own-fact check is the positive control: a read that
         # finds nothing would pass every "not found" check.
         self.members_allowed()
@@ -1138,7 +1139,17 @@ class ProductScenarios(Scenarios):
         word = 'WALLWORD'+number
         marks = {OTHER_GROUP: 'LEARNMARK'+number+'01', THIRD_GROUP: 'LEARNMARK'+number+'02', GROUP: 'LEARNMARK'+number+'04'}
         names = {OTHER_GROUP: 'GP1', THIRD_GROUP: 'GP2', GROUP: 'GP4'}
-        found = lambda result: sorted(names[chat] for chat, mark in marks.items() if mark in json.dumps(result, ensure_ascii=False))
+        found = lambda text: sorted(names[chat] for chat, mark in marks.items() if mark in text)
+
+        def read(chat, kind, sender=OWNER, topic=None):
+            # What one memory read returned, as the scripted model got it, wrapper and all: a recall, or a search by meaning.
+            # A member's private chat offers no recall tool, so the scripted model searches by meaning there instead.
+            before = len(self.f.agent())
+            directive = ('[[recall:team routine '+word+']]' if kind == 'recall' else
+                         '[[tool:mcp__nocheh__memory_search '+json.dumps({'query': word, 'limit': 10})+']]')
+            self.silent_turn(self.f.message(chat, 'یادت هست؟ '+directive+' [[after:silent]]', sender=sender, topic=topic), chat, topic)
+            return '\n'.join(str(event.get('result')) for event in self.f.agent()[before:] if event.get('phase') == 'final'
+                             and str(event.get('tool') or '').startswith('mcp__nocheh__memory_'))
         observed = self.current.setdefault('observed', {})
         person = self.fresh_person()
         member = None
@@ -1154,19 +1165,17 @@ class ProductScenarios(Scenarios):
                 # 1. Sharing off: each group reads only itself.
                 for chat in marks:
                     topic = TEAM_TOPIC if chat == GROUP else None
-                    recall = self.recalled(chat, 'team routine '+word, topic=topic)
-                    meaning = self.tool_call('mcp__nocheh__memory_search', {'query': word, 'limit': 10}, chat, topic=topic)
+                    recall, meaning = read(chat, 'recall', topic=topic), read(chat, 'meaning', topic=topic)
                     observed['off_'+names[chat]] = {'recall': found(recall), 'meaning': found(meaning)}
-                    self.gate('off_'+names[chat]+'_recalls_its_own_fact', found(recall) == [names[chat]], found=found(recall), result=str(recall)[:300])
-                    self.gate('off_'+names[chat]+'_finds_only_itself_by_meaning', found(meaning) == [names[chat]], found=found(meaning),
-                              result=str(meaning)[:300])
+                    self.gate('off_'+names[chat]+'_recalls_its_own_fact', found(recall) == [names[chat]], found=found(recall), result=recall[:300])
+                    self.gate('off_'+names[chat]+'_finds_only_itself_by_meaning', found(meaning) == [names[chat]], found=found(meaning), result=meaning[:300])
 
                 # 2. A member who joined GP1 alone, in their own private chat.
                 member = self.add_member(person, (OTHER_GROUP,))
                 self.seen_in(person, (OTHER_GROUP,))
-                recall = self.recalled(person, 'team routine '+word, sender=person)
+                recall = read(person, 'meaning', sender=person)
                 observed['member_GP1_only'] = found(recall)
-                self.gate('member_recalls_only_their_group', found(recall) == ['GP1'], found=found(recall), result=str(recall)[:300])
+                self.gate('member_finds_only_their_group', found(recall) == ['GP1'], found=found(recall), result=recall[:300])
 
                 # 3. Sharing on: GP1 reads the project's other group too, never one outside it. The wall changes with the
                 # switch, so the read is tried until it has caught up, within the same limit as other memory waits.
@@ -1176,10 +1185,10 @@ class ProductScenarios(Scenarios):
                 self.gate('project_shares_its_group_chats', shared.get('share_chats') is True, project={key: shared.get(key) for key in ('share_chats', 'revision')})
                 self.memory_settled()
                 caught = self.wait('shared_wall_caught_up', lambda: (lambda value: value if found(value) == ['GP1', 'GP2'] or 'GP4' in found(value) else None)(
-                    self.recalled(OTHER_GROUP, 'team routine '+word)), 300, 15)
+                    read(OTHER_GROUP, 'recall')), 300, 15)
                 observed['on_GP1'] = found(caught)
                 self.gate('on_GP1_recalls_the_projects_groups', found(caught) == ['GP1', 'GP2'], found=found(caught))
-                recall = self.recalled(GROUP, 'team routine '+word, topic=TEAM_TOPIC)
+                recall = read(GROUP, 'recall', topic=TEAM_TOPIC)
                 observed['on_GP4'] = found(recall)
                 self.gate('on_GP4_still_reads_only_itself', found(recall) == ['GP4'], found=found(recall))
             finally:
