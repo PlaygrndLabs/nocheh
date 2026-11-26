@@ -63,6 +63,7 @@ VM_IMAGE = 'nocheh-tester-vm:local'
 
 # Plain-English names for the report, by scenario.
 TITLES = {
+    'memory_walls_keep_groups_apart': "Memory walls: each group recalls and finds only its own facts; sharing on adds the project's groups",
     'reply_during_polling_reconnect': 'Replies survive Telegram reconnecting',
     'ordinary_private': 'Private chat reply', 'edit_is_silent': 'Edited message gets no new reply',
     'reaction_is_silent': 'A reaction gets no reply', 'general_after_topics': 'General topic reply',

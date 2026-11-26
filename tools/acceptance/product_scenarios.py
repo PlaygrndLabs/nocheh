@@ -1125,6 +1125,76 @@ class ProductScenarios(Scenarios):
         event_id, _ = self.turn(self.f.message(chat, text, sender=sender, mention=False, topic=topic, **options), chat, topic, expect_reply=False)
         return event_id
 
+    def memory_walls_keep_groups_apart(self):
+        # Memory walls on the real Honcho (ADR-0286, test plan step 3). The owner writes one fact in each of three groups:
+        # GP1 and GP2 in one project with "Share group chats" off, GP4 in none. Honcho learns each as a conclusion about
+        # the owner (LEARNMARK, installation-provider.py PrivacyCanary), so a wall that holds the wrong chats, or a read that
+        # skips its wall, lists another group's fact. With sharing off, recall and search by meaning in each group find
+        # that group's own fact and no other's; a member who joined only GP1 finds GP1's alone by meaning in their private
+        # chat, which offers no recall tool.
+        # With sharing on, GP1 finds GP2's fact too, never GP4's. Each own-fact check is the positive control: a read that
+        # finds nothing would pass every "not found" check.
+        self.members_allowed()
+        number = str(self.f.ids())
+        word = 'WALLWORD'+number
+        marks = {OTHER_GROUP: 'LEARNMARK'+number+'01', THIRD_GROUP: 'LEARNMARK'+number+'02', GROUP: 'LEARNMARK'+number+'04'}
+        names = {OTHER_GROUP: 'GP1', THIRD_GROUP: 'GP2', GROUP: 'GP4'}
+        found = lambda text: sorted(names[chat] for chat, mark in marks.items() if mark in text)
+
+        def read(chat, kind, sender=OWNER, topic=None):
+            # What one memory read returned, as the scripted model got it, wrapper and all: a recall, or a search by meaning.
+            # A member's private chat offers no recall tool, so the scripted model searches by meaning there instead.
+            before = len(self.f.agent())
+            directive = ('[[recall:team routine '+word+']]' if kind == 'recall' else
+                         '[[tool:mcp__nocheh__memory_search '+json.dumps({'query': word, 'limit': 10})+']]')
+            self.silent_turn(self.f.message(chat, 'یادت هست؟ '+directive+' [[after:silent]]', sender=sender, topic=topic), chat, topic)
+            return '\n'.join(str(event.get('result')) for event in self.f.agent()[before:] if event.get('phase') == 'final'
+                             and str(event.get('tool') or '').startswith('mcp__nocheh__memory_'))
+        observed = self.current.setdefault('observed', {})
+        person = self.fresh_person()
+        member = None
+        with self.groups_in_projects({'Walls '+number: (OTHER_GROUP, THIRD_GROUP)}, share=False) as made:
+            project = made['Walls '+number]
+            try:
+                for chat, mark in marks.items():
+                    self.posted(chat, 'Our team routine starts at nine '+word+' '+mark, topic=TEAM_TOPIC if chat == GROUP else None)
+                for mark in marks.values():
+                    self.honcho_learned(mark)
+                self.memory_settled()
+
+                # 1. Sharing off: each group reads only itself.
+                for chat in marks:
+                    topic = TEAM_TOPIC if chat == GROUP else None
+                    recall, meaning = read(chat, 'recall', topic=topic), read(chat, 'meaning', topic=topic)
+                    observed['off_'+names[chat]] = {'recall': found(recall), 'meaning': found(meaning)}
+                    self.gate('off_'+names[chat]+'_recalls_its_own_fact', found(recall) == [names[chat]], found=found(recall), result=recall[:300])
+                    self.gate('off_'+names[chat]+'_finds_only_itself_by_meaning', found(meaning) == [names[chat]], found=found(meaning), result=meaning[:300])
+
+                # 2. A member who joined GP1 alone, in their own private chat.
+                member = self.add_member(person, (OTHER_GROUP,))
+                self.seen_in(person, (OTHER_GROUP,))
+                recall = read(person, 'meaning', sender=person)
+                observed['member_GP1_only'] = found(recall)
+                self.gate('member_finds_only_their_group', found(recall) == ['GP1'], found=found(recall), result=recall[:300])
+
+                # 3. Sharing on: GP1 reads the project's other group too, never one outside it. The wall changes with the
+                # switch, so the read is tried until it has caught up, within the same limit as other memory waits.
+                shared = self.f.app('/v1/projects', {'id': project['id'], 'name': project['name'], 'description': project['description'],
+                                                     'state': 'active', 'share_chats': True, 'expected_revision': project['revision'],
+                                                     'operation_id': 'scenario-walls-share-'+number})
+                self.gate('project_shares_its_group_chats', shared.get('share_chats') is True, project={key: shared.get(key) for key in ('share_chats', 'revision')})
+                self.memory_settled()
+                caught = self.wait('shared_wall_caught_up', lambda: (lambda value: value if found(value) == ['GP1', 'GP2'] or 'GP4' in found(value) else None)(
+                    read(OTHER_GROUP, 'recall')), 300, 15)
+                observed['on_GP1'] = found(caught)
+                self.gate('on_GP1_recalls_the_projects_groups', found(caught) == ['GP1', 'GP2'], found=found(caught))
+                recall = read(GROUP, 'recall', topic=TEAM_TOPIC)
+                observed['on_GP4'] = found(recall)
+                self.gate('on_GP4_still_reads_only_itself', found(recall) == ['GP4'], found=found(recall))
+            finally:
+                if member:
+                    self.remove_member(member)
+
     def search_hits_name_their_source(self):
         # Every archive_search hit names who wrote it, where and when, in a tag Nocheh's code builds from the archive, never
         # the model, beside every field it had (ADR-0261). The owner reads times in the Settings › Tasks time zone, a group
@@ -5842,7 +5912,7 @@ PRODUCT_ORDER = ['group_members', 'group_name_addresses', 'unaddressed_messages_
                  'retired_source_leaves_tags', 'owner_recall_session_hits_have_text',
                  # The dashboard's sources (ADR-0261 step 4); it retires one message and restores it.
                  'dashboard_shows_where_memory_came_from',
-                 'new_id_group_works_end_to_end', 'private_chat_stays_out_of_groups', 'project_groups_stay_apart',
+                 'new_id_group_works_end_to_end', 'private_chat_stays_out_of_groups', 'project_groups_stay_apart', 'memory_walls_keep_groups_apart',
                  'supergroup_upgrade_keeps_history', 'inbox_never_asks_about_the_owner',
                  'import_with_topics_files_and_learning', 'import_learning_choice', 'tasks_from_chat_with_reminder', 'tasks_not_in_unrelated_group', 'read_only_member_cannot_add_a_task',
                  'member_reminder_says_who_set_it', 'reminder_with_split_emoji_arrives', 'chat_is_read_in_order',
