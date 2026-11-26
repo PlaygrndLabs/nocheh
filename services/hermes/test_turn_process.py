@@ -163,21 +163,6 @@ class TurnProcessTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(events,['hello']);self.assertEqual(result['state'],'done')
         with self.assertRaisesRegex(RuntimeError,'assistant_process_failed'):
             await self.execute('import sys; sys.stdin.read(); sys.exit(1)')
-    async def test_a_scheduled_run_has_longer_than_a_reply_and_says_it_is_still_working(self):
-        # A brief reads tasks, chats, memory and connectors, which can take longer than a reply's 230 s; it gets 480 s,
-        # inside its 10-minute one-time key, and its stream sends heartbeats so a sealed run's bridge keeps waiting.
-        from . import turn_process
-        source=('import sys,json,time; body=json.load(sys.stdin); print(json.dumps({"state":"done","text":"ok",'
-                '"left":body["turn_deadline_epoch"]-time.time(),"heartbeat":body.get("heartbeat")}))')
-        waits=[];original=asyncio.wait_for
-        async def wait_for(task,timeout):waits.append(timeout);return await original(task,timeout)
-        with patch('services.hermes.turn_process.scheduled_preferences',return_value={}),patch('services.hermes.turn_process.asyncio.wait_for',wait_for):
-            scheduled,_=await self.execute(source,extra={'channel':'scheduler','job_id':'j'*12},scope=Scope('42','42',True,'owner'))
-            reply,_=await self.execute(source)
-        self.assertEqual((turn_process.REPLY_SECONDS,turn_process.SCHEDULED_SECONDS),(230,480))
-        self.assertTrue(230<scheduled['left']<=480);self.assertIs(scheduled['heartbeat'],True)
-        self.assertTrue(0<reply['left']<=230);self.assertIsNone(reply['heartbeat'])
-        self.assertEqual([wait for wait in waits if wait in (230,480)],[480,230])
     async def test_messages_that_join_the_turn_follow_its_request_on_stdin(self):
         from .steering import Steering
         steering=Steering('who');steering.offer('1'*64,'Joined message')

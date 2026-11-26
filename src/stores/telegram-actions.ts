@@ -200,15 +200,26 @@ export class TelegramActionRepository {
     try{return row?cardName(JSON.parse(row.content.toString()).name,80):null;}catch{return null;}
   }
   /** Tells the owner once that a scheduled run stopped before it finished (interrupted or failed), so it sent nothing.
-   *  A run that was cancelled or skipped says nothing here. Never stops its caller (ADR-0266). */
+   *  A run that was cancelled or skipped says nothing here. Once the bot took the notice, it also covers the schedule's
+   *  earlier failed runs nobody was told about. Never stops its caller (ADR-0266). */
   async scheduleFailed(id:string):Promise<void> {
     try {
-      const row=(await this.stores.control.query(`SELECT r.scope,r.state,v.definition_reference FROM managed_runs r
+      const row=(await this.stores.control.query(`SELECT r.scope,r.job_id,r.state,r.failure_told_at,v.definition_reference FROM managed_runs r
         LEFT JOIN schedule_versions v ON v.id=r.schedule_version WHERE r.event_id=$1 AND r.channel='scheduler'`,[id])).rows[0];
-      if(!row||!['interrupted','failed'].includes(row.state))return;
+      if(!row||!['interrupted','failed'].includes(row.state)||row.failure_told_at)return;
       const name=await this.scheduleName(row.definition_reference)??scheduleNoticeLines((await ownerPrompts(this.stores.control))['schedules.notice_texts']).unnamed;
-      await this.ownerNotice(digest(canonical(['schedule-run-failed-v1',id])),'schedule_failed',{chat:row.scope,title:name});
+      if(!await this.ownerNotice(digest(canonical(['schedule-run-failed-v1',id])),'schedule_failed',{chat:row.scope,title:name}))return;
+      await this.stores.control.query(`UPDATE managed_runs SET failure_told_at=now() WHERE channel='scheduler' AND scope=$1 AND job_id=$2
+        AND state IN ('interrupted','failed') AND failure_told_at IS NULL AND updated_at<=(SELECT updated_at FROM managed_runs WHERE event_id=$3)`,[row.scope,row.job_id,id]);
     }catch{/* As ownerNotice: shown in System › Health; the run's own end goes on. */}
+  }
+  /** A failed run's notice that could not go (the bot or the internet was down) goes once they are back: the newest of
+   *  each schedule's untold failures from the last day, one notice per schedule. */
+  async retryScheduleFailures():Promise<void> {
+    const rows=(await this.stores.control.query(`SELECT DISTINCT ON (scope,job_id) event_id FROM managed_runs WHERE channel='scheduler'
+      AND state IN ('interrupted','failed') AND failure_told_at IS NULL AND updated_at>now()-interval '1 day'
+      ORDER BY scope,job_id,updated_at DESC,event_id DESC LIMIT 20`)).rows;
+    for(const row of rows)await this.scheduleFailed(row.event_id);
   }
   /** The person who wrote a live group turn, when they may talk to Nocheh there (the owner or a member who talks there);
    *  null for the owner's private chat. */
@@ -435,15 +446,17 @@ export class TelegramActionRepository {
   /** Tells the owner, in their private chat, that a scheduled task's result, a schedule's run or a job's report did not
    * reach its chat, and why, in the owner's editable words (ADR-0254). The id makes the bot send it once. A notice that
    * fails shows in System › Health and never causes another (SPECS.md); the caller goes on either way. */
-  async ownerNotice(id:string,key:'schedule_not_sent'|'schedule_not_run'|'schedule_failed'|'job_report_not_sent',values:{chat:string;reason?:ApprovalText;title?:string}):Promise<void> {
+  async ownerNotice(id:string,key:'schedule_not_sent'|'schedule_not_run'|'schedule_failed'|'job_report_not_sent',values:{chat:string;reason?:ApprovalText;title?:string}):Promise<boolean> {
     try {
-      const owner=ownerChat(this.access.policy());if(!owner)return;
+      const owner=ownerChat(this.access.policy());if(!owner)return false;
       const line=approvalLines((await ownerPrompts(this.stores.control))['telegram.approval_texts']),directory=await currentChats();
       // One pass: a name that holds {chat} or {reason} stays as written, and the line is never dropped.
       const text=noticeText(fillLine(line[key],{chat:placeLabel(values.chat,line,directory),...(values.reason===undefined?{}:{reason:line[values.reason]}),
         ...(values.title===undefined?{}:{title:quotedName(labelName(values.title)??'')})}));
-      await this.call('telegram.notice',{id,...telegramTarget(owner,directory),text},30000);
-    }catch{/* Shown in System › Health by the bot; nothing here waits for it. */}
+      const answer=await this.call('telegram.notice',{id,...telegramTarget(owner,directory),text},30000) as {state?:unknown}|undefined;
+      // True once the bot took it: sent, or tried and unclear, which is never sent again. False when it could not try.
+      return typeof answer?.state==='string'&&answer.state!=='not_started';
+    }catch{/* Shown in System › Health by the bot; nothing here waits for it. */return false;}
   }
   /** Trusted native sender rechecks the exact approved payload immediately before sending. */
   async authorizeDelivery(value:unknown) {

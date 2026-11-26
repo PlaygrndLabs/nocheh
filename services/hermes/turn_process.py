@@ -13,9 +13,6 @@ import unicodedata
 from pathlib import Path
 from services.durable import canonical
 
-# Seconds a turn may take. A reply answers within REPLY_SECONDS. A scheduled run may take SCHEDULED_SECONDS, which ends
-# well inside its 10-minute one-time key (ADR-0305), counted from its claim. A job run has its own deadline.
-REPLY_SECONDS,SCHEDULED_SECONDS=230,480
 
 
 def schedule_store(root,chat):
@@ -325,8 +322,6 @@ async def _run_process(profile, scope, body, model, credentials, session_id, emi
     # A background job run lasts until its job's hard deadline: its box commands end then, and the process a minute
     # later if nothing stopped it before. Every other turn has the usual reply time.
     background = job_run(body.get('background')) if body.get('channel')=='background' else None
-    # A scheduled run reads more than a reply (a brief reads tasks, chats, memory and connectors), so it has longer.
-    limit = SCHEDULED_SECONDS if body.get('channel')=='scheduler' else REPLY_SECONDS
     # A private answer's pass and its framed question come together, or the turn does not run.
     answer = private_answer(body.get('private_answer')) if scope.answer else None
     if answer is None and body.get('private_answer') is not None: raise ValueError('invalid_private_answer')
@@ -348,12 +343,11 @@ async def _run_process(profile, scope, body, model, credentials, session_id, emi
                **transport, 'stream':emit is not None,
                'memory_context':os.environ.get('NOCHEH_MEMORY_CONTEXT','legacy'),
                'images':[file['sha256'] for file in body.get('files',[]) if file['kind']=='image'],
-               'turn_deadline_epoch':background['hard_deadline'] if background else time.time()+limit,'prompts':body.get('prompts') or {},
+               'turn_deadline_epoch':background['hard_deadline'] if background else time.time()+230,'prompts':body.get('prompts') or {},
                # Each native note's source, as storage labels it from this parent's records, by the note's key.
                'note_sources':note_sources or {}}
     if body.get('channel')=='scheduler':
-        # Its stream says it is still working, so a sealed run's longer wait never looks like a stalled reply.
-        request.update(preferences=scheduled_preferences(profile,body),heartbeat=True)
+        request['preferences']=scheduled_preferences(profile,body)
     if steering is not None:
         # Later messages in this chat may join the turn while it runs (steering.py): its stdin stays open for them.
         request['steer']=True
@@ -453,7 +447,7 @@ async def _run_process(profile, scope, body, model, credentials, session_id, emi
             from .timing import safe
             return {'state':'failed','error_code':'guard_context_changed','timings':safe(result.get('timings'))}
         return result
-    try: return await asyncio.wait_for(collect(), timeout=background['hard_deadline']+60-time.time() if background else limit)
+    try: return await asyncio.wait_for(collect(), timeout=background['hard_deadline']+60-time.time() if background else 230)
     except asyncio.TimeoutError:
         # A turn stopped at its time limit reports nothing else; count it so its failure shows.
         from .usage import part_of, record

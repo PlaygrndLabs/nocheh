@@ -27,7 +27,7 @@ test('scheduled execution uses guarded operation roots and stages exact delivery
   let failCompletion=false,mode='done',serial=0,answer='Scheduled answer fixture-secret';const calls:any[]=[],native=new Map<string,any>(),contexts=new Map<string,any>(),claims=new Map<string,any>(),tasksRead:string[]=[],lookups:{state:string;id:string}[]=[],refusals:(string|null)[]=[];
   // The groups the owner serves, which a test turns off as the owner would; `deselect` turns them off as a run finishes.
   // Notices to the owner are kept apart: the bot sends each id once.
-  let groups=['-123'],deselect=false,advanceTimeout=false;const notices:any[]=[];const clocks:any[][]=[],cards:any[]=[];
+  let groups=['-123'],deselect=false,advanceTimeout=false,noticesDown=false;const notices:any[]=[];const clocks:any[][]=[],cards:any[]=[];
   const control=new Proxy(stores.control,{get(target,key){if(key==='connect')return async()=>{
     const db=await target.connect();return new Proxy(db,{get(client,name){if(name==='query')return (sql:any,...args:any[])=>{
       if(failCompletion&&String(sql).startsWith('UPDATE managed_runs SET state=$2,result_reference')){failCompletion=false;return Promise.reject(Error('lost control completion'));}
@@ -35,7 +35,7 @@ test('scheduled execution uses guarded operation roots and stages exact delivery
   };const value=Reflect.get(target,key);return typeof value==='function'?value.bind(target):value;}});
   const runtime:FakeCall=async(op,body)=>{
     if(op==='guard.detect')return {literals:String(body.text).includes('fixture-secret')?['fixture-secret']:[]};
-    if(op==='telegram.notice'){notices.push(body);return {state:'done'};}
+    if(op==='telegram.notice'){if(noticesDown)throw Error('bot unreachable');notices.push(body);return {state:'done'};}
     if(op==='telegram.approval'){cards.push(body);return {state:'done'};}
     calls.push({op,body});
     // Hermes may capture a timed fire only while Nocheh's advance runs: its clock grant is there then, for that cursor.
@@ -172,12 +172,16 @@ test('scheduled execution uses guarded operation roots and stages exact delivery
     await assert.rejects(capture({timezone:'../../etc'}),{code:'invalid_schedule_definition'});
     const recovered=await capture();failCompletion=true;assert.equal((await run(recovered.event_id)).state,'waiting');
     const before=calls.length;assert.equal((await run(recovered.event_id)).state,'completed');assert.equal(calls.length,before,'durable derivative receipt repairs control without new native execution');
-    const uncertain=await capture();mode='running';await run(uncertain.event_id);native.delete(uncertain.event_id);
+    const uncertain=await capture();mode='running';await run(uncertain.event_id);native.delete(uncertain.event_id);noticesDown=true;
     assert.equal((await run(uncertain.event_id)).state,'ambiguous');assert.equal((await s.scheduled.delivery(uncertain)).state,'withheld');
     // A run that stopped partway sent nothing: the owner is told, naming the schedule, instead of silence (ADR-0266).
+    // Here the bot was down as it ended (an internet outage stops both), so the notice goes once the bot is back.
     const stopped=digest(canonical(['schedule-run-failed-v1',uncertain.event_id]));
-    assert.equal((await run(uncertain.event_id)).state,'ambiguous');
-    assert.deepEqual([...new Set(notices.map(notice=>notice.id))],[stopped],'told once for the run, as the bot sends each id once');
+    assert.equal(notices.length,0,'the bot was down');assert.equal((await saved(uncertain.event_id)).failure_told_at,null);
+    noticesDown=false;await s.telegramActions.retryScheduleFailures();
+    assert.deepEqual(notices.map(notice=>notice.id),[stopped]);assert.ok((await saved(uncertain.event_id)).failure_told_at);
+    assert.equal((await run(uncertain.event_id)).state,'ambiguous');await s.telegramActions.retryScheduleFailures();
+    assert.deepEqual(notices.map(notice=>notice.id),[stopped],'told once for the run');
     assert.equal(notices[0].chat_id,'123');
     assert.equal(notices[0].text,'⚠\ufe0f The scheduled task \u2068\u201cFixture\u201d\u2069 in your private chat stopped before it finished, so it sent nothing. Its runs are on the dashboard Schedules page.');
     notices.length=0;
