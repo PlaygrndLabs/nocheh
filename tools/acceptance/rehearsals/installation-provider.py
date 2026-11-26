@@ -68,6 +68,7 @@ class ScriptedAgent:
     # [[do:note|TEXT]] (saves TEXT as a native note) or [[do:schedule|PROMPT]] (sets a schedule), then answers from that
     # call's result. Attack scenarios plant these where untrusted text reaches a tool's result.
     OBEY = '[[obey]]'
+    OFFERED = '[[offered]]'
     PLANTED = re.compile(r'\[\[do:(action|browser|shell|note|schedule)\|([^\]]{1,800})\]\]')
     TOOLS = {'search': 'mcp__nocheh__archive_search', 'recall': 'mcp__nocheh__memory_recall', 'action': 'mcp__nocheh__action_request',
              'owner': 'mcp__nocheh__owner_read'}
@@ -298,6 +299,9 @@ class ScriptedAgent:
         self.counts['chat'] += 1
         self.observe(messages, users, index, current)
         later = messages[index + 1:]
+        # [[offered]] records the tools Hermes offered this turn, once, beside the turn's tool directives.
+        if self.OFFERED in current and not [message for message in later if message.role == 'tool']:
+            self.record(directive='offered', phase='seen', tools=sorted(name for name in names if isinstance(name, str)))
         # [[after:silent]] makes the answer after a tool result [NO_REPLY], as
         # Nocheh asks once an approval card already answers the request.
         silent_after = '[[after:silent]]' in current

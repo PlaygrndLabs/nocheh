@@ -1355,6 +1355,40 @@ class ProductScenarios(Scenarios):
                 self.remove_member(member)
             dashboard.post('/connections/gmail/disconnect', {})
 
+    # What every Nocheh tool gets in every_listed_tool_answers: a read where the tool has one, else input it refuses, so
+    # nothing is sent, changed or asked for. A tool missing here gets {}.
+    SAFE_TOOL_INPUT = {
+        'archive_search': {'query': 'hello', 'limit': 1}, 'archive_page': {'limit': 1}, 'memory_search': {'query': 'hello', 'limit': 1},
+        'memory_recall': {'query': 'hello', 'limit': 1}, 'background_job': {'action': 'status'}, 'owner_read': {'view': 'projects'},
+        'tasks': {'action': 'list'}, 'notion': {'operation': 'connections'}, 'github': {'operation': 'repos'}, 'gmail': {'operation': 'call'},
+    }
+    # A tool's own words when it could not do its work at all, rather than answer, refuse or say what is wrong with the input.
+    BROKEN = ('_unavailable', 'timed_out', 'Traceback', 'Internal Server Error')
+
+    def every_listed_tool_answers(self):
+        # Every Nocheh tool Hermes offers in the owner's private chat answers (test plan step 3): each is called once, in
+        # one turn, with a read or with input it refuses, and each comes back with its own answer, never a broken
+        # connection, a timeout or a crash. A tool Nocheh has but Hermes did not offer here is listed for the report.
+        names = re.findall(r"\{name:'([a-z_]+)'", (ROOT/'src/mcp/tools.ts').read_text())
+        before = len(self.f.agent())
+        self.silent_turn(self.f.message(OWNER, 'ابزارها [[offered]] [[tool:mcp__nocheh__action_status {}]] [[after:silent]]'), OWNER)
+        offered = next((event['tools'] for event in self.f.agent()[before:] if event.get('directive') == 'offered'), None)
+        self.gate('tools_offered_seen', offered is not None and 'mcp__nocheh__action_status' in offered, offered=offered)
+        listed = [name[len('mcp__nocheh__'):] for name in offered if name.startswith('mcp__nocheh__')]
+        observed = self.current.setdefault('observed', {})
+        observed['offered'], observed['not_offered_here'] = listed, sorted(set(names)-set(listed))
+        self.gate('offered_tools_are_nochehs', set(listed) <= set(names), unknown=sorted(set(listed)-set(names)))
+        calls = ' '.join('[[tool:mcp__nocheh__'+name+' '+json.dumps(self.SAFE_TOOL_INPUT.get(name, {}))+']]' for name in listed)
+        before = len(self.f.agent())
+        self.silent_turn(self.f.message(OWNER, 'همه را امتحان کن '+calls+' [[after:silent]]'), OWNER)
+        results = {event['tool'][len('mcp__nocheh__'):]: str(event.get('result') or '') for event in self.f.agent()[before:]
+                   if event.get('phase') == 'final' and str(event.get('tool') or '').startswith('mcp__nocheh__')}
+        observed['answers'] = {name: text[:150] for name, text in results.items()}
+        silent = [name for name in listed if not results.get(name, '').strip()]
+        broken = {name: text[:300] for name, text in results.items() if any(word in text for word in self.BROKEN)}
+        self.gate('every_offered_tool_answered', not silent, silent=silent)
+        self.gate('no_tool_broke', not broken, broken=broken)
+
     def search_hits_name_their_source(self):
         # Every archive_search hit names who wrote it, where and when, in a tag Nocheh's code builds from the archive, never
         # the model, beside every field it had (ADR-0261). The owner reads times in the Settings › Tasks time zone, a group
@@ -6082,7 +6116,7 @@ PRODUCT_ORDER = ['group_members', 'group_name_addresses', 'unaddressed_messages_
                  'job_operation_runs_after_approval',
                  'background_job_long_run', 'background_job_stop_button', 'background_job_restart', 'background_job_reaction_during_run',
                  'background_job_time_limit', 'machine_job_runs_after_one_approval', 'machine_job_refused_for_members_and_stopped',
-                 'defaults_keep_history_and_notion_off', 'notion_reads_and_asks_before_changes', 'gmail_reads_only_in_the_owners_chat', 'settings_apply_is_followed_to_the_end',
+                 'defaults_keep_history_and_notion_off', 'notion_reads_and_asks_before_changes', 'gmail_reads_only_in_the_owners_chat', 'every_listed_tool_answers', 'settings_apply_is_followed_to_the_end',
                  'memory_search_model_change_rebuilds_memory',
                  # A member's own private chat (step 4) and the owner's ask about it (step 4b), ADR-0262; the ask needs the marks
                  # the scenario before it planted, and the sweep after them reads both.
