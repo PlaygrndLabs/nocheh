@@ -280,14 +280,14 @@ export function TelegramSettings() {
                   <Unsaved show={s.changed('TELEGRAM_PROBLEM_NOTICES')} />
                 </>
               }
-              description="Messages your private chat about each new failure or problem, such as failed work or a model that refused. The same problem repeats at most once an hour, and only when it gets worse."
+              description="Off by default. When on, your private chat also gets a message about each new failure or problem, such as failed work or a model that refused. The same problem repeats at most once an hour, and only when it gets worse. Either way, System › Health lists every problem and System in the menu shows their count."
               htmlFor="telegram-problem-notices"
             >
               <div className="flex sm:justify-end">
                 <Switch
                   id="telegram-problem-notices"
                   label="Tell me about problems"
-                  checked={s.value('TELEGRAM_PROBLEM_NOTICES') !== 'false'}
+                  checked={s.value('TELEGRAM_PROBLEM_NOTICES') === 'true'}
                   disabled={s.busy}
                   onChange={on => s.set('TELEGRAM_PROBLEM_NOTICES', on ? 'true' : 'false')}
                 />

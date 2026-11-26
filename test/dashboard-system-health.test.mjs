@@ -96,7 +96,7 @@ test('failed attempts at telling where notes came from and memory read in part a
   );
 });
 
-test('the stores\' label lookups and recall\'s ask of forwards and files are lines of their own', () => {
+test("the stores' label lookups and recall's ask of forwards and files are lines of their own", () => {
   // Beside Hermes's own lines, so one side working never hides the other's failure.
   const found = issues({
     note_problems: [
@@ -155,8 +155,18 @@ test('source tags that could not be built are a stores line of their own (ADR-02
 test('note refs that could not be kept are a stores line of their own (ADR-0261)', () => {
   // Their labels went out; only the refs were lost, which a note labels line would misreport.
   assert.deepEqual(
-    issues({note_problems: [{day: '2026-11-14', kind: 'note_refs', failed: 2, ok: 0}]}).map(row => [row.text, row.detail, row.link]),
-    [['Keeping note refs failed 2 times today', 'Those notes went out with their sources named but could not be opened by ref. The notes are kept.', undefined]],
+    issues({note_problems: [{day: '2026-11-14', kind: 'note_refs', failed: 2, ok: 0}]}).map(row => [
+      row.text,
+      row.detail,
+      row.link,
+    ]),
+    [
+      [
+        'Keeping note refs failed 2 times today',
+        'Those notes went out with their sources named but could not be opened by ref. The notes are kept.',
+        undefined,
+      ],
+    ],
   );
 });
 
@@ -201,9 +211,14 @@ test('failed sends to chat apps need a look and open the Problems list', () => {
 
 test('a leave Telegram refused is a problem named as the request', () => {
   const item = sendIssue(
-    monitoring(sends({problems: 1, problem_kinds: {leave: 1}, latest_problems: [row('failed', 'leave', 'no_permission')]})),
+    monitoring(
+      sends({problems: 1, problem_kinds: {leave: 1}, latest_problems: [row('failed', 'leave', 'no_permission')]}),
+    ),
   );
-  assert.deepEqual([item.tone, item.text, item.detail], ['bad', '1 send to chat apps failed in the last day', 'Leave a group: 1']);
+  assert.deepEqual(
+    [item.tone, item.text, item.detail],
+    ['bad', '1 send to chat apps failed in the last day', 'Leave a group: 1'],
+  );
 });
 
 test('sends that may still have arrived warn instead of failing', () => {
@@ -296,6 +311,28 @@ test('backups and off-site copies that did not happen need a look and open Syste
       ['warn', 'Off-site copies of 3 backups were skipped', '#system?view=backups', 'Backups'],
     ],
   );
-  assert.match(found[0].detail, /^A file link outside a command workspace stopped the backup\..* Older backups are kept\.$/);
-  assert.equal(found[3].detail, 'Not enough free disk space to make the encrypted copy. Free some space, then try again.');
+  assert.match(
+    found[0].detail,
+    /^A file link outside a command workspace stopped the backup\..* Older backups are kept\.$/,
+  );
+  assert.equal(
+    found[3].detail,
+    'Not enough free disk space to make the encrypted copy. Free some space, then try again.',
+  );
+});
+
+test('a GitHub app GitHub refused and machine programs Nocheh could not end need a look, as their notices say', () => {
+  assert.deepEqual(issues({github: {reconnect: false}, machines: {cleanup_failed: 0}}), []);
+  assert.deepEqual(issues({github: {unavailable: true}, machines: {unavailable: true}}), []);
+  assert.deepEqual(
+    issues({github: {reconnect: true}, machines: {cleanup_failed: 2}}).map(issue => [
+      issue.tone,
+      issue.text,
+      issue.link,
+    ]),
+    [
+      ['bad', 'GitHub refused Nocheh’s app', '#connections?view=github'],
+      ['bad', 'Nocheh couldn’t end the programs of 2 stopped jobs in the last 7 days', '#system?view=machines'],
+    ],
+  );
 });

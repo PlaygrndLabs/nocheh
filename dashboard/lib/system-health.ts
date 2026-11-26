@@ -335,6 +335,24 @@ export function issues(m: any): Issue[] {
     });
   const sends = sendIssue(m);
   if (sends) list.push(sends);
+  // The rest of what a problem notice tells about, so Health shows every problem with notices off.
+  if (m.github?.reconnect)
+    list.push({
+      tone: 'bad',
+      text: 'GitHub refused Nocheh’s app',
+      detail: 'Jobs keep the copies they have until you connect GitHub again.',
+      link: href('connections', {view: 'github'}),
+      action: 'GitHub app',
+    });
+  const cleanup = m.machines?.cleanup_failed;
+  if (typeof cleanup === 'number' && cleanup > 0)
+    list.push({
+      tone: 'bad',
+      text: `Nocheh couldn’t end the programs of ${count(cleanup)} stopped ${cleanup === 1 ? 'job' : 'jobs'} in the last 7 days`,
+      detail: 'They may still run on the machine. End them yourself.',
+      link: href('system', {view: 'machines'}),
+      action: 'Machine log',
+    });
   list.push(...backupIssues(m));
   return list;
 }
