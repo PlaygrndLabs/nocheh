@@ -697,6 +697,8 @@ def provider():
 # Dollars per million tokens of the chat models a capped run may use; prompts above `long_above` tokens cost the long
 # rates. A model not listed has no price, so a capped run on it is refused before it starts.
 PRICES = {'claude-haiku-5-5': {'input': 0.10, 'output': 0.50, 'long_input': 0.50, 'long_output': 2.50, 'long_above': 100000}}
+# How many of the latest agent requests the relay keeps for /fixture/relay.
+RELAY_KEPT = 60
 # The memory search model's price per million tokens, for the spend count.
 EMBEDDING_PRICE = 0.02
 
@@ -749,6 +751,8 @@ def relay(app, upstream, counts, canary, client=None, model=None, price=None, ca
     from fastapi.responses import JSONResponse, StreamingResponse
     from starlette.background import BackgroundTask
     client = client or httpx.AsyncClient(timeout=httpx.Timeout(300, connect=20))
+    # The latest agent requests, numbered: the benchmark runner reads a turn's tool calls and their results from them.
+    seen = {'count': 0, 'requests': []}
     if cap is not None and not price:
         raise ValueError('fixture_spend_cap_needs_a_price')
     counts.setdefault('spend_dollars', 0.0)
@@ -772,6 +776,8 @@ def relay(app, upstream, counts, canary, client=None, model=None, price=None, ca
                 counts['learning'] += 1
             elif kind == 'chat':
                 counts['chat'] += 1
+                seen['count'] += 1
+                seen['requests'] = seen['requests'][-(RELAY_KEPT-1):] + [{'n': seen['count'], 'messages': parsed.get('messages')}]
             if kind == 'chat' and model and isinstance(parsed, dict):
                 parsed['model'] = model
                 body = json.dumps(parsed).encode()
@@ -802,6 +808,10 @@ def relay(app, upstream, counts, canary, client=None, model=None, price=None, ca
     @app.post('/v1/chat/completions')
     async def completions(request: Request):
         return await forward(request, 'chat', '/chat/completions')
+
+    @app.get('/fixture/relay')
+    def relayed(since: int = 0):
+        return {'count': seen['count'], 'requests': [row for row in seen['requests'] if row['n'] > since]}
 
     @app.get('/v1/models')
     async def models(request: Request):

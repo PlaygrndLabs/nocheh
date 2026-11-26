@@ -305,6 +305,7 @@ def main():
     parser.add_argument('--isolation-topic', type=int, default=9,
                         help='An unused synthetic topic for the shared topic memory case; the next one must be unused too.')
     parser.add_argument('--skip-fresh', action='store_true', help='Leave out the fresh-session variant of each case.')
+    parser.add_argument('--relay-only', action='store_true', help='Switch the fixture to the relay and stop, asking nothing.')
     parser.add_argument('--model', default='claude-haiku-5-5', help='The one model that answers every call of the run.')
     parser.add_argument('--spend-cap', type=float, default=5.0,
                         help='Dollars; the relay refuses every call once the run has spent this much.')
@@ -326,6 +327,8 @@ def main():
     if not 0 < args.spend_cap <= 20:
         parser.error('--spend-cap must be above 0 and at most 20 dollars')
     fixture = Fixture(args.directory, upstream, args.model, args.spend_cap)
+    if args.relay_only:
+        return
     output = fixture.directory / ('quality-' + str(time.time_ns()))
     output.mkdir(mode=0o700)
     results = {'live_acceptance': False, 'real_model': True, 'quality_review': 'automatic', 'cases': [], 'sources': [],

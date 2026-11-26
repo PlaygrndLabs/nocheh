@@ -10,7 +10,8 @@ The model fixture serves them where an installation with NOCHEH_INSTALLATION_FIX
 - `/gmail/token`, `/gmail/revoke` and the mailbox under `/gmail/gmail/v1`: Google's code and refresh exchanges and the
   Gmail reads Nocheh makes (profile, a search, a message, a thread). Mail carries the mark the tester set.
 - `/fixture/notion` and `/fixture/gmail`: GET answers the requests that came, in order; POST sets the tokens and marks,
-  and empties the list.
+  and empties the list. POST may also give the made-up content itself: `pages` for Notion (each {id, title, text}) and
+  `messages` for Gmail (each {id, thread, from, to, subject, date, text}), as the benchmark runner does for each case.
 """
 import base64
 import json
@@ -40,7 +41,9 @@ class ConnectorsMock:
     def __init__(self):
         # token -> the mark its pages carry.
         self.notion = {}
-        self.gmail = {'mark': None, 'access': set(), 'refresh': set()}
+        # Made-up pages and mail a caller set; none means the one marked page and message.
+        self.pages = None
+        self.gmail = {'mark': None, 'access': set(), 'refresh': set(), 'messages': None}
         self.requests = {'notion': [], 'gmail': []}
 
     @staticmethod
@@ -48,7 +51,25 @@ class ConnectorsMock:
         value = request.headers.get('authorization') or ''
         return value[7:] if value.startswith('Bearer ') else None
 
+    def notion_pages(self, tool, arguments):
+        """The answer from the pages a caller set: a search lists every page whose title or text has a word of the
+        query, or all when none has; a fetch opens a page by id or title."""
+        if tool == 'notion-search':
+            words = [word for word in str(arguments.get('query') or '').lower().split() if len(word) > 1]
+            found = [page for page in self.pages if any(word in (page['title']+' '+page['text']).lower() for word in words)] or self.pages
+            return {'results': [{'id': page['id'], 'title': page['title'], 'highlight': page['text'][:200]} for page in found],
+                    'query': arguments.get('query')}
+        if tool == 'notion-fetch':
+            wanted = str(arguments.get('id') or arguments.get('url') or '')
+            page = next((page for page in self.pages if wanted and (wanted == page['id'] or wanted.endswith(page['id']) or wanted == page['title'])), None)
+            return page or {'error': 'object_not_found'}
+        if tool == 'notion-get-self':
+            return {'user': {'name': 'Made-up owner', 'email': 'someone@example.com'}}
+        return {'ok': True, 'changed': tool}
+
     def notion_answer(self, token, tool, arguments):
+        if self.pages is not None:
+            return self.notion_pages(tool, arguments)
         mark = self.notion[token]
         page = {'id': '0' * 31 + '1', 'title': 'Made-up plan ' + mark, 'text': 'The made-up plan for the week. ' + mark}
         if tool == 'notion-search':
@@ -58,6 +79,28 @@ class ConnectorsMock:
         if tool == 'notion-get-self':
             return {'user': {'name': 'Made-up ' + mark, 'email': 'someone@example.com'}}
         return {'ok': True, 'changed': tool, 'mark': mark}
+
+    def mailbox(self, rest):
+        """Gmail's answers from the made-up mail a caller set: a search lists every message, newest first."""
+        from fastapi.responses import JSONResponse
+
+        def full(message):
+            headers = [{'name': name.capitalize(), 'value': message[name]} for name in ('from', 'to', 'subject', 'date')]
+            text = base64.urlsafe_b64encode(message['text'].encode()).decode().rstrip('=')
+            return {'id': message['id'], 'threadId': message['thread'], 'labelIds': ['INBOX'], 'snippet': message['text'][:100],
+                    'payload': {'mimeType': 'text/plain', 'headers': headers, 'body': {'data': text}}}
+        messages = self.gmail['messages']
+        if rest == 'profile':
+            return {'emailAddress': 'owner@example.com'}
+        if rest == 'messages':
+            return {'messages': [{'id': message['id'], 'threadId': message['thread']} for message in messages], 'resultSizeEstimate': len(messages)}
+        for message in messages:
+            if rest == 'messages/' + message['id']:
+                return full(message)
+        thread = [full(message) for message in messages if rest == 'threads/' + message['thread']]
+        if thread:
+            return {'id': thread[0]['threadId'], 'messages': thread}
+        return JSONResponse({'error': {'code': 404, 'message': 'Not Found'}}, status_code=404)
 
     def install(self, app):
         from fastapi import Request
@@ -127,6 +170,8 @@ class ConnectorsMock:
             self.requests['gmail'].append({'path': '/' + rest, 'query': str(request.url.query), 'known': known})
             if not known:
                 return refused()
+            if self.gmail['messages'] is not None:
+                return self.mailbox(rest)
             mark = self.gmail['mark'] or 'GMAILMARK'
             headers = [{'name': 'From', 'value': 'Someone <someone@example.com>'}, {'name': 'To', 'value': 'owner@example.com'},
                        {'name': 'Subject', 'value': 'Made-up invoice ' + mark}, {'name': 'Date', 'value': 'Mon, 2 Mar 2026 09:00:00 +0000'}]
@@ -151,6 +196,8 @@ class ConnectorsMock:
         async def notion_set(request: Request):
             body = json.loads(await request.body() or b'{}')
             self.notion = {str(token): str(mark) for token, mark in (body.get('tokens') or {}).items()}
+            self.pages = [{'id': str(page['id']), 'title': str(page.get('title') or ''), 'text': str(page.get('text') or '')}
+                          for page in body['pages']] if isinstance(body.get('pages'), list) else None
             self.requests['notion'] = []
             return {'ok': True}
 
@@ -162,5 +209,7 @@ class ConnectorsMock:
         async def gmail_set(request: Request):
             body = json.loads(await request.body() or b'{}')
             self.gmail['mark'] = body.get('mark')
+            self.gmail['messages'] = [{key: str(message.get(key) or '') for key in ('id', 'thread', 'from', 'to', 'subject', 'date', 'text')}
+                                      for message in body['messages']] if isinstance(body.get('messages'), list) else None
             self.requests['gmail'] = []
             return {'ok': True}

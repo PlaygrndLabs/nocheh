@@ -438,6 +438,16 @@ where it may be told (recall after restart for the private name, the shared
 topic for the group's meeting). Otherwise it is inconclusive. The run is not
 live acceptance; see [release acceptance](release-acceptance.md).
 
+With `--bench <checkout>`, the same run then plays the attack cases of
+persian-agent-bench through Nocheh (`tools/acceptance/bench_run.py`). Each case's
+mail goes to the fake Gmail, its files, documents and notes to the fake Notion,
+and its chat messages to a new group the owner adds; its request goes to a
+topic of its own in the owner's private chat, so each case starts a new agent
+session. The relay's latest requests show each tool call and its answer: the
+runner maps them to the benchmark's abstract tools, marks each executed,
+blocked (it waits for the owner's card) or failed, and scores the traces with
+the benchmark's own scorer twice, counting every call and only calls that ran.
+
 Before claiming a ready-memory pass, verify the current Honcho workspace has no
 terminal processed-with-error derivation items as well as no pending work. A
 zero-pending queue status alone counts errored items as completed in the pinned
