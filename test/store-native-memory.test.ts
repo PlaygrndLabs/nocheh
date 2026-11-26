@@ -46,7 +46,12 @@ test('reply context reads Honcho on arrival, limits other audiences to their own
     if(sql.includes('peer_ids ? $2 AND ($3::text IS NULL OR session_id=$3)'))return {rowCount:1,rows:[{}]};
     throw Error('unexpected_control_query '+sql);
   }};
-  const contexts={access:{stores:{control},policy:()=>({owner_id:'123'}),archive:{captured:async()=>({reference:root})}},
+  // A scheduled run's event is not in the archive (ADR-0266): it reads its chat's context through the newest message there.
+  const anchor={store:'archive',kind:'event',id:digest('anchor'),revision:'1',input_hash:digest('anchor-hash')},anchored:string[]=[];
+  let archived:any[]=[];const spaceOf:Record<string,string>={[anchor.id]:'123',[digest('topic-message')]:'-100/topic/3'};
+  const archive={query:async(sql:string,values:any[])=>{assert.match(sql,/kind='telegram_update' ORDER BY capture_sequence DESC/);anchored.push(...values[0]);return {rows:archived};}};
+  const contexts={access:{stores:{control,archive},policy:()=>({owner_id:'123'}),space:async(reference:any)=>spaceOf[reference.id]??null,
+    archive:{captured:async(id:string)=>{if(id===digest('scheduled-run'))throw new HttpError(404,'source_not_found');return {reference:root};}}},
     entities:{context:async()=>({session_id:key,speaker:{id:'speaker',kind:'person'},project:null,mentioned_projects:[],mentioned_people:[]})},
     guards:{prepareContext:async()=>{prepared++;return null;},read:async()=>({value:{text:'Guarded Honcho context'}})}};
   const derived={record:async(input:any)=>{records.push(input.operation_id);contents.push(String(input.content));return {store:'derived',kind:'artifact',id:digest(input.operation_id),input_hash:digest(input.content)};}};
@@ -100,6 +105,20 @@ test('reply context reads Honcho on arrival, limits other audiences to their own
   failForwards=false;asked=calls.length;
   const job=await memory.context({...ownerReader,logical_profile:'job-fixture'} as Reader) as any;
   assert.equal(calls.length,asked+1);assert.deepEqual(job.sources.map((source:any)=>source.about),[undefined]);
+  // A scheduled run in the owner's private chat reads the same blocks, through the newest message in that chat; a message
+  // in another chat or topic never stands in. With none, it reads nothing and that is no failure.
+  const scheduled={...ownerReader,turnEvent:digest('scheduled-run'),keyKind:'scheduled'} as Reader;
+  archived=[{id:digest('topic-message'),revision:'1',payload_hash:digest('t')},{id:anchor.id,revision:anchor.revision,payload_hash:anchor.input_hash}];
+  asked=calls.length;const restoreChats=installChatsForTest(recallChats());
+  const brief=await memory.context(scheduled).finally(restoreChats) as any;
+  assert.equal(brief.limited_memory,false);assert.equal(brief.error,undefined);
+  assert.deepEqual(brief.sources.map((source:any)=>source.about),['owner','forwards_and_files']);assert.equal(calls.length,asked+2);
+  assert.ok(anchored.includes('123'),'read from the archive scopes of its own chat');
+  archived=[{id:digest('topic-message'),revision:'1',payload_hash:digest('t')}];asked=calls.length;
+  const none=await memory.context(scheduled) as any;
+  assert.equal(none.limited_memory,true);assert.equal(none.error,undefined);assert.equal(calls.length,asked);
+  // Any other turn whose message is missing still fails as before.
+  assert.equal((await memory.context({...ownerReader,turnEvent:digest('scheduled-run')} as Reader) as any).error,'memory_context_failed');
   delete sessions[materialSessionKey(engine.protocol)];
   const calledBefore=calls.length;
   const crossed=await memory.context(group);

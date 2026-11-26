@@ -1229,7 +1229,7 @@ export class NativeMemoryRepository {
     try {
       const current=await this.current(workspace.id),audience=this.principalAudience(principal);
       if(await this.correcting(current))return correcting;
-      const source=(await this.contexts.access.archive.captured(principal.turnEvent)).reference;
+      const source=await this.contextSource(principal);if(!source)return limited;
       // A job's run reads what it read before; the forwards-and-files block is for the owner's own turns.
       const material=audience==='owner'&&!jobRun(principal),read=await this.sessionContext(current,audience,source,material);
       await this.current(workspace.id);await this.prepared.audience.assert(principal);
@@ -1249,6 +1249,21 @@ export class NativeMemoryRepository {
         status:error instanceof HttpError?error.status:null,type:error instanceof Error&&/^[A-Za-z]{1,40}$/.test(error.name)?error.name:null}));
       await this.prepared.audience.assert(principal);return {...limited,error:'memory_context_failed'};
     }
+  }
+  /** The archived message a turn's long-term context is read for: the turn's own. A scheduled run has none, so it reads
+   *  the context of its chat or topic through the newest message there (ADR-0266); none when nothing was said there yet. */
+  private async contextSource(principal:Reader):Promise<SourceReference|null> {
+    try{return (await this.contexts.access.archive.captured(principal.turnEvent!)).reference;}
+    catch(error){if(!(error instanceof HttpError&&error.code==='source_not_found'&&principal.keyKind==='scheduled'))throw error;}
+    const space=principal.space;if(!space)return null;
+    const rows=(await this.contexts.access.stores.archive.query(`SELECT id,revision,payload_hash FROM events WHERE scope=ANY($1::text[])
+      AND channel='telegram' AND kind='telegram_update' ORDER BY capture_sequence DESC LIMIT 50`,[archiveScopes([space])])).rows;
+    for(const row of rows) {
+      const reference:SourceReference={store:'archive',kind:'event',id:row.id,revision:row.revision,input_hash:row.payload_hash};
+      // A group's newest message may be in another topic: only one the run's own chat or topic holds.
+      if(await this.contexts.access.space(reference)===space)return reference;
+    }
+    return null;
   }
   private async relevantOwnerCorrections(principal:Reader,query:string,binding:GuardBinding) {
     const space=principal.space??principal.scope;
