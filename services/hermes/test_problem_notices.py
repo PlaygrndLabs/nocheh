@@ -116,6 +116,17 @@ class ProblemNoticeTests(unittest.TestCase):
         self.check(NOW + 4000, monitoring(failed=20), usage=refusals(2, 2))
         self.assertEqual(self.sent, [])
 
+    def test_the_switch_is_off_unless_the_owner_turned_it_on(self):
+        def run(now, values):
+            sent = []
+            send = lambda body: sent.append(body) or {'state': 'done'}
+            return problems.check(self.state, monitoring(failed=20 + now - NOW), [], send, now, None, values)['state'], sent
+        run(NOW, {})
+        self.assertEqual(run(NOW + 120, {}), ('turned_off', []), 'off by default')
+        self.assertEqual(run(NOW + 4000, {'TELEGRAM_PROBLEM_NOTICES': 'false'})[0], 'turned_off')
+        state, sent = run(NOW + 8000, {'TELEGRAM_PROBLEM_NOTICES': 'true'})
+        self.assertEqual((state, len(sent)), ('done', 1))
+
     def test_unreadable_background_work_does_not_reset_its_totals(self):
         self.check(NOW)
         self.check(NOW + 120, monitoring(work=False))

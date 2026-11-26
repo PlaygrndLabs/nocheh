@@ -19,7 +19,7 @@ DEFAULTS = {
     'NOCHEH_GUARD_MODE': 'on', 'NOCHEH_SECURITY_RUNTIME': 'isolated', 'NOCHEH_MEMORY_CONTEXT': 'evidence',
     'TELEGRAM_ENABLED': 'false', 'TELEGRAM_BOT_TOKEN': '', 'TELEGRAM_OWNER_ID': '',
     'TELEGRAM_GROUP_REPLIES': 'addressed', 'TELEGRAM_BOT_NAMES': 'Nocheh,نوچه', 'TELEGRAM_TOPIC_MEMORY': 'group', 'TELEGRAM_TYPING': 'true', 'TELEGRAM_REACTIONS': 'true',
-    'TELEGRAM_PROBLEM_NOTICES': 'true', 'NOCHEH_QUIET_HOURS': '', 'NOCHEH_DASHBOARD_URL': '',
+    'TELEGRAM_PROBLEM_NOTICES': 'false', 'NOCHEH_QUIET_HOURS': '', 'NOCHEH_DASHBOARD_URL': '',
     'NOCHEH_MONTHLY_LIMIT_USD': '',
     'POSTGRES_PASSWORD': '', 'SERVICE_TOKEN': '',
     'NOCHEH_STORAGE_LAYOUT': 'original-only-v1',
@@ -221,7 +221,7 @@ def validate(values):
     if values.get('TELEGRAM_TOPIC_MEMORY','group') not in ('group','topic'):raise ValueError('TELEGRAM_TOPIC_MEMORY must be group or topic')
     if values.get('TELEGRAM_TYPING','true') not in ('true','false'):raise ValueError('TELEGRAM_TYPING must be true or false')
     if values.get('TELEGRAM_REACTIONS','true') not in ('true','false'):raise ValueError('TELEGRAM_REACTIONS must be true or false')
-    if values.get('TELEGRAM_PROBLEM_NOTICES','true') not in ('true','false'):raise ValueError('TELEGRAM_PROBLEM_NOTICES must be true or false')
+    if values.get('TELEGRAM_PROBLEM_NOTICES','false') not in ('true','false'):raise ValueError('TELEGRAM_PROBLEM_NOTICES must be true or false')
     # Quiet hours: a start and an end in each person's own time zone, such as 23:00-07:00; empty is off.
     quiet=str(values.get('NOCHEH_QUIET_HOURS',''))
     if quiet and not (re.fullmatch(r'(?:[01]\d|2[0-3]):[0-5]\d-(?:[01]\d|2[0-3]):[0-5]\d',quiet) and quiet[:5]!=quiet[6:]):

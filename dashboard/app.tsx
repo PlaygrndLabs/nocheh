@@ -33,6 +33,7 @@ import {useHash, useParam} from './lib/navigation';
 import {pageTitles, tabLinks} from './lib/page-tabs';
 import {useResource} from './lib/resource';
 import {useInboxCount} from './lib/inbox';
+import {issues} from './lib/system-health';
 import {cn} from './lib/utils';
 import {apiPost} from './lib/api';
 import {Button, Dot, Field, Input, Spinner, type Tone} from './ui/core';
@@ -185,6 +186,8 @@ function Navigation({
   onToggle?: () => void;
 }) {
   const inbox = useInboxCount();
+  // Everything System › Health says needs a look, so a problem is seen without a Telegram notice.
+  const problems = issues(useResource<any>('/monitoring', 15000).data).length;
   const view = useParam('view');
   const [isOpen, toggleGroup] = useOpenGroups(page);
   const [theme, cycleTheme] = useTheme();
@@ -261,6 +264,20 @@ function Navigation({
                     ) : (
                       <span className="tabular rounded-full bg-accent px-1.5 text-[11px] leading-5 font-semibold text-on-accent">
                         {inbox > 99 ? '99+' : inbox}
+                      </span>
+                    ))}
+                  {id === 'system' &&
+                    !!problems &&
+                    (collapsed ? (
+                      <span className="absolute top-1.5 right-2.5 size-2 rounded-full bg-bad">
+                        <span className="sr-only">, {problems} need a look</span>
+                      </span>
+                    ) : (
+                      <span
+                        title={`${problems} ${problems === 1 ? 'thing needs' : 'things need'} a look`}
+                        className="tabular rounded-full bg-bad px-1.5 text-[11px] leading-5 font-semibold text-on-accent"
+                      >
+                        {problems > 99 ? '99+' : problems}
                       </span>
                     ))}
                 </a>

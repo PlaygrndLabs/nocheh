@@ -1,8 +1,9 @@
 """Problems worth telling the owner about, and the Telegram notice that tells them.
 
 The dashboard runs `check` every two minutes. It reads what System › Health reads, plus
-today's model usage and the files Hermes's readers could not read, and sends the owner's private chat one message that lists every
-problem that is new or worse. A problem repeats at most once an hour, and only when it got
+today's model usage and the files Hermes's readers could not read, and, only when Settings › Telegram › Tell me about
+problems is on (off by default), sends the owner's private chat one message that lists every problem that is new or worse.
+System › Health and the count on System in the dashboard's menu show the same problems either way. A problem repeats at most once an hour, and only when it got
 worse; one that goes away and comes back is new again. Failed and uncertain background
 tasks are kept forever, so only their growth is news: the first check after an
 installation that can read them records the totals it finds without a message.
@@ -584,7 +585,7 @@ def check(state, monitoring=None, usage_rows=None, send=None, now=None, enabled=
     if values is None:
         values = load(state)
     if enabled is None:
-        enabled = values.get('TELEGRAM_PROBLEM_NOTICES', 'true') != 'false'
+        enabled = values.get('TELEGRAM_PROBLEM_NOTICES', 'false') == 'true'
     if monitoring is None:
         from tools.operations.provider.monitoring import status
         monitoring = status(state)
