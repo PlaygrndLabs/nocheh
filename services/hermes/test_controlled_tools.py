@@ -105,6 +105,14 @@ class ToolTests(unittest.TestCase):
         self.assertEqual(str(raised.exception),'public_https_required')
         self.assertEqual(run.call_args.args[0][:3],['docker','rm','-f'])
 
+    def test_the_isolated_helper_gets_the_fake_services_only_in_a_fixture(self):
+        from tools.operations.security.tool_execution import child_environment
+        fakes={'NOCHEH_GITHUB_URL':'http://model-fixture:8317/github','NOCHEH_NOTION_URL':'http://model-fixture:8317/notion',
+               'NOCHEH_GMAIL_URL':'http://model-fixture:8317/gmail'}
+        given={'PATH':'/usr/bin','SECRET_KEY':'kept-out',**fakes}
+        self.assertEqual(child_environment(given),{'PATH':'/usr/bin'})
+        self.assertEqual(child_environment({**given,'NOCHEH_INSTALLATION_FIXTURE':'1'}),{'PATH':'/usr/bin','NOCHEH_INSTALLATION_FIXTURE':'1',**fakes})
+
     def test_an_unconfirmed_outcome_keeps_only_a_fixed_failure_code(self):
         from tools.operations.security.tool_execution import failure
         import subprocess,socket,ssl

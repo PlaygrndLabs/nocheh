@@ -201,10 +201,18 @@ def execute(state,action,request=https_request,run=subprocess.run,container_name
         run(['docker','rm','-f',name],stdout=subprocess.DEVNULL,stderr=subprocess.DEVNULL,timeout=15)
 
 
+def child_environment(environ=os.environ):
+    """What the isolated helper gets: only what it needs to run. In the tester's fixture installation, also where the
+    fake connected services are (connections/fixture.py), so a call there never falls back to the real service."""
+    keys=('PATH','HOME','LANG','DOCKER_HOST','DOCKER_CONTEXT','DOCKER_CONFIG','NOCHEH_TOOLS_IMAGE')
+    if environ.get('NOCHEH_INSTALLATION_FIXTURE')=='1':keys+=('NOCHEH_INSTALLATION_FIXTURE','NOCHEH_GITHUB_URL','NOCHEH_NOTION_URL','NOCHEH_GMAIL_URL')
+    return {key:environ[key] for key in keys if key in environ}
+
+
 def bounded_execute(state,action):
     """An overall process deadline also bounds DNS and slow response streams."""
     name='nocheh-tool-'+uuid.uuid4().hex
-    env={key:os.environ[key] for key in ('PATH','HOME','LANG','DOCKER_HOST','DOCKER_CONTEXT','DOCKER_CONFIG','NOCHEH_TOOLS_IMAGE') if key in os.environ}
+    env=child_environment()
     process=subprocess.Popen([sys.executable,'-m','tools.operations.security.tool_execution'],cwd=REPO_ROOT,env=env,
         stdin=subprocess.PIPE,stdout=subprocess.PIPE,stderr=subprocess.DEVNULL,start_new_session=True)
     selector=selectors.DefaultSelector();output=bytearray();deadline=time.monotonic()+75
