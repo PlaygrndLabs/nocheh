@@ -17,6 +17,8 @@ class ArchiveTests(unittest.TestCase):
             with patch.object(archive_tools,'_PROCESS_CREDENTIAL',None),patch('urllib.request.urlopen',side_effect=slow_read) as network:
                 self.assertEqual(archive_tools.request('/v1/context/prepare',{'text':'Synthetic context'}),{'text':'Synthetic context'})
                 self.assertEqual(network.call_args.kwargs['timeout'],60)
+                self.assertEqual(archive_tools.request('/v1/memory/longterm/context',{}),{'text':'Synthetic context'})
+                self.assertEqual(network.call_args.kwargs['timeout'],60)
                 with self.assertRaises(TimeoutError): archive_tools.request('/v1/search?q=synthetic')
                 self.assertEqual(network.call_args.kwargs['timeout'],15)
         finally: archive_tools.ARCHIVE_CREDENTIAL.reset(token)
