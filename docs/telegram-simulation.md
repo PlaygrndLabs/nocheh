@@ -411,21 +411,32 @@ environment is a later step.
 <real_model_evaluation>
 
 The `model-fixture` service is configured as an ordinary custom provider and
-answers deterministically. For real-model memory cases, after the Telegram
-rehearsal and the scripted scenarios run `python3 -m tools.acceptance.model_rehearsal
---directory <fixture> --upstream <private file>`. Relay mode stays on for that
-fixture, so the scripted scenarios refuse to run until its saved
+answers deterministically. For real-model memory cases, run `python3 -m
+tools.acceptance.real_model_run --upstream <private file> [--build]`: it starts a
+synthetic installation, connects the fake Telegram, runs `python3 -m
+tools.acceptance.model_rehearsal` and removes the fixture. Relay mode stays on
+for a kept fixture, so the scripted scenarios refuse to run until its saved
 `compose.before-model.json` is restored. The file is owner-authorized, mode 0600, outside
 tracked source, and names `chat` and optional `embeddings` providers as
 `{"url": "https://…", "key": "…"}`. The fixture model service then relays chat,
-model-list and embedding requests there with only the authorization replaced;
+model-list and embedding requests there with only the authorization replaced,
+and with one model (`--model`, the cheap one by default) answering every chat call;
 it alone joins an egress network, every other fixture network stays internal,
-and an unguarded secret canary is refused outside the secret check. Cases cover
-reaction removal, a corrected fact, private isolation, memory shared across a
-group's topics, isolation between groups, recall after restart and a retired
-fact. Saved answers remain pending semantic review against ground truth;
-successful delivery alone cannot pass recall, and the run is not live
-acceptance; see [release acceptance](release-acceptance.md).
+and an unguarded secret canary is refused outside the secret check. The relay
+counts what each reply cost from its reported tokens and refuses every call once
+the run has spent `--spend-cap` dollars (5 by default).
+
+Cases cover reaction removal, a corrected fact, private isolation, memory shared
+across a group's topics, isolation between groups, recall after restart and a
+retired fact. Each also runs in a fresh agent session: in the same chat after
+its day is moved on with nothing carried, or in a thread of the group never used
+before. Answers are graded by code: what they must say, what they must never
+say, in Persian or Latin digits, and that they are in Persian. Only the reaction
+case, which words cannot settle, asks the same model as a judge. A check that
+something stays hidden passes only when its control passed: the same fact asked
+where it may be told (recall after restart for the private name, the shared
+topic for the group's meeting). Otherwise it is inconclusive. The run is not
+live acceptance; see [release acceptance](release-acceptance.md).
 
 Before claiming a ready-memory pass, verify the current Honcho workspace has no
 terminal processed-with-error derivation items as well as no pending work. A

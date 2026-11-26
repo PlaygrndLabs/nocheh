@@ -619,7 +619,9 @@ def provider():
     agent = ScriptedAgent(counts, canary)
     upstream = os.environ.get('NOCHEH_FIXTURE_UPSTREAM')
     if upstream:
-        relay(app, json.loads(open(upstream).read()), counts, canary)
+        model = os.environ.get('NOCHEH_FIXTURE_UPSTREAM_MODEL') or None
+        relay(app, json.loads(open(upstream).read()), counts, canary, model=model, price=PRICES.get(model),
+              cap=float(os.environ.get('NOCHEH_FIXTURE_SPEND_CAP') or 0) or None)
     else:
         # Registered before Honcho's mock router so tool-bearing agent turns that
         # carry an explicit fixture directive reach the scripted agent first.
@@ -692,17 +694,64 @@ def provider():
     uvicorn.run(app, host='0.0.0.0', port=8317, log_level='warning', access_log=False)
 
 
-def relay(app, upstream, counts, canary, client=None):
-    """Forward the OpenAI-compatible routes to the configured providers unchanged.
+# Dollars per million tokens of the chat models a capped run may use; prompts above `long_above` tokens cost the long
+# rates. A model not listed has no price, so a capped run on it is refused before it starts.
+PRICES = {'claude-haiku-5-5': {'input': 0.10, 'output': 0.50, 'long_input': 0.50, 'long_output': 2.50, 'long_above': 100000}}
+# The memory search model's price per million tokens, for the spend count.
+EMBEDDING_PRICE = 0.02
 
-    Only the authorization changes. The canary check still proves that every
-    request except the secret detector reaches the model already guarded.
+
+def usage_of(received):
+    """The token use a provider reported: a JSON reply's, or the last one a stream carried; None when it sent none."""
+    text = received.decode('utf-8', 'replace')
+    try:
+        value = json.loads(text)
+        return value['usage'] if isinstance(value, dict) and isinstance(value.get('usage'), dict) else None
+    except ValueError:
+        pass
+    found = None
+    for line in text.splitlines():
+        line = line.strip()
+        line = line[5:].strip() if line.startswith('data:') else line
+        if not line.startswith('{'):
+            continue
+        try:
+            value = json.loads(line)
+        except ValueError:
+            continue
+        if isinstance(value, dict) and isinstance(value.get('usage'), dict):
+            found = value['usage']
+    return found
+
+
+def cost_of(kind, sent, received, price):
+    """What one request cost in dollars, from the reported tokens; without them, a high guess from the bytes."""
+    usage = usage_of(received) or {}
+    number = lambda value, fallback: value if type(value) is int and value >= 0 else fallback
+    tokens_in = number(usage.get('prompt_tokens', usage.get('input_tokens')), len(sent) // 2)
+    if kind == 'embeddings':
+        return tokens_in * EMBEDDING_PRICE / 1e6
+    tokens_out = number(usage.get('completion_tokens', usage.get('output_tokens')), len(received) // 2)
+    long = tokens_in > price.get('long_above', 10**12)
+    return (tokens_in * price['long_input' if long else 'input'] + tokens_out * price['long_output' if long else 'output']) / 1e6
+
+
+def relay(app, upstream, counts, canary, client=None, model=None, price=None, cap=None):
+    """Forward the OpenAI-compatible routes to the configured providers.
+
+    Only the authorization changes, and with `model` the chat model every caller asks for, so one cheap model answers
+    all of Nocheh. The canary check still proves that every request except the secret detector reaches the model
+    already guarded. With `cap`, the spend so far is counted from each reply and every request past the cap is refused,
+    so a run never costs more than the owner allowed.
     """
     import httpx
     from fastapi import Request
     from fastapi.responses import JSONResponse, StreamingResponse
     from starlette.background import BackgroundTask
     client = client or httpx.AsyncClient(timeout=httpx.Timeout(300, connect=20))
+    if cap is not None and not price:
+        raise ValueError('fixture_spend_cap_needs_a_price')
+    counts.setdefault('spend_dollars', 0.0)
 
     async def forward(request, kind, path):
         spec = upstream[kind]
@@ -723,6 +772,12 @@ def relay(app, upstream, counts, canary, client=None):
                 counts['learning'] += 1
             elif kind == 'chat':
                 counts['chat'] += 1
+            if kind == 'chat' and model and isinstance(parsed, dict):
+                parsed['model'] = model
+                body = json.dumps(parsed).encode()
+            if cap is not None and counts['spend_dollars'] >= cap:
+                counts['spend_refused'] = counts.get('spend_refused', 0) + 1
+                return JSONResponse({'error': {'message': 'fixture_spend_cap_reached'}}, status_code=402)
         sent = client.build_request(request.method, spec['url'].rstrip('/') + path, content=body or None,
             headers={'content-type': 'application/json', 'accept': request.headers.get('accept', 'application/json'),
                      'authorization': 'Bearer ' + spec['key']})
@@ -733,7 +788,15 @@ def relay(app, upstream, counts, canary, client=None):
             return JSONResponse({'error': {'message': 'fixture_upstream_' + type(error).__name__}}, status_code=502)
         if response.status_code >= 400:
             counts['upstream_errors'] = counts.get('upstream_errors', 0) + 1
-        return StreamingResponse(response.aiter_bytes(), status_code=response.status_code,
+
+        async def passed_on():
+            received = []
+            async for chunk in response.aiter_bytes():
+                received.append(chunk)
+                yield chunk
+            if request.method == 'POST' and price:
+                counts['spend_dollars'] = round(counts['spend_dollars'] + cost_of(kind, body, b''.join(received), price), 6)
+        return StreamingResponse(passed_on(), status_code=response.status_code,
             media_type=response.headers.get('content-type'), background=BackgroundTask(response.aclose))
 
     @app.post('/v1/chat/completions')

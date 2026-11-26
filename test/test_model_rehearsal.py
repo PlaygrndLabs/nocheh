@@ -9,8 +9,8 @@ import unittest
 from pathlib import Path
 from unittest.mock import patch
 from tools.paths import ROOT
-from tools.acceptance.model_rehearsal import (enable_relay, main, next_update_base, read_upstream, replies_to,
-    retire_synthetic_name_sources, selected_cases, validate_model_egress)
+from tools.acceptance.model_rehearsal import (enable_relay, grade, main, next_update_base, read_upstream, replies_to,
+    retire_synthetic_name_sources, says, selected_cases, settle, validate_model_egress)
 
 PROJECT = 'nocheh-installation-' + 'a' * 12
 
@@ -33,6 +33,11 @@ class ModelRehearsalReplyTests(unittest.TestCase):
             self.assertEqual(valid['networks']['model-egress'], {'name': PROJECT + '-model-egress'})
             self.assertEqual(oct((directory / 'state/model-upstream.json').stat().st_mode & 0o777), '0o600')
             self.assertNotIn('key', json.dumps(valid['services']['model-fixture']['environment']))
+            self.assertEqual({key: value for key, value in valid['services']['model-fixture']['environment'].items() if 'MODEL' in key or 'CAP' in key},
+                             {'NOCHEH_FIXTURE_UPSTREAM_MODEL': 'claude-haiku-5-5', 'NOCHEH_FIXTURE_SPEND_CAP': '5.0'})
+            for model, cap in (('claude-haiku-5-5', 0), ('claude-haiku-5-5', 21), ('Bad Model', 5.0)):
+                with self.subTest(model=model, cap=cap), self.assertRaisesRegex(ValueError, 'model_and_cap_required'):
+                    enable_relay(directory, manifest(), upstream, model, cap)
         for change in (lambda m: m['services']['hermes']['networks'].update({'model-egress': None}),
                        lambda m: m['networks']['default'].update(internal=False),
                        lambda m: m['networks']['model-egress'].update(name='bridge'),
@@ -123,8 +128,31 @@ class ModelRehearsalReplyTests(unittest.TestCase):
             with self.assertRaisesRegex(AssertionError,'private_fact_source_missing'):
                 retire_synthetic_name_sources(fixture,original,'synthetic-case')
 
+    def test_answers_are_graded_by_their_words_in_either_digits(self):
+        self.assertTrue(says('جلسه ساعت۱۸ است', '18'))
+        self.assertFalse(says('سال ۲۰۱۸', '18'))
+        self.assertEqual(grade('corrected_fact', 'جلسه ساعت ۱۸ است.')['verdict'], 'pass')
+        self.assertEqual(grade('corrected_fact', 'جلسه ساعت ۱۶ است.')['reasons'], ['missing:18'])
+        self.assertEqual(grade('corrected_fact_fresh', 'The meeting is at 18.')['reasons'], ['not_persian'])
+        self.assertEqual(grade('recall_after_restart', 'اسمش «پرستو نیلی ۷۲» است.')['verdict'], 'pass')
+        self.assertEqual(grade('retired_fact', 'اسمش پرستو نیلی ۷۲ بود.')['reasons'], ['told:پرستو', 'told:نیلی', 'told:72'])
+        self.assertEqual(grade('reaction_removed', 'یک ستاره گذاشتی و برداشتی.')['verdict'], 'judge')
+        self.assertEqual(grade('reaction_removed', 'یک ستاره گذاشتی و برداشتی.', {'pass': True})['verdict'], 'pass')
+        self.assertEqual(grade('reaction_removed', 'تأییدشده است.', {'pass': False, 'reason': 'says approved'})['reasons'],
+                         ['judge:says approved'])
+
+    def test_a_must_not_tell_check_counts_only_when_its_control_recalled_the_fact(self):
+        rows = [{'case': 'recall_after_restart', 'verdict': 'fail'}, {'case': 'retired_fact', 'verdict': 'pass'},
+                {'case': 'topic_shared', 'verdict': 'pass'}, {'case': 'group_isolation', 'verdict': 'pass'},
+                {'case': 'group_isolation_fresh', 'verdict': 'pass'}, {'case': 'private_isolation', 'verdict': 'fail'}]
+        self.assertEqual(settle(rows), {'pass': 2, 'fail': 2, 'inconclusive': 2})
+        self.assertEqual(rows[1]['reasons'], ['control_not_passed:recall_after_restart'])
+        self.assertEqual(rows[4]['reasons'], ['control_not_passed:topic_shared_fresh'])
+        self.assertEqual(rows[3]['control'], 'topic_shared')
+
     def test_invalid_continuation_stops_before_opening_a_fixture(self):
-        for options in (['--start-at', 'retired_fact'], ['--isolation-topic', '0'], ['--isolation-topic', '7'],
+        for options in (['--start-at', 'retired_fact'], ['--isolation-topic', '0'], ['--isolation-topic', '7'], ['--spend-cap', '0'],
+                        ['--spend-cap', '25'],
                         ['--reuse-seeds', '/unused/observations.json', '--start-at', 'retired_fact',
                          '--stop-after', 'topic_shared']):
             with self.subTest(options=options), patch('sys.argv', ['model-rehearsal', '--directory', '/unused', *options]), \
@@ -146,6 +174,7 @@ class ModelRelayTests(unittest.TestCase):
             spec = importlib.util.spec_from_file_location('installation_provider', ROOT / 'tools/acceptance/rehearsals/installation-provider.py')
             module = importlib.util.module_from_spec(spec)
             spec.loader.exec_module(module)
+        self.module = module
         self.seen = []
 
         def upstream(request):
@@ -170,6 +199,39 @@ class ModelRelayTests(unittest.TestCase):
             ('https://gateway.example/v1/models', 'Bearer real-chat')])
         self.assertEqual(json.loads(self.seen[0][2]), body)
         self.assertEqual(self.counts['chat'], 1)
+
+    def test_one_model_answers_and_the_cap_stops_further_calls(self):
+        import httpx
+        from fastapi import FastAPI
+        from fastapi.testclient import TestClient
+        bodies = []
+
+        def upstream(request):
+            bodies.append(json.loads(request.content))
+            # A stream whose last chunk reports the tokens used.
+            chunks = ['data: {"choices":[{"delta":{"content":"hi"}}]}', 'data: {"choices":[],"usage":{"prompt_tokens":2000000,"completion_tokens":1000000}}', 'data: [DONE]']
+            return httpx.Response(200, content='\n\n'.join(chunks).encode(), headers={'content-type': 'text/event-stream'})
+        counts = {'detector': 0, 'learning': 0, 'chat': 0, 'embeddings': 0, 'raw_canary_outside_detector': 0}
+        app = FastAPI()
+        self.module.relay(app, {'chat': {'url': 'https://gateway.example/v1', 'key': 'real-chat'}}, counts, 'CANARY',
+                          client=httpx.AsyncClient(transport=httpx.MockTransport(upstream)), model='claude-haiku-5-5',
+                          price=self.module.PRICES['claude-haiku-5-5'], cap=0.5)
+        client = TestClient(app)
+        body = {'model': 'claude-sonnet-5-5', 'stream': True, 'messages': [{'role': 'user', 'content': 'hello'}]}
+        self.assertEqual(client.post('/v1/chat/completions', json=body).status_code, 200)
+        self.assertEqual(bodies[0]['model'], 'claude-haiku-5-5')
+        # 2M prompt tokens at the long rate is above 100K: (2 * 0.50 + 1 * 2.50) dollars.
+        self.assertAlmostEqual(counts['spend_dollars'], 3.5)
+        refused = client.post('/v1/chat/completions', json=body)
+        self.assertEqual((refused.status_code, refused.json()['error']['message']), (402, 'fixture_spend_cap_reached'))
+        self.assertEqual((len(bodies), counts['spend_refused']), (1, 1))
+        with self.assertRaisesRegex(ValueError, 'needs_a_price'):
+            self.module.relay(FastAPI(), {'chat': {'url': 'https://gateway.example/v1', 'key': 'k'}}, counts, 'CANARY', cap=1)
+
+    def test_a_reply_without_token_counts_is_priced_high_from_its_size(self):
+        price = self.module.PRICES['claude-haiku-5-5']
+        self.assertAlmostEqual(self.module.cost_of('chat', b'x' * 2000, b'{"usage":{"prompt_tokens":1000,"completion_tokens":10}}', price), 0.000105)
+        self.assertAlmostEqual(self.module.cost_of('chat', b'x' * 2000, b'not json', price), (1000 * 0.10 + 4 * 0.50) / 1e6)
 
     def test_an_unguarded_secret_never_leaves_except_to_the_detector(self):
         leaked = {'messages': [{'role': 'user', 'content': 'my CANARY'}]}
