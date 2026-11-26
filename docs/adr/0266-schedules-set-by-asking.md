@@ -87,6 +87,13 @@ is not what Nocheh runs: Nocheh keeps the bot, the sealed runs and the archive.
    untold failure of each schedule from the last day, which covers its earlier ones
    (`managed_runs.failure_told_at`). A cancelled or skipped run says nothing. Run time
    limits stay as they are.
+12. **A scheduled run reads long-term memory like a reply.** A reply's long-term context is
+   read through the message it answers. A scheduled run has no message in the archive, so
+   that read always failed (`source_not_found`) and counted `memory_read` on every run
+   (2026-11-26). A scheduled run now reads its chat's or topic's context, and in the owner's
+   private chat the forwards-and-files block too, through the newest message in that chat
+   or topic. If nothing has been said there yet, it reads none, and that is not a failure.
+   Any other turn whose message is missing still fails as before.
 
 ## Consequences
 
