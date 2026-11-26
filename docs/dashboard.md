@@ -44,7 +44,7 @@ updates; `dashboard --stop` stops only the dashboard service and owner server.
 | Memory | Facts, People and Projects as lists with side panels (correct a fact, share it with a chat, rename or merge people, a project's groups, its role and skills, its last Answer privately buttons, and automatic organizing, which, once on, only creates projects; removing a group from a project asks first and says its tasks stay on that project's list, which that project's chats still see; moving a group to another project says its tasks stay behind, and the project dialog says that, with "Share group chats" off, the project's tasks are still one list for all its groups). Assistant notes: native notes and history for one chat. Long-term memory: the memory engine in use (Honcho today), readiness, attachment, budget, re-run or replace, stored data, and the facts it learned with the messages they came from. |
 | Usage | Model calls, tokens and cost by part and by model, calls per day, and reply speed with a per-stage breakdown for each reply. |
 | System | Health: services, connections, storage and diagnostics. Background work: background jobs with Stop (a machine job also shows its machine and plan), workflow totals, history charts and the task list with retry and cancel (an ask about a member offers neither: it closes on its own and tells you). Sent to apps: every message, edit, card, notice and reaction sent to chat apps, and each time Nocheh leaves a group ("Leave a group"), and whether it worked, with a Problems filter. Not a problem: a leave that found Nocheh no longer in the chat; a failed or uncertain try that a later try of the same send, to the same chat, finished within 15 minutes; and a failed or uncertain leave try, at any time, once Nocheh left that group for the same add (it reads "Nocheh left"). A refused leave stays a problem until then, and for good when Nocheh couldn't leave. Machine log: every command jobs ran on your machines. Backups: backups, restore, off-site copies and their test, exports, service checks, restart and settings-apply history. Databases: read-only table browser. |
-| Settings | Telegram (with the mini app: its address and tunnel token, then both addresses it serves, yours and the members' app at `/m/`, and the line "Every private chat with Nocheh gets the menu button. Only active members can open the app. Others see a closed page."), Models (providers and which model each part uses), Speed, Privacy & data (backups, off-site copies with Cloudflare or Backblaze connected from one pasted credential, secret check, how long history is kept, password), Assistant (owner freedom, role and skills for the private chat and for groups, tools in every chat, limits, background jobs), Tasks (statuses, priorities, columns, time zone), Connections (Notion, GitHub), Machines (your VMs that jobs can work on over SSH, and the Machine control switch) and Advanced. |
+| Settings | General (your one time zone, which every part of Nocheh follows), Telegram (with the mini app: its address and tunnel token, then both addresses it serves, yours and the members' app at `/m/`, and the line "Every private chat with Nocheh gets the menu button. Only active members can open the app. Others see a closed page."), Models (providers and which model each part uses), Speed, Privacy & data (backups, off-site copies with Cloudflare or Backblaze connected from one pasted credential, secret check, how long history is kept, password), Assistant (owner freedom, role and skills for the private chat and for groups, tools in every chat, limits, background jobs), Tasks (statuses, priorities, columns), Connections (Notion, GitHub), Machines (your VMs that jobs can work on over SSH, and the Machine control switch) and Advanced. |
 
 Every settings edit, on any page, is a draft. On Settings and Chats the page header
 always stays at the top of the screen with Discard and Save, turned off until something
@@ -220,8 +220,8 @@ people not allowed where they wrote were kept out of your notes, a line above
 the notes counts them; they are still in that group's long-term memory
 ([ADR-0257](adr/0257-learned-memory-names-its-source.md)).
 
-A note from a notes review also shows its day, in your Settings › Tasks time
-zone (a note Nocheh wrote while answering names its day in its label), and each
+A note from a notes review also shows its day, in your time zone (Settings ›
+General) (a note Nocheh wrote while answering names its day in its label), and each
 note has **Original message** links to the messages it was written from: the
 messages a review read, first message first, or the message the turn answered.
 A message hidden from the assistant reads **Hidden from assistant** and is never
@@ -585,7 +585,7 @@ approval flag keeps imports searchable without scheduling a native review.
 
 Ask in your private chat to set a schedule, for example "every weekday at 8, send me a
 short brief". Nocheh posts a message with the schedule's name, when it runs and its
-next run, with **Pause** and **Delete**. Schedules run in your Tasks time zone unless you name another. Each
+next run, with **Pause** and **Delete**. Schedules run in your time zone (Settings › General) unless you name another; the page shows it with a link there. Each
 result comes to your private chat with no card; a run with nothing new sends nothing.
 A group's results still wait for your yes (ADR-0266).
 

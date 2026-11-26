@@ -23,9 +23,12 @@ class BackupScheduleTests(unittest.TestCase):
         self.settings({})
         self.disk = patch('tools.operations.installation.backup_schedule.shutil.disk_usage', return_value=Usage(0, 0, 50 * 1024 ** 3))
         self.disk.start()
+        # No Nocheh answers here: the schedule keeps UTC unless a test gives the owner's time zone.
+        self.zone = patch('tools.operations.installation.backup_schedule._ask_owner_zone', side_effect=OSError('no nocheh'))
+        self.zone.start()
 
     def tearDown(self):
-        self.disk.stop(); self.folder.cleanup()
+        self.zone.stop(); self.disk.stop(); self.folder.cleanup()
 
     def settings(self, values):
         lines = {'NOCHEH_CONFIG_VERSION': '1', **values}
@@ -49,12 +52,31 @@ class BackupScheduleTests(unittest.TestCase):
         # Asleep at 04:00 on the 29th: due as soon as it is checked again.
         self.assertTrue(backup_schedule.due(self.state, at('2026-10-29T09:30:00'))['due'])
 
-    def test_time_follows_the_chosen_time_zone(self):
-        self.settings({'NOCHEH_BACKUP_TIME': '05:30', 'NOCHEH_BACKUP_TIME_ZONE': 'Asia/Kolkata'})
-        backup_schedule.due(self.state, at('2026-10-28T12:00:00'))
-        # 05:30 in Kolkata (UTC+05:30) is midnight UTC.
-        self.assertFalse(backup_schedule.due(self.state, at('2026-10-28T23:59:00'))['due'])
-        self.assertTrue(backup_schedule.due(self.state, at('2026-10-29T00:00:00'))['due'])
+    def test_time_follows_the_owners_time_zone(self):
+        self.settings({'NOCHEH_BACKUP_TIME': '05:30'})
+        with patch('tools.operations.installation.backup_schedule._ask_owner_zone', return_value='Asia/Kolkata'):
+            backup_schedule.due(self.state, at('2026-10-28T12:00:00'))
+            # 05:30 in Kolkata (UTC+05:30) is midnight UTC.
+            self.assertFalse(backup_schedule.due(self.state, at('2026-10-28T23:59:00'))['due'])
+            self.assertTrue(backup_schedule.due(self.state, at('2026-10-29T00:00:00'))['due'])
+            status = backup_schedule.status(self.state, at('2026-10-28T12:00:00'))
+        self.assertEqual((status['time_zone'], status['next_at']), ('Asia/Kolkata', '2026-10-29T00:00:00+00:00'))
+
+    def test_keeps_the_last_owner_time_zone_while_nocheh_cannot_answer(self):
+        self.settings({'NOCHEH_BACKUP_TIME': '05:30'})
+        with patch('tools.operations.installation.backup_schedule._ask_owner_zone', return_value='Asia/Kolkata'):
+            backup_schedule.due(self.state, at('2026-10-28T12:00:00'))
+        # A restart at the set time: the zone read before still holds, so the backup neither moves nor runs early.
+        with patch('tools.operations.installation.backup_schedule._ask_owner_zone', side_effect=OSError('refused')):
+            self.assertFalse(backup_schedule.due(self.state, at('2026-10-28T23:59:00'))['due'])
+            self.assertTrue(backup_schedule.due(self.state, at('2026-10-29T00:00:00'))['due'])
+        # An answer that is no time zone counts as no answer.
+        with patch('tools.operations.installation.backup_schedule._ask_owner_zone', return_value='Mars/Base'):
+            self.assertEqual(backup_schedule.status(self.state, at('2026-10-29T00:00:00'))['time_zone'], 'Asia/Kolkata')
+
+    def test_utc_until_nocheh_has_answered_once(self):
+        with patch('tools.operations.installation.backup_schedule._ask_owner_zone', side_effect=OSError('refused')):
+            self.assertEqual(backup_schedule.status(self.state, at('2026-10-28T12:00:00'))['time_zone'], 'UTC')
 
     def test_off_never_runs(self):
         self.settings({'NOCHEH_BACKUP_SCHEDULE': 'off'})
@@ -86,10 +108,8 @@ class BackupScheduleTests(unittest.TestCase):
         self.assertTrue(backup_schedule.due(self.state, at('2026-10-28T05:05:00'))['due'])
 
     def test_settings_are_validated(self):
-        validate_backups({'NOCHEH_BACKUP_SCHEDULE': 'daily', 'NOCHEH_BACKUP_TIME': '23:59', 'NOCHEH_BACKUP_TIME_ZONE': 'America/New_York',
-                          'NOCHEH_BACKUP_KEEP': '365'})
+        validate_backups({'NOCHEH_BACKUP_SCHEDULE': 'daily', 'NOCHEH_BACKUP_TIME': '23:59', 'NOCHEH_BACKUP_KEEP': '365'})
         for bad in ({'NOCHEH_BACKUP_SCHEDULE': 'hourly'}, {'NOCHEH_BACKUP_TIME': '24:00'}, {'NOCHEH_BACKUP_TIME': '4:00'},
-                    {'NOCHEH_BACKUP_TIME_ZONE': 'Mars/Base'}, {'NOCHEH_BACKUP_TIME_ZONE': '../etc'},
                     {'NOCHEH_BACKUP_KEEP': '0'}, {'NOCHEH_BACKUP_KEEP': '400'}):
             with self.assertRaises(ValueError): validate_backups(bad)
 
@@ -112,7 +132,7 @@ class BackupScheduleTests(unittest.TestCase):
         self.assertTrue((root / '.backup-linked').is_symlink()); self.assertTrue((elsewhere / 'kept').is_file())
 
     def test_backups_that_did_not_finish_are_counted_until_one_does(self):
-        values = {'NOCHEH_BACKUP_SCHEDULE': 'daily', 'NOCHEH_BACKUP_TIME': '04:00', 'NOCHEH_BACKUP_TIME_ZONE': 'UTC', 'NOCHEH_BACKUP_KEEP': '7'}
+        values = {'NOCHEH_BACKUP_SCHEDULE': 'daily', 'NOCHEH_BACKUP_TIME': '04:00', 'NOCHEH_BACKUP_KEEP': '7'}
         start = at('2026-10-28T04:00:00')
         self.assertEqual(backup_schedule.health(self.state, values, start)['failed'], 0)
         backup_schedule.record_backup(self.state, 'running', start)
@@ -137,7 +157,7 @@ class BackupScheduleTests(unittest.TestCase):
         self.assertEqual((done['failed'], done['reason'], done['unreadable']), (0, None, 1))
 
     def test_what_the_newest_complete_backup_left_out_stays_told_while_later_ones_fail_or_run(self):
-        values = {'NOCHEH_BACKUP_SCHEDULE': 'daily', 'NOCHEH_BACKUP_TIME': '04:00', 'NOCHEH_BACKUP_TIME_ZONE': 'UTC', 'NOCHEH_BACKUP_KEEP': '7'}
+        values = {'NOCHEH_BACKUP_SCHEDULE': 'daily', 'NOCHEH_BACKUP_TIME': '04:00', 'NOCHEH_BACKUP_KEEP': '7'}
         start = at('2026-11-01T04:00:00'); left_out = ['hermes/profiles/x/workspace/a', 'hermes/profiles/x/workspace/b']
         backup_schedule.record_backup(self.state, 'running', start)
         backup_schedule.record_backup(self.state, 'complete', start, unreadable=left_out)
@@ -156,7 +176,7 @@ class BackupScheduleTests(unittest.TestCase):
         self.assertEqual((done['failed'], done['unreadable'], done['unreadable_paths']), (0, 0, []))
 
     def test_low_disk_skips_count_each_day_and_status_warns_without_a_backups_folder(self):
-        values = {'NOCHEH_BACKUP_SCHEDULE': 'daily', 'NOCHEH_BACKUP_TIME': '04:00', 'NOCHEH_BACKUP_TIME_ZONE': 'UTC', 'NOCHEH_BACKUP_KEEP': '7'}
+        values = {'NOCHEH_BACKUP_SCHEDULE': 'daily', 'NOCHEH_BACKUP_TIME': '04:00', 'NOCHEH_BACKUP_KEEP': '7'}
         self.disk.stop()
         try:
             status = backup_schedule.status(self.state, at('2026-10-27T12:00:00'))

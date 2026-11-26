@@ -1,9 +1,10 @@
 import {HttpError,object,string} from '../http.js';
 
 /**
- * How tasks are described: statuses, priority names, the owner's own columns
- * and the time zone dates and reminders mean. Every name is the owner's to
- * change in Settings › Tasks; only these defaults live in code.
+ * How tasks are described: statuses, priority names and the owner's own columns,
+ * which the owner changes in Settings › Tasks, and the owner's one time zone, which
+ * every part of Nocheh follows and the owner changes in Settings › General (ADR-0312).
+ * Only these defaults live in code.
  */
 export type StatusCategory='not_started'|'active'|'done'|'cancelled';
 export type TaskColor='neutral'|'info'|'warn'|'good'|'bad'|'accent';
@@ -97,18 +98,19 @@ export function storedTaskSettings(value:unknown):TaskSettings {
   return settings;
 }
 
-/** The owner's clock: the time zone set in Settings › Tasks (UTC until the owner sets one), read once for a request
+/** The owner's clock: the time zone set in Settings › General (UTC until the owner sets one), read once for a request
  *  that shows the owner times, such as the owner's source tags (ADR-0261). Never shown to anyone else. */
 export async function ownerTimeZone(db:{query(text:string,values?:unknown[]):Promise<{rows:any[]}>}):Promise<string> {
   const row=(await db.query('SELECT settings FROM owner_task_settings WHERE singleton')).rows[0];
   return storedTaskSettings(row?.settings).time_zone;
 }
 
-/** Set the owner's time zone alone, the one their new schedules and task dates use; 400 `invalid_task_time_zone` for a
- *  zone this server's clock does not know. The other task settings, and schedules already set, keep theirs. */
+/** Set the owner's time zone alone (Settings › General, or the owner telling Nocheh in their private chat); 400
+ *  `invalid_task_time_zone` for a zone this server's clock does not know. The task settings keep theirs and their
+ *  revision, so an edit open in Settings › Tasks still saves; schedules already set keep their own zone. */
 export async function setOwnerTimeZone(db:{query(text:string,values?:unknown[]):Promise<{rows:any[]}>},value:unknown):Promise<string> {
   const zone=timeZone(value);
-  await db.query(`UPDATE owner_task_settings SET settings=settings||jsonb_build_object('time_zone',$1::text),revision=revision+1,updated_at=now()
+  await db.query(`UPDATE owner_task_settings SET settings=settings||jsonb_build_object('time_zone',$1::text),updated_at=now()
     WHERE singleton`,[zone]);
   return zone;
 }

@@ -155,9 +155,9 @@ export class ScheduleNotices {
       reply=choice==='p'?lines.paused:choice==='s'?lines.started:lines.deleted;
     }catch(error){if(!(error instanceof HttpError)||error.status>=500&&error.code!=='agent_rejected')throw error;return lines.changed;}
     // The message shows the answer and loses its buttons; an edit that fails changes nothing else. The latest message
-    // about the schedule is the one with buttons.
+    // about the schedule is the one with buttons. It is a notice, the only kind a member's chat takes an edit of.
     const notice=(await this.control.query<{notice_id:string|null}>('SELECT notice_id FROM workflow_schedules WHERE id=$1',[scheduleKey(profile,job)])).rows[0]?.notice_id;
-    if(target)await this.call('telegram.notice',{id:notice??ScheduleNotices.id(profile,job),...target,text:text+'\n\n'+points(reply,280),edit:true},30000).catch(()=>{});
+    if(target)await this.call('telegram.notice',{id:notice??ScheduleNotices.id(profile,job),...target,text:text+'\n\n'+points(reply,280),edit:true,send_class:'notice'},30000).catch(()=>{});
     return reply;
   }
 }

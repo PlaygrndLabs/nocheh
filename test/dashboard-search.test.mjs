@@ -36,7 +36,7 @@ test('a setting opens its own tab and names where it is', () => {
     const view = new URLSearchParams(item.href.split('?')[1] ?? '').get('view');
     if (page === 'settings') {
       assert.ok(!view || view in pageTabs.settings, item.href);
-      assert.equal(item.detail, 'Settings › ' + pageTabs.settings[view ?? 'telegram'], item.title);
+      assert.equal(item.detail, 'Settings › ' + pageTabs.settings[view ?? 'general'], item.title);
     }
   }
 });

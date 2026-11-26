@@ -91,7 +91,7 @@ export default function Home() {
       tone: 'neutral',
       text: 'Telegram is turned off',
       detail: 'Nocheh won’t receive or answer messages until it’s on.',
-      link: href('settings'),
+      link: href('settings', {view: 'telegram'}),
       action: 'Telegram settings',
     });
   if (memory.data && availability.state !== 'ready')

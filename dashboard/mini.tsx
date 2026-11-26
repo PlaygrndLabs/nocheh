@@ -409,7 +409,7 @@ function MiniApp({launched}: {launched: boolean}) {
           {page === 'home' && <MiniHome />}
           {page === 'inbox' && <MiniInbox />}
           {page === 'tasks' && <Tasks />}
-          {page === 'schedules' && <Schedules />}
+          {page === 'schedules' && <Schedules settingsLink={false} />}
           {page === 'problems' && <MiniProblems />}
         </main>
         <nav aria-label="Main" className="flex border-t border-line bg-surface pb-[env(safe-area-inset-bottom)]">

@@ -765,7 +765,9 @@ class MemberNoticeShapeTests(unittest.TestCase):
                    {'send_class': 'notice', 'topic': '7'}, {'send_class': 'notice', 'edit': False}, {'send_class': 'answer'},
                    {'send_class': 'notice', 'buttons': [[press('p'), press('d'), press('p')]]}, {'send_class': 'notice', 'buttons': [[press('p')], [press('d')]]},
                    {'send_class': 'notice', 'buttons': [[{'text': 'Open', 'url': 'https://example.com'}]]},
-                   {'send_class': 'notice', 'buttons': [[{'text': 'x', 'callback': 'nka' + 'a' * 36}]]}, {'send_class': 'notice', 'buttons': []}]
+                   {'send_class': 'notice', 'buttons': [[{'text': 'x', 'callback': 'nka' + 'a' * 36}]]}, {'send_class': 'notice', 'buttons': []},
+                   # An edit names its class too, as a press's edit of the schedule message does.
+                   {'edit': True}]
         for body in refused:
             self.assertFalse(member_notice_shape(body), body)
 

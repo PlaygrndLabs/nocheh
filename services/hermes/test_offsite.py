@@ -292,7 +292,7 @@ class SendAndCheckTests(unittest.TestCase):
 
     def test_copies_that_fail_or_are_skipped_are_counted_for_the_owner(self):
         from tools.operations.installation import backup_schedule
-        values = {**self.values, 'NOCHEH_BACKUP_SCHEDULE': 'off', 'NOCHEH_BACKUP_TIME': '04:00', 'NOCHEH_BACKUP_TIME_ZONE': 'UTC', 'NOCHEH_BACKUP_KEEP': '7'}
+        values = {**self.values, 'NOCHEH_BACKUP_SCHEDULE': 'off', 'NOCHEH_BACKUP_TIME': '04:00', 'NOCHEH_BACKUP_KEEP': '7'}
         self.backup(JOBS[0], 1)
         refused = lambda handler: (handler._parts(), handler._body(), handler._send(403, b'<Error><Code>AccessDenied</Code></Error>'))
         with patch.object(Bucket, 'do_PUT', refused):
