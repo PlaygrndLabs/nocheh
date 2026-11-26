@@ -2,13 +2,16 @@
 import base64
 import io
 import json
+import os
 import stat
 import tempfile
 import time
 import unittest
 import urllib.error
 import urllib.parse
+import urllib.request
 from pathlib import Path
+from unittest.mock import patch
 
 from tools.operations.connections import gmail
 
@@ -138,6 +141,19 @@ class GmailTests(unittest.TestCase):
         with self.assertRaises(ValueError) as caught:
             gmail.lookup(self.state, {'connection': 'gmail', 'tool': 'read_message', 'input': {'id': 'msg00001'}}, post=self.post, get=off)
         self.assertEqual(str(caught.exception), 'gmail_api_off')
+
+    def test_the_fake_google_is_used_only_in_a_fixture_at_its_exact_address(self):
+        # The tester's fake Google (tools/acceptance/connectors_mock.py): the fixture flag and the exact address, both.
+        real = (gmail.TOKEN, gmail.REVOKE, gmail.API)
+        for environment in ({'NOCHEH_GMAIL_URL': gmail.FIXTURE_GMAIL_URL}, {'NOCHEH_INSTALLATION_FIXTURE': '1'},
+                            {'NOCHEH_INSTALLATION_FIXTURE': '1', 'NOCHEH_GMAIL_URL': 'http://model-fixture:8317/other'}):
+            with self.subTest(environment=environment), patch.dict(os.environ, environment):
+                self.assertEqual((gmail.fixture(), gmail.token_url(), gmail.revoke_url(), gmail.api_url()), (False, *real))
+        with patch.dict(os.environ, {'NOCHEH_INSTALLATION_FIXTURE': '1', 'NOCHEH_GMAIL_URL': gmail.FIXTURE_GMAIL_URL}):
+            fake = 'http://model-fixture:8317/gmail'
+            self.assertEqual((gmail.token_url(), gmail.revoke_url(), gmail.api_url()),
+                             (fake + '/token', fake + '/revoke', fake + urllib.parse.urlsplit(gmail.API).path))
+            self.assertFalse(any(isinstance(handler, urllib.request.ProxyHandler) and handler.proxies for handler in gmail.opener().handlers))
 
     def test_html_only_mail_is_made_plain(self):
         text, files = gmail.body_of({'mimeType': 'text/html', 'body': {'data': encoded('<style>x{}</style><p>One &amp; two</p><br>Three')}})

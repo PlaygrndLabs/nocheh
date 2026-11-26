@@ -102,7 +102,10 @@ def mcp_call(args,request=https_request,state=None):
     url,auth,versions=args.get('url'),{},('2025-11-25',)
     if args.get('connection')=='notion':
         from tools.operations.connections import notion
-        url,versions=notion.MCP_URL,notion.VERSIONS
+        url,versions=notion.mcp_url(),notion.VERSIONS
+        if notion.fixture():
+            from tools.operations.connections import fixture
+            request=fixture.request
         # A project's Notion uses that project's own sign-in (ADR-0268).
         auth={'Authorization':'Bearer '+notion.bearer(state,project=args.get('project'))}
     def rpc(body,headers=None):

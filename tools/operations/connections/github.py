@@ -35,7 +35,7 @@ from datetime import datetime, timezone
 from pathlib import Path
 from types import SimpleNamespace
 
-from tools.operations.connections import secret_file
+from tools.operations.connections import fixture as fixture_service, secret_file
 
 # The bounds of a copy (ADR-0209 §0). Same numbers and patterns as repo_fetch.py, box_repo.py, security_launcher.py
 # and background-jobs.ts; a parity test reads them.
@@ -69,7 +69,7 @@ MAX_INSTALLATIONS=10
 API_URL='https://api.github.com'
 GIT_URL='https://github.com'
 # The tester's fake GitHub, used only in a fixture installation and only at this exact address (src/security/broker.ts).
-FIXTURE_GITHUB_URL='http://model-fixture:8317/github'
+FIXTURE_GITHUB_URL=fixture_service.HOST+'/github'
 API_VERSION='2022-11-28'
 JSON='application/vnd.github+json'
 NETWORK='nocheh-repo-fetch'
@@ -107,7 +107,7 @@ def fingerprint(app):
 
 
 def fixture():
-    return os.environ.get('NOCHEH_INSTALLATION_FIXTURE')=='1' and os.environ.get('NOCHEH_GITHUB_URL')==FIXTURE_GITHUB_URL
+    return fixture_service.on('NOCHEH_GITHUB_URL',FIXTURE_GITHUB_URL)
 
 
 def api_base():return FIXTURE_GITHUB_URL+'/api' if fixture() else API_URL
@@ -119,10 +119,6 @@ def git_base():return FIXTURE_GITHUB_URL+'/git' if fixture() else GIT_URL
 def web_base():return FIXTURE_GITHUB_URL+'/web' if fixture() else GIT_URL
 
 
-class Refuse(urllib.request.HTTPRedirectHandler):
-    def redirect_request(self,*args,**kwargs):return None
-
-
 def request(url,body=None,headers=None):
     """One GitHub API request, a GET or, with a body, a JSON POST: tool_execution's pinned public HTTPS, or the
     fixture's plain http without proxies or redirects. Answers (content, lowercased headers); raises
@@ -130,15 +126,7 @@ def request(url,body=None,headers=None):
     if not fixture():
         from tools.operations.security.tool_execution import https_request
         return https_request(url,body,headers)
-    data=None if body is None else json.dumps(body,separators=(',',':')).encode()
-    sent={**(headers or {}),**({} if data is None else {'Content-Type':'application/json'})}
-    try:
-        with urllib.request.build_opener(urllib.request.ProxyHandler({}),Refuse).open(urllib.request.Request(url,data=data,headers=sent),timeout=15) as response:
-            content=response.read(2*1024*1024+1)
-            if len(content)>2*1024*1024:raise RuntimeError('remote_response_limit')
-            return content,{key.lower():value for key,value in response.getheaders()}
-    except urllib.error.HTTPError as error:
-        raise RuntimeError('remote_unauthorized' if error.code==401 else 'remote_response_rejected') from None
+    return fixture_service.request(url,body,headers)
 
 
 def store(path,body=None):

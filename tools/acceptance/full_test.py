@@ -175,6 +175,8 @@ TITLES = {
     'machine_job_runs_after_one_approval': 'A job on your machine runs its commands there after one approval',
     'machine_job_refused_for_members_and_stopped': 'A member cannot ask for a machine job, and Stop ends only its programs there',
     'defaults_keep_history_and_notion_off': 'Defaults: history kept, Notion off',
+    'notion_reads_and_asks_before_changes': 'Notion: reads run, changes ask, walls hold',
+    'gmail_reads_only_in_the_owners_chat': 'Gmail: only in the owner\'s private chat',
     'settings_apply_is_followed_to_the_end': 'Settings: Save and apply finish, and a reload keeps following',
     'memory_search_model_change_rebuilds_memory': 'Changing the memory search model rebuilds memory',
     'member_private_chat_reads_joined_groups': 'In their private chat a member reads the groups they joined and the whole task list of each of their projects, one at a time, and changes nothing',

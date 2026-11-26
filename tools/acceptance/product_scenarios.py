@@ -1195,6 +1195,166 @@ class ProductScenarios(Scenarios):
                 if member:
                     self.remove_member(member)
 
+    # Notion and Gmail on the tester's fakes (tools/acceptance/connectors_mock.py) --------------------------------
+
+    # A made-up Personal mode OAuth client, as the owner pastes it on the dashboard's Gmail page.
+    GMAIL_CLIENT = '123456789012-abcdef0123456789.apps.googleusercontent.com'
+
+    def tool_turn(self, chat, tool, arguments, sender=OWNER, topic=None):
+        """One silent turn whose scripted model calls `tool` once; answers what the tool returned, as the model got it."""
+        before = len(self.f.agent())
+        self.silent_turn(self.f.message(chat, 'ببین [[tool:'+tool+' '+json.dumps(arguments)+']] [[after:silent]]', sender=sender, topic=topic), chat, topic)
+        return '\n'.join(str(event.get('result')) for event in self.f.agent()[before:] if event.get('phase') == 'final' and event.get('tool') == tool)
+
+    def notion_setting(self, project, enabled):
+        """Turns a Notion connection on or off as the dashboard does: the owner's own (None) or a project's."""
+        current = self.f.app('/v1/notion'+('' if project is None else '?project='+project))
+        return self.f.app('/v1/notion', {**({} if project is None else {'project': project}), 'enabled': enabled,
+                                         'expected_revision': current['revision']})
+
+    def notion_reads_and_asks_before_changes(self):
+        # Notion through Nocheh's real client, to a fake Notion MCP server (test plan step 3, ADR-0268, ADR-0278). The owner
+        # saves a token for their own Notion and another for a project's, as on the dashboard, and turns both on. In the
+        # owner's private chat a read runs at once with the owner's token, and a change waits for its card and runs once
+        # after Approve. A group can't reach the owner's own Notion. A group in the project reads the project's Notion
+        # with the project's token; a group outside it can't. A member of the project's group reads it from their private
+        # chat, and a change there is refused with no card. Each page carries its token's mark, so a read that went to the
+        # wrong Notion shows it; each refusal is checked on the fake too: nothing reached it.
+        self.members_allowed()
+        number = str(self.f.ids())
+        own_token, project_token = 'ntn_fixture_own_'+number, 'ntn_fixture_project_'+number
+        own_mark, project_mark = 'NOTIONOWN'+number, 'NOTIONPROJECT'+number
+        self.f.http('/fixture/notion', {'tokens': {own_token: own_mark, project_token: project_mark}})
+        dashboard = self.dashboard()
+        observed = self.current.setdefault('observed', {})
+        calls = lambda: [row for row in self.f.http('/fixture/notion')['requests'] if row.get('method') == 'tools/call']
+        search = {'tool': 'notion-search', 'input': {'query': 'plan '+number}}
+        change = {'tool': 'notion-create-pages', 'input': {'pages': [{'properties': {'title': 'Made-up page '+number}}]}}
+
+        def notion(chat, arguments, sender=OWNER):
+            before = len(calls())
+            result = self.tool_turn(chat, 'mcp__nocheh__notion', {'operation': 'call', **arguments}, sender)
+            return result, calls()[before:]
+        person = self.fresh_person()
+        member, project = None, None
+        with self.groups_in_projects({'Notion '+number: (OTHER_GROUP,)}, share=False) as made:
+            project = made['Notion '+number]['id']
+            try:
+                # 1. The owner's own Notion, from a token saved on the dashboard; Notion checks it when it is saved.
+                saved = dashboard.post('/connections/notion/token', {'token': own_token})
+                self.gate('own_notion_connected', saved.get('connected') is True and saved.get('method') == 'token', saved=saved)
+                self.notion_setting(None, True)
+
+                # 2. A read in the owner's private chat runs at once, with the owner's token.
+                result, sent = notion(OWNER, search)
+                observed['own_read'] = {'result': result[:200], 'sent': sent}
+                self.gate('own_read_runs_in_the_private_chat', own_mark in result and [row['tool'] for row in sent] == ['notion-search']
+                          and {row['token'] for row in sent} == {own_token}, result=result[:300], sent=sent)
+
+                # 3. A change waits for its card; nothing reaches Notion before Approve, and it runs once after.
+                before = len(self.f.sent())
+                result, sent = notion(OWNER, change)
+                card = self.wait('notion_change_card', lambda: self.cards(before, OWNER), 120)[0]
+                self.gate('change_waits_for_the_owner', not sent, result=result[:300], sent=sent)
+                ran = len(calls())
+                self.press(card, 'approve')
+                self.wait('notion_change_ran', lambda: [row for row in calls()[ran:] if row.get('tool') == 'notion-create-pages'], 120)
+                # A second run would land within seconds of the first.
+                time.sleep(5)
+                done = [row for row in calls()[ran:] if row.get('tool') == 'notion-create-pages']
+                self.gate('change_runs_once_after_approve', len(done) == 1 and done[0]['token'] == own_token
+                          and done[0]['input'] == change['input'], done=done)
+
+                # 4. A group can't reach the owner's own Notion.
+                result, sent = notion(THIRD_GROUP, {'connection': 'own', **search})
+                observed['group_own'] = result[:200]
+                self.gate('group_cannot_read_the_owners_notion', not sent and own_mark not in result, result=result[:300], sent=sent)
+
+                # 5. A project's Notion: its own token, read in its group, never in a group outside it.
+                saved = dashboard.post('/connections/notion/token', {'project': project, 'token': project_token})
+                self.gate('project_notion_connected', saved.get('connected') is True, saved=saved)
+                self.notion_setting(project, True)
+                result, sent = notion(OTHER_GROUP, search)
+                observed['project_group'] = {'result': result[:200], 'sent': sent}
+                self.gate('project_group_reads_its_projects_notion', project_mark in result and own_mark not in result
+                          and [row['token'] for row in sent] == [project_token], result=result[:300], sent=sent)
+                result, sent = notion(THIRD_GROUP, {'connection': project, **search})
+                observed['outside_group'] = result[:200]
+                self.gate('group_outside_the_project_cannot_read_it', not sent and project_mark not in result, result=result[:300], sent=sent)
+
+                # 6. A member of the project's group reads its Notion from their private chat; a change there is refused,
+                # with no card for anyone.
+                member = self.add_member(person, (OTHER_GROUP,))
+                self.seen_in(person, (OTHER_GROUP,))
+                result, sent = notion(person, {'connection': project, **search}, sender=person)
+                observed['member_read'] = {'result': result[:200], 'sent': sent}
+                self.gate('member_reads_their_projects_notion', project_mark in result and [row['token'] for row in sent] == [project_token],
+                          result=result[:300], sent=sent)
+                before = len(self.f.sent())
+                result, sent = notion(person, {'connection': project, **change}, sender=person)
+                time.sleep(5)
+                self.gate('member_change_refused_without_a_card', not sent and not self.cards(before), result=result[:300], sent=sent)
+            finally:
+                if member:
+                    self.remove_member(member)
+                # Both connections off and signed out again, as later scenarios expect.
+                for target in (None, project):
+                    self.notion_setting(target, False)
+                    dashboard.post('/connections/notion/disconnect', {} if target is None else {'project': target})
+
+    def gmail_reads_only_in_the_owners_chat(self):
+        # The owner's own Gmail through Nocheh's real client, to a fake Google (test plan step 3, ADR-0272). The owner pastes
+        # a made-up OAuth client and signs in, as on the dashboard. In the owner's private chat a search and a message read
+        # run at once and carry the mail's mark. A group and a member's private chat get nothing: no mail in the answer,
+        # and no request reaches the fake.
+        self.members_allowed()
+        from tools.acceptance.connectors_mock import GMAIL_CODE
+        number = str(self.f.ids())
+        mark = 'GMAILMARK'+number
+        self.f.http('/fixture/gmail', {'mark': mark})
+        dashboard = self.dashboard()
+        observed = self.current.setdefault('observed', {})
+        reads = lambda: [row for row in self.f.http('/fixture/gmail')['requests'] if row['path'] not in ('/token', '/revoke', '/profile')]
+        search = {'operation': 'call', 'tool': 'search_mail', 'input': {'query': 'invoice'}}
+
+        def gmail(chat, arguments, sender=OWNER):
+            before = len(reads())
+            result = self.tool_turn(chat, 'mcp__nocheh__gmail', arguments, sender)
+            return result, reads()[before:]
+        person = self.fresh_person()
+        member = None
+        try:
+            # 1. Connect: the owner's client, then a sign-in that comes back to the dashboard with a code.
+            dashboard.post('/connections/gmail/client', {'client_id': self.GMAIL_CLIENT, 'client_secret': 'fixture-secret-'+number})
+            started = dashboard.post('/connections/gmail/start', {'redirect': dashboard.origin+'/?connect=gmail'})
+            state = dict(urllib.parse.parse_qsl(urllib.parse.urlsplit(started['url']).query)).get('state')
+            finished = dashboard.post('/connections/gmail/finish', {'code': GMAIL_CODE, 'state': state})
+            self.gate('gmail_connected', finished.get('connected') is True and finished.get('email') == 'owner@example.com'
+                      and 'secret' not in json.dumps(finished), finished=finished)
+
+            # 2. The owner's private chat: a search, then the message it found.
+            result, sent = gmail(OWNER, search)
+            observed['owner_search'] = {'result': result[:200], 'sent': sent}
+            self.gate('owner_searches_mail', mark in result and any(row['path'] == '/messages' for row in sent)
+                      and all(row['known'] for row in sent), result=result[:300], sent=sent)
+            result, sent = gmail(OWNER, {'operation': 'call', 'tool': 'read_message', 'input': {'id': 'msgfixture01'}})
+            self.gate('owner_reads_a_message', 'due Friday. '+mark in result and [row['path'] for row in sent] == ['/messages/msgfixture01'],
+                      result=result[:300], sent=sent)
+
+            # 3. Never in a group, never in a member's private chat.
+            result, sent = gmail(THIRD_GROUP, search)
+            observed['group'] = result[:200]
+            self.gate('group_cannot_read_gmail', not sent and mark not in result, result=result[:300], sent=sent)
+            member = self.add_member(person, (OTHER_GROUP,))
+            self.seen_in(person, (OTHER_GROUP,))
+            result, sent = gmail(person, search, sender=person)
+            observed['member'] = result[:200]
+            self.gate('member_cannot_read_gmail', not sent and mark not in result, result=result[:300], sent=sent)
+        finally:
+            if member:
+                self.remove_member(member)
+            dashboard.post('/connections/gmail/disconnect', {})
+
     def search_hits_name_their_source(self):
         # Every archive_search hit names who wrote it, where and when, in a tag Nocheh's code builds from the archive, never
         # the model, beside every field it had (ADR-0261). The owner reads times in the Settings › Tasks time zone, a group
@@ -5922,7 +6082,7 @@ PRODUCT_ORDER = ['group_members', 'group_name_addresses', 'unaddressed_messages_
                  'job_operation_runs_after_approval',
                  'background_job_long_run', 'background_job_stop_button', 'background_job_restart', 'background_job_reaction_during_run',
                  'background_job_time_limit', 'machine_job_runs_after_one_approval', 'machine_job_refused_for_members_and_stopped',
-                 'defaults_keep_history_and_notion_off', 'settings_apply_is_followed_to_the_end',
+                 'defaults_keep_history_and_notion_off', 'notion_reads_and_asks_before_changes', 'gmail_reads_only_in_the_owners_chat', 'settings_apply_is_followed_to_the_end',
                  'memory_search_model_change_rebuilds_memory',
                  # A member's own private chat (step 4) and the owner's ask about it (step 4b), ADR-0262; the ask needs the marks
                  # the scenario before it planted, and the sweep after them reads both.

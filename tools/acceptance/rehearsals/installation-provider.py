@@ -652,6 +652,10 @@ def provider():
     if os.environ.get('NOCHEH_TELEGRAM_FIXTURE_STATE'):
         from tools.acceptance.telegram_mock import TelegramMock
         TelegramMock(os.environ['NOCHEH_TELEGRAM_FIXTURE_STATE']).install(app)
+    # The fake Notion and Gmail of the connector scenarios (tools/acceptance/connectors_mock.py).
+    if os.environ.get('NOCHEH_CONNECTORS_FIXTURE') == '1':
+        from tools.acceptance.connectors_mock import ConnectorsMock
+        ConnectorsMock().install(app)
     # The fake GitHub that the GitHub copy scenario copies from (tools/acceptance/github_mock.py).
     if os.environ.get('NOCHEH_GITHUB_FIXTURE_ROOT'):
         from tools.acceptance.github_mock import GithubMock
