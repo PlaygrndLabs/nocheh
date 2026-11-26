@@ -1019,7 +1019,11 @@ export class NativeMemoryRepository {
   private async sessionContext(current:Current,audience:string,source:SourceReference,material=false) {
     const own=this.conversationContext(current,audience,source);
     if(!material)return {...await own,material:undefined};
-    const [read,forwards]=await Promise.all([own,this.materialContext(current,source).catch(()=>null)]);
+    // A failed forwards-and-files read says why, by code only, so the turn's memory_read count can be traced.
+    const [read,forwards]=await Promise.all([own,this.materialContext(current,source).catch(error=>{
+      console.warn(JSON.stringify({event:'memory_forwards_context_failed',engine:this.engine.id,
+        code:error instanceof HttpError?error.code:error instanceof Error&&/^[a-z_]{3,80}$/.test(error.message)?error.message:'memory_forwards_context_error',
+        status:error instanceof HttpError?error.status:null,type:error instanceof Error&&/^[A-Za-z]{1,40}$/.test(error.name)?error.name:null}));return null;})]);
     return {...read,material:forwards};
   }
   private async conversationContext(current:Current,audience:string,source:SourceReference):Promise<ContextBlock> {
@@ -1240,6 +1244,9 @@ export class NativeMemoryRepository {
       return {sources,limited_memory:false,syncing};
     } catch(error) {
       // A failed read says so, so the turn's parent counts it for the owner's notice (ADR-0257); the turn still runs.
+      console.warn(JSON.stringify({event:'memory_context_failed',engine:this.engine.id,
+        code:error instanceof HttpError?error.code:error instanceof Error&&/^[a-z_]{3,80}$/.test(error.message)?error.message:'memory_context_error',
+        status:error instanceof HttpError?error.status:null,type:error instanceof Error&&/^[A-Za-z]{1,40}$/.test(error.name)?error.name:null}));
       await this.prepared.audience.assert(principal);return {...limited,error:'memory_context_failed'};
     }
   }
