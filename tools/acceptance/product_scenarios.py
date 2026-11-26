@@ -1367,7 +1367,7 @@ class ProductScenarios(Scenarios):
 
     def every_listed_tool_answers(self):
         # Every Nocheh tool Hermes offers in the owner's private chat answers (test plan step 3): each is called once, in
-        # one turn, with a read or with input it refuses, and each comes back with its own answer, never a broken
+        # its own turn, with a read or with input it refuses, and each comes back with its own answer, never a broken
         # connection, a timeout or a crash. A tool Nocheh has but Hermes did not offer here is listed for the report.
         names = re.findall(r"\{name:'([a-z_]+)'", (ROOT/'src/mcp/tools.ts').read_text())
         before = len(self.f.agent())
@@ -1378,11 +1378,8 @@ class ProductScenarios(Scenarios):
         observed = self.current.setdefault('observed', {})
         observed['offered'], observed['not_offered_here'] = listed, sorted(set(names)-set(listed))
         self.gate('offered_tools_are_nochehs', set(listed) <= set(names), unknown=sorted(set(listed)-set(names)))
-        calls = ' '.join('[[tool:mcp__nocheh__'+name+' '+json.dumps(self.SAFE_TOOL_INPUT.get(name, {}))+']]' for name in listed)
-        before = len(self.f.agent())
-        self.silent_turn(self.f.message(OWNER, 'همه را امتحان کن '+calls+' [[after:silent]]'), OWNER)
-        results = {event['tool'][len('mcp__nocheh__'):]: str(event.get('result') or '') for event in self.f.agent()[before:]
-                   if event.get('phase') == 'final' and str(event.get('tool') or '').startswith('mcp__nocheh__')}
+        # One turn for each tool: a turn that collects many results grows past Hermes's own context limit.
+        results = {name: self.tool_turn(OWNER, 'mcp__nocheh__'+name, self.SAFE_TOOL_INPUT.get(name, {})) for name in listed}
         observed['answers'] = {name: text[:150] for name, text in results.items()}
         silent = [name for name in listed if not results.get(name, '').strip()]
         broken = {name: text[:300] for name, text in results.items() if any(word in text for word in self.BROKEN)}
