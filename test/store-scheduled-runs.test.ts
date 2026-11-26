@@ -174,7 +174,15 @@ test('scheduled execution uses guarded operation roots and stages exact delivery
     const before=calls.length;assert.equal((await run(recovered.event_id)).state,'completed');assert.equal(calls.length,before,'durable derivative receipt repairs control without new native execution');
     const uncertain=await capture();mode='running';await run(uncertain.event_id);native.delete(uncertain.event_id);
     assert.equal((await run(uncertain.event_id)).state,'ambiguous');assert.equal((await s.scheduled.delivery(uncertain)).state,'withheld');
+    // A run that stopped partway sent nothing: the owner is told, naming the schedule, instead of silence (ADR-0266).
+    const stopped=digest(canonical(['schedule-run-failed-v1',uncertain.event_id]));
+    assert.equal((await run(uncertain.event_id)).state,'ambiguous');
+    assert.deepEqual([...new Set(notices.map(notice=>notice.id))],[stopped],'told once for the run, as the bot sends each id once');
+    assert.equal(notices[0].chat_id,'123');
+    assert.equal(notices[0].text,'⚠\ufe0f The scheduled task \u2068\u201cFixture\u201d\u2069 in your private chat stopped before it finished, so it sent nothing. Its runs are on the dashboard Schedules page.');
+    notices.length=0;
     const cancelled=await capture();await s.scheduled.cancel(cancelled);assert.equal((await run(cancelled.event_id)).state,'cancelled');
+    assert.equal(notices.length,0,'a cancelled run is not a failure');
     // Each schedule's runs for the Schedules page: when, timed or Run now, and how each ended, never what it said (ADR-0266).
     const log=async(item:{scope:string;job:string})=>(await s.scheduled.runLog(item.scope,item.job)).runs;
     assert.deepEqual((await log(own)).map(item=>[item.trigger,item.result]),[['run_now','sending']]);
@@ -185,6 +193,7 @@ test('scheduled execution uses guarded operation roots and stages exact delivery
     assert.deepEqual((await log(delivered)).map(item=>item.result),['waiting']);
     assert.deepEqual((await log(local)).map(item=>item.result),['kept']);
     assert.deepEqual((await log(cancelled)).map(item=>item.result),['stopped']);
+    assert.deepEqual((await log(uncertain)).map(item=>item.result),['failed']);
     assert.ok(!JSON.stringify(await log(own)).includes('fixture-secret'),'a run log never carries what a run said');
     assert.deepEqual(await log({scope:'-123',job:own.job}),[],'a job is listed only in its own chat');
     await assert.rejects(s.scheduled.runLog('123','../x'),{code:'invalid_run_identity'});

@@ -79,6 +79,13 @@ is not what Nocheh runs: Nocheh keeps the bot, the sealed runs and the archive.
    the cursor's earlier run was already closed as superseded, so the schedule never woke
    again (2026-11-24). A cursor whose run is closed now gets a new generation. At startup,
    storage's worker starts again any schedule whose current cursor has only a superseded run.
+11. **A scheduled run has 8 minutes, and a failed one says so.** A reply has 230 seconds. A
+   brief reads tasks, chats, memory and connectors, and often took longer, so its runs
+   stopped partway with nothing sent (2026-11-26). A scheduled run now has 480 seconds,
+   inside its 10-minute one-time key (ADR-0305), and its stream sends heartbeats like a job
+   run's. A run that ends interrupted or failed tells the owner once in their private chat
+   (`schedule_failed`, an editable line that names the schedule and its chat). A cancelled
+   or skipped run says nothing.
 
 ## Consequences
 

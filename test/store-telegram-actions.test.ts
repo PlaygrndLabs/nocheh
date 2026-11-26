@@ -316,8 +316,11 @@ test('an owner notice names the chat in the owner\'s fixed words, quotes only na
     await actions.ownerNotice('a'.repeat(64),'schedule_not_sent',{chat:UNSERVED,reason:'reason_not_served'});
     await actions.ownerNotice('b'.repeat(64),'job_report_not_sent',{chat:GP1_TOPIC,reason:'reason_not_served',title:'Plan {chat} \u201cx\u201d'});
     await actions.ownerNotice('c'.repeat(64),'schedule_not_sent',{chat:OWNER,reason:'reason_settings_changed'});
+    // A scheduled run that stopped partway names its schedule; it has no reason line.
+    await actions.ownerNotice('e'.repeat(64),'schedule_failed',{chat:OWNER,title:'Weekday brief'});
     down=true;await actions.ownerNotice('d'.repeat(64),'schedule_not_run',{chat:GP2,reason:'reason_not_served'});
-    assert.deepEqual(sent.map(notice=>[notice.id,notice.chat_id]),[['a'.repeat(64),OWNER],['b'.repeat(64),OWNER],['c'.repeat(64),OWNER]]);
+    assert.deepEqual(sent.map(notice=>[notice.id,notice.chat_id]),[['a'.repeat(64),OWNER],['b'.repeat(64),OWNER],['c'.repeat(64),OWNER],['e'.repeat(64),OWNER]]);
+    assert.equal(sent[3]!.text,'\u26a0\ufe0f The scheduled task \u2068\u201cWeekday brief\u201d\u2069 in your private chat stopped before it finished, so it sent nothing. Its runs are on the dashboard Schedules page.');
     assert.equal(sent[0]!.text,'\u26a0\ufe0f A scheduled task in group \u2068\u201cUnserved\u201d\u2069 (not served now) finished, but its result was not sent: Nocheh does not serve that chat now.');
     // A name's own braces and quotes show plain, so it can neither be filled in nor close the quotes code adds.
     assert.equal(sent[1]!.text,'\u26a0\ufe0f The job \u2068\u201cPlan [chat] \'x\'\u201d\u2069 finished, but its report was not sent to group \u2068\u201cGP1\u201d\u2069 \u203a a topic: Nocheh does not serve that chat now.');

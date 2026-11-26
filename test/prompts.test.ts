@@ -69,7 +69,7 @@ test('sends and reminders name chats and people in fixed lines the owner can edi
   assert.deepEqual({group_chat:lines.group_chat,topic_name:lines.topic_name,person_chat:lines.person_chat,person_chat_more:lines.person_chat_more,
     person_chat_other:lines.person_chat_other,unnamed_person:lines.unnamed_person,unknown_chat:lines.unknown_chat,not_served:lines.not_served,
     name_project:lines.name_project,name_id:lines.name_id,not_sent:lines.not_sent,reason_not_served:lines.reason_not_served,
-    reason_settings_changed:lines.reason_settings_changed,schedule_not_sent:lines.schedule_not_sent,schedule_not_run:lines.schedule_not_run,
+    reason_settings_changed:lines.reason_settings_changed,schedule_not_sent:lines.schedule_not_sent,schedule_not_run:lines.schedule_not_run,schedule_failed:lines.schedule_failed,
     job_report_not_sent:lines.job_report_not_sent},{group_chat:'group {name}',topic_name:'topic {name}',
     person_chat:'private chat with {name} (a member in {group})',
     person_chat_more:'private chat with {name} (a member in {group} and {count} more)',person_chat_other:'private chat with {name}',
@@ -78,6 +78,7 @@ test('sends and reminders name chats and people in fixed lines the owner can edi
     reason_settings_changed:'your settings changed while it ran. It runs again at its next time.',
     schedule_not_sent:'\u26a0\ufe0f A scheduled task in {chat} finished, but its result was not sent: {reason}',
     schedule_not_run:'\u26a0\ufe0f A scheduled task in {chat} did not run: {reason} It runs again once you select that group on the dashboard Chats page.',
+    schedule_failed:'\u26a0\ufe0f The scheduled task {title} in {chat} stopped before it finished, so it sent nothing. Its runs are on the dashboard Schedules page.',
     job_report_not_sent:'\u26a0\ufe0f The job {title} finished, but its report was not sent to {chat}: {reason}'});
   assert.deepEqual([lines.private_chat,lines.topic,lines.unnamed_group,lines.unnamed_topic,lines.general_topic],['your private chat','\u203a {topic}','a Telegram group','a topic','General'],
     'the chat words a card has today stay');

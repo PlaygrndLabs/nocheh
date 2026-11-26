@@ -192,9 +192,23 @@ export class TelegramActionRepository {
   /** What Run now sends when it found nothing new, naming its schedule as the owner sees it on the Schedules page. */
   private async quietLine(definition:{id?:string}|null):Promise<string> {
     const lines=scheduleNoticeLines((await ownerPrompts(this.stores.control))['schedules.notice_texts']);
+    return fillTemplate(lines.quiet,{name:await this.scheduleName(definition)??lines.unnamed});
+  }
+  /** A schedule's name as the Schedules page shows it, or null. */
+  private async scheduleName(definition:{id?:string}|null):Promise<string|null> {
     const row=definition?.id?(await this.stores.derived.query('SELECT content FROM derived_artifacts WHERE id=$1',[definition.id])).rows[0]:null;
-    let name:string|null=null;try{name=row?cardName(JSON.parse(row.content.toString()).name,80):null;}catch{name=null;}
-    return fillTemplate(lines.quiet,{name:name??lines.unnamed});
+    try{return row?cardName(JSON.parse(row.content.toString()).name,80):null;}catch{return null;}
+  }
+  /** Tells the owner once that a scheduled run stopped before it finished (interrupted or failed), so it sent nothing.
+   *  A run that was cancelled or skipped says nothing here. Never stops its caller (ADR-0266). */
+  async scheduleFailed(id:string):Promise<void> {
+    try {
+      const row=(await this.stores.control.query(`SELECT r.scope,r.state,v.definition_reference FROM managed_runs r
+        LEFT JOIN schedule_versions v ON v.id=r.schedule_version WHERE r.event_id=$1 AND r.channel='scheduler'`,[id])).rows[0];
+      if(!row||!['interrupted','failed'].includes(row.state))return;
+      const name=await this.scheduleName(row.definition_reference)??scheduleNoticeLines((await ownerPrompts(this.stores.control))['schedules.notice_texts']).unnamed;
+      await this.ownerNotice(digest(canonical(['schedule-run-failed-v1',id])),'schedule_failed',{chat:row.scope,title:name});
+    }catch{/* As ownerNotice: shown in System › Health; the run's own end goes on. */}
   }
   /** The person who wrote a live group turn, when they may talk to Nocheh there (the owner or a member who talks there);
    *  null for the owner's private chat. */
@@ -421,12 +435,12 @@ export class TelegramActionRepository {
   /** Tells the owner, in their private chat, that a scheduled task's result, a schedule's run or a job's report did not
    * reach its chat, and why, in the owner's editable words (ADR-0254). The id makes the bot send it once. A notice that
    * fails shows in System › Health and never causes another (SPECS.md); the caller goes on either way. */
-  async ownerNotice(id:string,key:'schedule_not_sent'|'schedule_not_run'|'job_report_not_sent',values:{chat:string;reason:ApprovalText;title?:string}):Promise<void> {
+  async ownerNotice(id:string,key:'schedule_not_sent'|'schedule_not_run'|'schedule_failed'|'job_report_not_sent',values:{chat:string;reason?:ApprovalText;title?:string}):Promise<void> {
     try {
       const owner=ownerChat(this.access.policy());if(!owner)return;
       const line=approvalLines((await ownerPrompts(this.stores.control))['telegram.approval_texts']),directory=await currentChats();
       // One pass: a name that holds {chat} or {reason} stays as written, and the line is never dropped.
-      const text=noticeText(fillLine(line[key],{chat:placeLabel(values.chat,line,directory),reason:line[values.reason],
+      const text=noticeText(fillLine(line[key],{chat:placeLabel(values.chat,line,directory),...(values.reason===undefined?{}:{reason:line[values.reason]}),
         ...(values.title===undefined?{}:{title:quotedName(labelName(values.title)??'')})}));
       await this.call('telegram.notice',{id,...telegramTarget(owner,directory),text},30000);
     }catch{/* Shown in System › Health by the bot; nothing here waits for it. */}
