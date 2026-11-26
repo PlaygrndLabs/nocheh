@@ -138,7 +138,10 @@ export class ScheduledRunRepository extends ManagedExecutionRepository {
   /** Nocheh delivers a completed run itself, and a result that waits for the owner gets its card here; Hermes no longer
    *  asks for either (ADR-0290). A card that cannot be posted leaves the result in the Inbox. */
   override async run(id:string,authority:ExecutionAuthority):Promise<Observation>{const result=await super.run(id,authority);
-    if(result.state==='completed'){const sent=await this.delivery({event_id:id});if(this.offer)await this.offer(sent as Record<string,any>).catch(()=>{});}return result;}
+    if(result.state==='completed'){const sent=await this.delivery({event_id:id});if(this.offer)await this.offer(sent as Record<string,any>).catch(()=>{});}
+    // A run that stopped partway sent nothing; the owner hears it once instead of silence.
+    else if(result.state==='ambiguous'||result.state==='failed')await this.actions.scheduleFailed(id);
+    return result;}
   async operation(job:string,authority:ExecutionAuthority):Promise<Observation>{
     if(job.startsWith('run:'))return this.run(managedEventId(job.slice(4)),authority);
     const match=/^schedule:([a-f0-9]{64}):([a-f0-9]{64})$/.exec(job);if(!match)return observation('failed','admission');

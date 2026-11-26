@@ -142,6 +142,7 @@ export const approvalTexts=[
   'reason_member_changed: the member who asked can no longer do this there: they were paused or removed, or a switch for them was turned off.',
   'schedule_not_sent: ⚠\ufe0f A scheduled task in {chat} finished, but its result was not sent: {reason}',
   'schedule_not_run: ⚠\ufe0f A scheduled task in {chat} did not run: {reason} It runs again once you select that group on the dashboard Chats page.',
+  'schedule_failed: ⚠\ufe0f The scheduled task {title} in {chat} stopped before it finished, so it sent nothing. Its runs are on the dashboard Schedules page.',
   'job_report_not_sent: ⚠\ufe0f The job {title} finished, but its report was not sent to {chat}: {reason}',
   'sent: ✅ Approved and sent.','sending: ⏳ Approved. Sending now.','done: ✅ Approved and done.','approved: ✅ Approved.',
   'allowed_here: ✅ Approved. It is allowed for 12 hours for everyone in the chat or topic that asked.',
@@ -187,7 +188,7 @@ export type ApprovalText='approve'|'reject'|'allow_once'|'allow_here'|'allow_alw
   'from_job'|'from_schedule'|'from_schedule_in'|'asked_you'|'asked_member'|'unnamed_member'|'list'|'list_part'|'list_note'|'list_long'|'list_inbox'|'list_done'|'list_some'|'list_partly'|'list_partly_rejected'|'only_owner'|'only_requester'|'changed'|'decided'|'stop'|'stopping_job'|'job_ended'|'only_stop'|
   'task_add'|'task_move'|'task_move_family'|'task_change'|'task_comment'|'task_no_chats'|'task_later'|'task_private_move'|'task_private_family'|'task_private_parts'|'task_done'|'task_rejected'|'task_changed'|
   'group_chat'|'topic_name'|'person_chat'|'person_chat_more'|'person_chat_other'|'unnamed_person'|'unknown_chat'|'not_served'|'name_project'|'name_id'|
-  'not_sent'|'reason_not_served'|'reason_settings_changed'|'reason_member_changed'|'schedule_not_sent'|'schedule_not_run'|'job_report_not_sent';
+  'not_sent'|'reason_not_served'|'reason_settings_changed'|'reason_member_changed'|'schedule_not_sent'|'schedule_not_run'|'schedule_failed'|'job_report_not_sent';
 /** The labeled lines, with any line the owner removed or left empty taken from the default, and so is a stored line
  * that lacks a value Nocheh fills in (labeledPlaceholders). */
 export function approvalLines(text:string|undefined):Record<ApprovalText,string> {
@@ -204,7 +205,7 @@ export function labeledLines(defaults:string,text:string|undefined):Record<strin
 export const labeledPlaceholders:Partial<Record<PromptKey,Readonly<Record<string,readonly string[]>>>>={
   'telegram.approval_texts':{group_chat:['{name}'],topic_name:['{name}'],person_chat:['{name}','{group}'],person_chat_more:['{name}','{group}','{count}'],
     person_chat_other:['{name}'],unnamed_person:['{id}'],name_project:['{name}','{project}'],name_id:['{name}','{id}'],not_sent:['{reason}'],
-    schedule_not_sent:['{chat}','{reason}'],schedule_not_run:['{chat}','{reason}'],job_report_not_sent:['{chat}','{reason}']},
+    schedule_not_sent:['{chat}','{reason}'],schedule_not_run:['{chat}','{reason}'],schedule_failed:['{title}','{chat}'],job_report_not_sent:['{chat}','{reason}']},
   'background.texts':{machine_reads:['{place}','{size}'],notion_pages:['{pages}'],machine_changed:['{machine_name}','{files}'],machine_unchecked:['{machine_name}'],files_changed:['{files}']},
   'tasks.reminder_texts':{person:['{name}'],person_gone:['{name}'],set_by:['{who}','{place}'],written_by:['{who}','{place}','{fields}'],
     closed_by:['{who}','{place}'],merged:['{count}','{place}'],more_waiting:['{count}'],note_line:['{line}'],removed_in_group:['{count}','{times}']},

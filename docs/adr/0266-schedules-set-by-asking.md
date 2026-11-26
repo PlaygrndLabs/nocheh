@@ -79,6 +79,14 @@ is not what Nocheh runs: Nocheh keeps the bot, the sealed runs and the archive.
    the cursor's earlier run was already closed as superseded, so the schedule never woke
    again (2026-11-24). A cursor whose run is closed now gets a new generation. At startup,
    storage's worker starts again any schedule whose current cursor has only a superseded run.
+11. **A failed run says so.** A run that ends interrupted or failed sent nothing, and the
+   owner heard nothing (2026-11-26, when the internet was down for hours and every run hit
+   its time limit). It now tells the owner once in their private chat (`schedule_failed`,
+   an editable line that names the schedule and its chat). A notice the bot could not take,
+   as in an outage, goes once it can: storage's worker sends, each minute, the newest
+   untold failure of each schedule from the last day, which covers its earlier ones
+   (`managed_runs.failure_told_at`). A cancelled or skipped run says nothing. Run time
+   limits stay as they are.
 
 ## Consequences
 

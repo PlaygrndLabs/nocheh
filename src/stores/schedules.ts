@@ -33,6 +33,7 @@ CREATE TABLE IF NOT EXISTS workflow_schedules (
 ALTER TABLE managed_runs ADD COLUMN IF NOT EXISTS schedule_version text REFERENCES schedule_versions(id);
 ALTER TABLE managed_runs ADD COLUMN IF NOT EXISTS trigger_reference jsonb;
 ALTER TABLE managed_runs ADD COLUMN IF NOT EXISTS fire_reason text;
+ALTER TABLE managed_runs ADD COLUMN IF NOT EXISTS failure_told_at timestamptz;
 -- Only Nocheh decides that a schedule may be set or fired (ADR-0290): a person's live turn, a press it saw, or its own
 -- clock around advance. Each grant is a row here; no secret passes through Hermes.
 CREATE TABLE IF NOT EXISTS schedule_turn_grants (
