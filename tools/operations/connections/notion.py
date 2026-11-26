@@ -19,11 +19,13 @@ import urllib.error
 import urllib.parse
 import urllib.request
 
-from tools.operations.connections import secret_file
+from tools.operations.connections import fixture as fixture_service, secret_file
 
 ISSUER = 'https://mcp.notion.com'
 MCP_URL = ISSUER + '/mcp'
 AUTHORIZE, TOKEN, REGISTER = ISSUER + '/authorize', ISSUER + '/token', ISSUER + '/register'
+# The tester's fake Notion, used only in a fixture installation and only at this exact address.
+FIXTURE_NOTION_URL = fixture_service.HOST + '/notion'
 # Notion answers with the newest version it supports; these are the ones this client speaks.
 VERSIONS = ('2025-11-25', '2025-06-18', '2025-03-26')
 PENDING_SECONDS = 600
@@ -32,6 +34,12 @@ ACCOUNT_RETRY_SECONDS = 300
 
 
 PROJECT = re.compile(r'[a-f0-9]{64}')
+
+
+def fixture(): return fixture_service.on('NOCHEH_NOTION_URL', FIXTURE_NOTION_URL)
+
+
+def mcp_url(): return FIXTURE_NOTION_URL + '/mcp' if fixture() else MCP_URL
 
 
 def name(project=None):
@@ -167,11 +175,11 @@ def save_token(state, value, check=None, project=None):
 
 def verify(token, opener=None):
     """Opens an MCP session with the token, so a wrong one is refused when it is saved."""
-    request = urllib.request.Request(MCP_URL, method='POST', headers={
+    request = urllib.request.Request(mcp_url(), method='POST', headers={
         'Authorization': 'Bearer ' + token, 'Content-Type': 'application/json', 'Accept': 'application/json, text/event-stream',
         'User-Agent': 'Nocheh'}, data=json.dumps({'jsonrpc': '2.0', 'id': 1, 'method': 'initialize', 'params': {
             'protocolVersion': VERSIONS[0], 'capabilities': {}, 'clientInfo': {'name': 'nocheh', 'version': '0.2'}}}).encode())
-    opener = opener or urllib.request.build_opener(urllib.request.ProxyHandler(urllib.request.getproxies()))
+    opener = opener or fixture_service.opener(fixture())
     try:
         with opener.open(request, timeout=20): pass
     except urllib.error.HTTPError as error:

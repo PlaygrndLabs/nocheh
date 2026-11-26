@@ -18,7 +18,7 @@ import urllib.error
 import urllib.parse
 import urllib.request
 
-from tools.operations.connections import secret_file
+from tools.operations.connections import fixture as fixture_service, secret_file
 
 NAME = 'gmail'
 AUTHORIZE = 'https://accounts.google.com/o/oauth2/v2/auth'
@@ -27,6 +27,8 @@ REVOKE = 'https://oauth2.googleapis.com/revoke'
 # Gmail names the signed-in account's own mailbox 'me'.
 MAILBOX = 'me'
 API = '/'.join(('https://gmail.googleapis.com/gmail/v1', 'users', MAILBOX))
+# The tester's fake Google, used only in a fixture installation and only at this exact address.
+FIXTURE_GMAIL_URL = fixture_service.HOST + '/gmail'
 SCOPE = 'https://www.googleapis.com/auth/gmail.readonly'
 PENDING_SECONDS = 600
 CLIENT_ID = re.compile(r'[0-9]{1,40}-[a-z0-9]{1,64}\.apps\.googleusercontent\.com')
@@ -43,8 +45,20 @@ def read(state): return secret_file.read(state, NAME)
 def write(state, value): return secret_file.write(state, NAME, value)
 
 
+def fixture(): return fixture_service.on('NOCHEH_GMAIL_URL', FIXTURE_GMAIL_URL)
+
+
+def token_url(): return FIXTURE_GMAIL_URL + '/token' if fixture() else TOKEN
+
+
+def revoke_url(): return FIXTURE_GMAIL_URL + '/revoke' if fixture() else REVOKE
+
+
+def api_url(): return FIXTURE_GMAIL_URL + urllib.parse.urlsplit(API).path if fixture() else API
+
+
 def opener():
-    return urllib.request.build_opener(urllib.request.ProxyHandler(urllib.request.getproxies()))
+    return fixture_service.opener(fixture())
 
 
 def post(url, body):
@@ -118,7 +132,7 @@ def finish(state, code, nonce, post=post, get=get):
         if not client.get('id') or not secrets.compare_digest(pending.get('state', ''), nonce) or pending.get('expires', 0) < time.time():
             raise ValueError('gmail_sign_in_expired')
         try:
-            token = post(TOKEN, {'grant_type': 'authorization_code', 'code': code, 'client_id': client['id'], 'client_secret': client['secret'],
+            token = post(token_url(), {'grant_type': 'authorization_code', 'code': code, 'client_id': client['id'], 'client_secret': client['secret'],
                                  'redirect_uri': pending['redirect'], 'code_verifier': pending['verifier']})
         except urllib.error.HTTPError:
             raise ValueError('gmail_sign_in_refused') from None
@@ -127,7 +141,7 @@ def finish(state, code, nonce, post=post, get=get):
         # Google lets the person untick a permission on its consent page; without mail reading there is nothing to use.
         if SCOPE not in str(token.get('scope', '')).split(): raise ValueError('gmail_scope_missing')
         grant = fresh(token)
-        try: email = get(API + '/profile', grant['access_token']).get('emailAddress')
+        try: email = get(api_url() + '/profile', grant['access_token']).get('emailAddress')
         except urllib.error.HTTPError as error: raise ValueError(api_error(error)) from None
         except OSError: raise ValueError('gmail_unavailable') from None
         saved.pop('pending')
@@ -141,7 +155,7 @@ def disconnect(state, post=post):
         saved = read(state); grant = saved.pop('grant', None); saved.pop('pending', None); write(state, saved)
     if grant and grant.get('refresh_token'):
         # Best effort: the sign-in is already forgotten here whatever Google answers.
-        try: post(REVOKE, {'token': grant['refresh_token']})
+        try: post(revoke_url(), {'token': grant['refresh_token']})
         except Exception: pass
     return status(state)
 
@@ -154,7 +168,7 @@ def bearer(state, post=post, now=time.time):
             raise ValueError('gmail_reconnect_needed' if grant.get('reconnect') else 'gmail_not_connected')
         if grant['expires_at'] - 300 > now(): return grant['access_token']
         try:
-            token = post(TOKEN, {'grant_type': 'refresh_token', 'refresh_token': grant['refresh_token'],
+            token = post(token_url(), {'grant_type': 'refresh_token', 'refresh_token': grant['refresh_token'],
                                  'client_id': client.get('id'), 'client_secret': client.get('secret')})
         except urllib.error.HTTPError as error:
             body = {}
@@ -241,7 +255,7 @@ def lookup(state, args, post=post, get=get):
         if not (isinstance(name, str) and MESSAGE_ID.fullmatch(name)): raise ValueError('invalid_gmail_lookup')
     token = bearer(state, post=post)
     def read_api(path):
-        try: return get(API + path, token)
+        try: return get(api_url() + path, token)
         except urllib.error.HTTPError as error: raise ValueError(api_error(error)) from None
         except OSError: raise ValueError('gmail_unavailable') from None
     if tool == 'search_mail':

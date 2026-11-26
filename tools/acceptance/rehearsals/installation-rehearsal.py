@@ -31,6 +31,9 @@ FIXTURE_PROVIDER = 'model-fixture'
 FIXTURE_REPLY_RATES = {'input': 50, 'output': 50, 'cache_read': 0.5, 'cache_write': 50}
 # The fake GitHub on the model fixture; github.py accepts this plain-HTTP address only inside an installation fixture.
 FIXTURE_GITHUB_URL = 'http://model-fixture:8317/github'
+# The fake Notion and Google the connector scenarios use (tools/acceptance/connectors_mock.py).
+FIXTURE_NOTION_URL = 'http://model-fixture:8317/notion'
+FIXTURE_GMAIL_URL = 'http://model-fixture:8317/gmail'
 
 
 def honcho_env(password, token, model):
@@ -177,7 +180,8 @@ def main():
                 service['volumes'].append({'type': 'bind', 'source': str(installation), 'target': str(installation), 'read_only': True})
                 # The GitHub fetcher runs the box image, and copies come from the fake GitHub on the fixture's internal network.
                 service['environment'].update(NOCHEH_BOX_IMAGE=images['box'], NOCHEH_GITHUB_URL=FIXTURE_GITHUB_URL,
-                                              NOCHEH_GITHUB_FIXTURE_NETWORK=rendered['networks']['default']['name'])
+                                              NOCHEH_GITHUB_FIXTURE_NETWORK=rendered['networks']['default']['name'],
+                                              NOCHEH_NOTION_URL=FIXTURE_NOTION_URL, NOCHEH_GMAIL_URL=FIXTURE_GMAIL_URL)
             # The Telegram service and the file reader run the native image too; the bot reaches the fake Bot API on the
             # default network.
             if name in ('hermes', 'hermes-agent-sb', 'nocheh-telegram', 'nocheh-reader'):
@@ -199,13 +203,15 @@ def main():
         rendered['services']['model-fixture'] = {'image': images['honcho'], 'user': '0:0', 'init': True, 'restart': 'no',
             'read_only': True, 'tmpfs': ['/tmp'], 'cap_drop': ['ALL'], 'security_opt': ['no-new-privileges:true'],
             'entrypoint': ['/app/.venv/bin/python'], 'command': ['/fixture/provider.py', 'provider'],
-            'environment': {'NOCHEH_INSTALLATION_FIXTURE': '1', 'PYTHONPATH': '/app', 'NOCHEH_GITHUB_FIXTURE_ROOT': '/fixture-github'},
+            'environment': {'NOCHEH_INSTALLATION_FIXTURE': '1', 'PYTHONPATH': '/app', 'NOCHEH_GITHUB_FIXTURE_ROOT': '/fixture-github',
+                            'NOCHEH_CONNECTORS_FIXTURE': '1'},
             'networks': {'default': None, 'memory': None},
             'volumes': [{'type': 'bind', 'source': str(root / 'tools/acceptance/rehearsals/installation-provider.py'), 'target': '/fixture/provider.py', 'read_only': True},
                         # The fake GitHub, mounted as the Telegram mock is (telegram_rehearsal.py); its app key stays in the file.
                         {'type': 'bind', 'source': str(directory / 'github'), 'target': '/fixture-github', 'read_only': True},
                         {'type': 'bind', 'source': str(root / 'tools/__init__.py'), 'target': '/fixture/tools/__init__.py', 'read_only': True},
-                        {'type': 'bind', 'source': str(root / 'tools/acceptance/github_mock.py'), 'target': '/fixture/tools/acceptance/github_mock.py', 'read_only': True}],
+                        {'type': 'bind', 'source': str(root / 'tools/acceptance/github_mock.py'), 'target': '/fixture/tools/acceptance/github_mock.py', 'read_only': True},
+                        {'type': 'bind', 'source': str(root / 'tools/acceptance/connectors_mock.py'), 'target': '/fixture/tools/acceptance/connectors_mock.py', 'read_only': True}],
             'healthcheck': {'test': ['CMD', '/app/.venv/bin/python', '-c', "import urllib.request; urllib.request.urlopen('http://127.0.0.1:8317/healthz')"], 'interval': '3s', 'retries': 30}}
         meter = rendered['services']['honcho-provider-gateway']
         meter['command'] = ['python', '/fixture/provider.py', 'meter']

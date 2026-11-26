@@ -1,12 +1,14 @@
 """The owner's Notion sign-in and Notion calls through its MCP server."""
 import io
 import json
+import os
 import stat
 import tempfile
 import unittest
 import urllib.error
 import urllib.parse
 from pathlib import Path
+from unittest.mock import patch
 
 from tools.operations.connections import notion
 from tools.operations.security.tool_execution import execute, mcp_call
@@ -141,6 +143,27 @@ class NotionSignInTests(unittest.TestCase):
         self.assertIsNone(notion.account(self.state, call=failed))
         self.assertIsNone(notion.account(self.state, call=lambda args, state=None: {'response': {'isError': True}, 'error': 'tool_reported_error'}))
         self.assertIsNone(notion.account(self.state, call=lambda args, state=None: {'response': {'content': [{'type': 'text', 'text': 'not json'}]}}))
+
+    def test_the_fake_notion_is_used_only_in_a_fixture_at_its_exact_address(self):
+        # The tester's fake Notion (tools/acceptance/connectors_mock.py): the fixture flag and the exact address, both.
+        for environment in ({'NOCHEH_NOTION_URL': notion.FIXTURE_NOTION_URL}, {'NOCHEH_INSTALLATION_FIXTURE': '1'},
+                            {'NOCHEH_INSTALLATION_FIXTURE': '1', 'NOCHEH_NOTION_URL': 'http://model-fixture:8317/other'}):
+            with self.subTest(environment=environment), patch.dict(os.environ, environment):
+                self.assertEqual((notion.fixture(), notion.mcp_url()), (False, notion.MCP_URL))
+        notion.save_token(self.state, 'ntn_owner', check=lambda token: None)
+        seen = []
+        def fake(url, body, headers):
+            seen.append(url)
+            if body['method'] == 'initialize':
+                return json.dumps({'jsonrpc': '2.0', 'id': 1, 'result': {'protocolVersion': '2025-11-25'}}).encode(), {'content-type': 'application/json'}
+            if body['method'] == 'notifications/initialized': return b'', {}
+            return json.dumps({'jsonrpc': '2.0', 'id': 2, 'result': {'tools': []}}).encode(), {'content-type': 'application/json'}
+        def public(url, body, headers): raise AssertionError('the fixture sends nothing to the public address')
+        with patch.dict(os.environ, {'NOCHEH_INSTALLATION_FIXTURE': '1', 'NOCHEH_NOTION_URL': notion.FIXTURE_NOTION_URL}), \
+                patch('tools.operations.connections.fixture.request', fake):
+            self.assertEqual(notion.mcp_url(), 'http://model-fixture:8317/notion/mcp')
+            mcp_call({'connection': 'notion', 'operation': 'list'}, public, self.state)
+        self.assertEqual(set(seen), {'http://model-fixture:8317/notion/mcp'})
 
     def test_a_project_keeps_its_own_sign_in_apart_from_the_owner_and_other_projects(self):
         # ADR-0268: the owner's own sign-in keeps notion.json; each project's is its own file, used only for its calls.
