@@ -1356,12 +1356,16 @@ class ProductScenarios(Scenarios):
             dashboard.post('/connections/gmail/disconnect', {})
 
     # What every Nocheh tool gets in every_listed_tool_answers: a read where the tool has one, else input it refuses, so
-    # nothing is sent, changed or asked for. A tool missing here gets {}.
+    # nothing is changed or asked for; the one post goes to the group it is asked in. A tool missing here gets {}.
     SAFE_TOOL_INPUT = {
         'archive_search': {'query': 'hello', 'limit': 1}, 'archive_page': {'limit': 1}, 'memory_search': {'query': 'hello', 'limit': 1},
         'memory_recall': {'query': 'hello', 'limit': 1}, 'background_job': {'action': 'status'}, 'owner_read': {'view': 'projects'},
         'tasks': {'action': 'list'}, 'notion': {'operation': 'connections'}, 'github': {'operation': 'repos'}, 'gmail': {'operation': 'call'},
+        'action_request': {'destination': 'current', 'text': 'Synthetic tool check'},
     }
+    # Tools that answer any failure with one "unavailable" code, bad input included, so each gets real work, where it works:
+    # a post to the same group, which goes without a card, and the group's own destinations.
+    TOOL_IN_GROUP = ('action_request', 'telegram_destinations')
     # A tool's own words when it could not do its work at all, rather than answer, refuse or say what is wrong with the input.
     BROKEN = ('_unavailable', 'timed_out', 'Traceback', 'Internal Server Error')
 
@@ -1378,8 +1382,15 @@ class ProductScenarios(Scenarios):
         observed = self.current.setdefault('observed', {})
         observed['offered'], observed['not_offered_here'] = listed, sorted(set(names)-set(listed))
         self.gate('offered_tools_are_nochehs', set(listed) <= set(names), unknown=sorted(set(listed)-set(names)))
-        # One turn for each tool: a turn that collects many results grows past Hermes's own context limit.
-        results = {name: self.tool_turn(OWNER, 'mcp__nocheh__'+name, self.SAFE_TOOL_INPUT.get(name, {})) for name in listed}
+        # One turn for each tool: a turn that collects many results grows past Hermes's own context limit. archive_search
+        # goes first, so archive_read opens a message it found.
+        results = {}
+        for name in sorted(listed, key=lambda name: name != 'archive_search'):
+            given = self.SAFE_TOOL_INPUT.get(name, {})
+            if name == 'archive_read':
+                found = re.search(r'nocheh:event:[a-f0-9]{64}', results.get('archive_search', ''))
+                given = {'id': found.group(0)} if found else {}
+            results[name] = self.tool_turn(OTHER_GROUP if name in self.TOOL_IN_GROUP else OWNER, 'mcp__nocheh__'+name, given)
         observed['answers'] = {name: text[:150] for name, text in results.items()}
         silent = [name for name in listed if not results.get(name, '').strip()]
         broken = {name: text[:300] for name, text in results.items() if any(word in text for word in self.BROKEN)}
