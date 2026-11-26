@@ -207,6 +207,19 @@ export function CommandSearch({open: shown, onOpenChange}: {open: boolean; onOpe
   const chosen = React.useRef(false);
   const fixed = React.useMemo(staticItems, []);
   const query = typed.trim();
+  // A panel that finishes opening after the search, such as the person a result just opened, would cover it and take
+  // its clicks and keys. The search then opens again on top, keeping what was typed.
+  const [layer, setLayer] = React.useState(0);
+  React.useEffect(() => {
+    if (!shown) return;
+    const observer = new MutationObserver(() => {
+      const own = document.getElementById('command-search');
+      const dialogs = document.querySelectorAll('[role="dialog"]');
+      if (own && dialogs[dialogs.length - 1] !== own) setLayer(count => count + 1);
+    });
+    observer.observe(document.body, {childList: true});
+    return () => observer.disconnect();
+  }, [shown]);
 
   // Fresh lists each time the search opens, so a new member or schedule is found.
   React.useEffect(() => {
@@ -279,10 +292,11 @@ export function CommandSearch({open: shown, onOpenChange}: {open: boolean; onOpe
 
   let index = -1;
   return (
-    <DialogPrimitive.Root open={shown} onOpenChange={onOpenChange}>
+    <DialogPrimitive.Root key={layer} open={shown} onOpenChange={onOpenChange}>
       <DialogPrimitive.Portal>
         <DialogPrimitive.Overlay className="fixed inset-0 z-50 bg-overlay" />
         <DialogPrimitive.Content
+          id="command-search"
           aria-describedby={undefined}
           onCloseAutoFocus={event => chosen.current && event.preventDefault()}
           className="fixed top-[12dvh] left-1/2 z-50 flex max-h-[min(70dvh,560px)] w-[calc(100vw-24px)] max-w-xl -translate-x-1/2 flex-col overflow-hidden rounded-xl border border-line bg-surface shadow-xl focus:outline-none"
