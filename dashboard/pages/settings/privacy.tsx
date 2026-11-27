@@ -61,7 +61,7 @@ const cloudflareTokenPage =
     ]),
   ) +
   '&name=' +
-  encodeURIComponent('Nocheh setup');
+  encodeURIComponent('nocheh-offsite-setup');
 const cloudflareR2Page = 'https://dash.cloudflare.com/?to=/:account/r2/overview';
 const cloudflareTokensPage = 'https://dash.cloudflare.com/?to=/:account/api-tokens';
 const backblazeKeysPage = 'https://secure.backblaze.com/app_keys.htm';
@@ -283,7 +283,7 @@ function OffsiteSettings() {
                       <>
                         {' '}
                         The setup token stays in Cloudflare so you can try again. Once you are done with it, delete
-                        “Nocheh setup” in <OutLink href={cloudflareTokensPage}>Cloudflare’s API tokens</OutLink>.
+                        “nocheh-offsite-setup” in <OutLink href={cloudflareTokensPage}>Cloudflare’s API tokens</OutLink>.
                       </>
                     )}
                   </Notice>
@@ -295,7 +295,7 @@ function OffsiteSettings() {
                         : ''}
                       {done.setup_token_deleted === false && (
                         <>
-                          Nocheh couldn’t delete the setup token. Delete “Nocheh setup” in{' '}
+                          Nocheh couldn’t delete the setup token. Delete “nocheh-offsite-setup” in{' '}
                           <OutLink href={cloudflareTokensPage}>Cloudflare’s API tokens</OutLink>.{' '}
                         </>
                       )}

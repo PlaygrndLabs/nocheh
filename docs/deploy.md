@@ -549,7 +549,7 @@ Pick the storage under Storage:
   that name plus a random ending when the account already has one), locks each
   copy for 7 days so it can't be deleted early, keeps a key for that bucket only,
   tests it and deletes the setup token. If connecting stops with an error, the
-  setup token stays so you can try again; delete "Nocheh setup" in Cloudflare's
+  setup token stays so you can try again; delete "nocheh-offsite-setup" in Cloudflare's
   API tokens once you are done with it. Turn on R2 in Cloudflare first if you
   never used it.
 - **Backblaze** (B2, free up to 10 GB): create a private bucket, set its

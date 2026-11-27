@@ -5,6 +5,9 @@ Accepted on 2026-11-11, after the owner asked for off-site copies that are
 configurable and set up through a Cloudflare connect or sign-in, or a better way.
 Builds on [ADR-0229](0229-encrypted-off-site-backup-copies.md): encryption, upload,
 the restore test and recovery stay as they are.
+
+Amended on 2026-11-27: the setup token is named `nocheh-offsite-setup` and the kept
+key `nocheh-offsite-backup`, in kebab-case, at the owner's request.
 </status>
 
 <context>
@@ -43,12 +46,12 @@ the restore test and recovery stay as they are.
   - adds the bucket lock rule `nocheh-copies`: objects under `nocheh-backups/`
     cannot be deleted or replaced for 7 days, and the owner's other rules on the
     bucket stay. When the existing rules cannot be read, nothing is written;
-  - creates the token "Nocheh off-site copies" with Workers R2 Storage Bucket Item
+  - creates the token `nocheh-offsite-backup` with Workers R2 Storage Bucket Item
     Write and Read on that bucket only, and writes, reads back and removes a test
     object with its S3 keys, retrying while the new key starts to work;
   - saves the storage address, bucket, region `auto` and the keys, then deletes
-    the key an earlier connect saved, only when Cloudflare names it "Nocheh
-    off-site copies", and the setup token. If Cloudflare refuses to delete the
+    the key an earlier connect saved, only when Cloudflare names it
+    `nocheh-offsite-backup`, and the setup token. If Cloudflare refuses to delete the
     setup token, the dashboard says so with a link.
   The setup token is never saved, logged or returned. A key that fails its test is
   deleted and nothing is saved.
@@ -77,7 +80,7 @@ the restore test and recovery stay as they are.
   delete copies only after they are 7 days old.
 - The setup token can create tokens while it exists. Nocheh deletes it once
   connecting succeeds. After a failed connect it stays so the owner can try again,
-  and the dashboard links to Cloudflare's token list to delete "Nocheh setup".
+  and the dashboard links to Cloudflare's token list to delete `nocheh-offsite-setup`.
 - A bucket can hold more copies than the number to keep while young ones are
   locked.
 - A connect that stops after making the bucket leaves that bucket, and the next
