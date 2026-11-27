@@ -1,11 +1,12 @@
 import {useState} from 'react';
-import {ExternalLink} from 'lucide-react';
+import {Copy, ExternalLink} from 'lucide-react';
 import {apiPost, type ApiError} from '../../lib/api';
 import {useSubTab} from '../../lib/navigation';
 import {adoptSavedSettings, useSettings, type SettingsView} from '../../lib/settings';
 import {operationError} from '../../lib/system-format';
-import {Button, Card, CardHeader, Input, Notice, Segmented, Select, SettingRow} from '../../ui/core';
-import {useFeedback} from '../../ui/overlay';
+import {Button, Card, CardHeader, Dot, Input, Notice, Segmented, Select, SettingRow, type Tone} from '../../ui/core';
+import {cn} from '../../lib/utils';
+import {Dialog, useFeedback} from '../../ui/overlay';
 import {SubPanel, SubTabs} from '../../ui/page';
 import {Unsaved, UnsavedDot} from './telegram';
 import {PasswordSettings} from './password';
@@ -82,6 +83,34 @@ function OutLink({href, children}: {href: string; children: React.ReactNode}) {
   );
 }
 
+/** One numbered step in a setup window, joined to the next by a line. */
+function SetupStep({
+  number,
+  title,
+  last,
+  children,
+}: {
+  number: number;
+  title: string;
+  last?: boolean;
+  children: React.ReactNode;
+}) {
+  return (
+    <li className="grid grid-cols-[1.5rem_minmax(0,1fr)] gap-x-3">
+      <div className="flex flex-col items-center">
+        <span className="flex size-6 shrink-0 items-center justify-center rounded-full border border-line text-xs font-medium">
+          {number}
+        </span>
+        {!last && <span aria-hidden className="mt-1 w-px flex-1 bg-line" />}
+      </div>
+      <div className="grid min-w-0 gap-2.5 pb-1">
+        <p className="pt-0.5 text-sm font-medium">{title}</p>
+        {children}
+      </div>
+    </li>
+  );
+}
+
 /** Encrypted off-site copies of finished backups in the owner's own storage (ADR-0229, ADR-0236). */
 function OffsiteSettings() {
   const s = useSettings();
@@ -115,6 +144,7 @@ function OffsiteSettings() {
   // A Cloudflare connect that stops after the setup token was accepted leaves that token in place for another try.
   const [problem, setProblem] = useState<{text: string; tokenLeft: boolean} | null>(null);
   const [done, setDone] = useState<Connected | null>(null);
+  const [setupOpen, setSetupOpen] = useState(false);
   const showForm = provider !== 'other' && (!connected || again);
 
   const forgetAccount = () => {
@@ -160,6 +190,7 @@ function OffsiteSettings() {
       setKeyId('');
       forgetAccount();
       setAgain(false);
+      setSetupOpen(false);
       feedback.toast('Storage connected.');
     } catch (error) {
       const code = (error as ApiError).message;
@@ -212,8 +243,145 @@ function OffsiteSettings() {
       Connect
     </Button>
   );
+  const problemNotice = problem && (
+    <Notice tone="bad">
+      {problem.text}
+      {problem.tokenLeft && (
+        <>
+          {' '}
+          The setup token stays in Cloudflare so you can try again. Once you are done with it, delete
+          “nocheh-offsite-setup” in <OutLink href={cloudflareTokensPage}>Cloudflare’s API tokens</OutLink>.
+        </>
+      )}
+    </Notice>
+  );
+  const setupStatus: {tone: Tone; text: string} = busy
+    ? {tone: 'info', text: 'Connecting… Nocheh is making the bucket and its key.'}
+    : problem
+      ? {tone: 'bad', text: 'Stopped. See the message above.'}
+      : accounts || askAccount
+        ? {tone: 'warn', text: 'Choose the account, then press Connect.'}
+        : token
+          ? {tone: 'accent', text: 'Token pasted. Press Connect.'}
+          : {tone: 'neutral', text: 'Waiting for the token…'};
+  const copyLink = async () => {
+    try {
+      await navigator.clipboard.writeText(cloudflareTokenPage);
+      feedback.toast('Link copied.');
+    } catch {
+      feedback.toast('Copying isn’t allowed here. Use Open Cloudflare instead.', 'bad');
+    }
+  };
+  const setupDialog = provider === 'cloudflare' && (
+    <Dialog
+      open={setupOpen}
+      onOpenChange={setSetupOpen}
+      title="Connect Cloudflare R2"
+      description="One setup token. Nocheh does the rest."
+      footer={
+        <div className="mr-auto flex min-w-0 flex-1 flex-wrap items-center justify-between gap-x-4 gap-y-1 py-1">
+          <p role="status" className="flex items-center gap-2 text-[13px] text-fg">
+            <Dot tone={setupStatus.tone} className={cn(busy && 'animate-pulse')} />
+            {setupStatus.text}
+          </p>
+          {busy && <p className="text-[12px] text-muted">Closing this window won’t stop it.</p>}
+        </div>
+      }
+    >
+      <ol className="grid gap-5">
+        <SetupStep number={1} title="Open Cloudflare and create the token">
+          <p className="text-[13px] text-muted">
+            The token page opens with the name nocheh-offsite-setup and the right permissions. Press Continue to
+            summary, then Create Token, and copy it. First time with R2?{' '}
+            <OutLink href={cloudflareR2Page}>Turn on R2</OutLink> first.
+          </p>
+          <div className="flex min-w-0 items-center gap-2 rounded-lg border border-line bg-subtle py-1.5 pr-1.5 pl-3">
+            <span className="min-w-0 flex-1 truncate font-mono text-xs" title={cloudflareTokenPage}>
+              <span className="font-semibold">dash.cloudflare.com</span>/api-tokens?name=nocheh-offsite-setup
+            </span>
+            <Button variant="ghost" size="icon-sm" aria-label="Copy link" onClick={() => void copyLink()}>
+              <Copy aria-hidden />
+            </Button>
+          </div>
+          <div>
+            <Button size="sm" asChild>
+              <a href={cloudflareTokenPage} target="_blank" rel="noreferrer">
+                Open Cloudflare <ExternalLink aria-hidden className="size-3.5" />
+              </a>
+            </Button>
+          </div>
+        </SetupStep>
+        <SetupStep number={2} title="Paste the token" last>
+          <p className="text-[13px] text-muted">
+            Nocheh makes the bucket and a key for that bucket only, tests it, then deletes the setup token. The token
+            itself is never saved.
+          </p>
+          <div className="flex gap-2">
+            <Input
+              id="offsite-cloudflare-token"
+              aria-label="Setup token"
+              type="password"
+              autoComplete="off"
+              placeholder="Setup token"
+              value={token}
+              disabled={s.busy || busy}
+              onChange={e => {
+                // Another token may reach other accounts.
+                setToken(e.target.value.trim());
+                forgetAccount();
+              }}
+            />
+            {!accounts && !askAccount && connectButton}
+          </div>
+          {accounts && (
+            <div className="grid gap-1.5">
+              <label htmlFor="offsite-cloudflare-account" className="text-[13px] text-muted">
+                This token reaches more than one account. Pick the one for the copies.
+              </label>
+              <div className="flex gap-2">
+                <Select
+                  id="offsite-cloudflare-account"
+                  value={account}
+                  disabled={busy}
+                  onChange={e => setAccount(e.target.value)}
+                >
+                  {accounts.map(row => (
+                    <option key={row.id} value={row.id}>
+                      {row.name || row.id}
+                    </option>
+                  ))}
+                </Select>
+                {connectButton}
+              </div>
+            </div>
+          )}
+          {askAccount && !accounts && (
+            <div className="grid gap-1.5">
+              <label htmlFor="offsite-cloudflare-account-id" className="text-[13px] text-muted">
+                Cloudflare didn’t say which account this token is for. Copy the Account ID from your Cloudflare account
+                home.
+              </label>
+              <div className="flex gap-2">
+                <Input
+                  id="offsite-cloudflare-account-id"
+                  autoComplete="off"
+                  placeholder="32 letters and digits"
+                  value={account}
+                  disabled={busy}
+                  onChange={e => setAccount(e.target.value.trim().toLowerCase())}
+                />
+                {connectButton}
+              </div>
+            </div>
+          )}
+          {problemNotice}
+        </SetupStep>
+      </ol>
+    </Dialog>
+  );
   return (
     <Card>
+      {setupDialog}
       <CardHeader
         title="Off-site copies"
         description="After each automatic backup, an encrypted copy goes to your own storage. It is locked with your passphrase on this machine, so the storage only ever holds scrambled data."
@@ -274,37 +442,26 @@ function OffsiteSettings() {
                 />
               </div>
             </SettingRow>
-            {(problem || done) && (
+            {((problem && !setupOpen) || done) && (
               <div className="border-t border-line px-5 py-4">
-                {problem ? (
-                  <Notice tone="bad">
-                    {problem.text}
-                    {problem.tokenLeft && (
-                      <>
-                        {' '}
-                        The setup token stays in Cloudflare so you can try again. Once you are done with it, delete
-                        “nocheh-offsite-setup” in <OutLink href={cloudflareTokensPage}>Cloudflare’s API tokens</OutLink>.
-                      </>
+                {problem
+                  ? problemNotice
+                  : done && (
+                      <Notice tone="good" title={'Connected to bucket ' + done.bucket + '.'}>
+                        {done.lock_days
+                          ? `Each copy is locked for ${done.lock_days} days, so nobody can delete it early, not even with this machine’s key. `
+                          : ''}
+                        {done.setup_token_deleted === false && (
+                          <>
+                            Nocheh couldn’t delete the setup token. Delete “nocheh-offsite-setup” in{' '}
+                            <OutLink href={cloudflareTokensPage}>Cloudflare’s API tokens</OutLink>.{' '}
+                          </>
+                        )}
+                        {s.saved('NOCHEH_OFFSITE') === 's3' && configured('NOCHEH_OFFSITE_PASSPHRASE')
+                          ? 'New copies go there from now on.'
+                          : 'Now type your passphrase below and save.'}
+                      </Notice>
                     )}
-                  </Notice>
-                ) : (
-                  done && (
-                    <Notice tone="good" title={'Connected to bucket ' + done.bucket + '.'}>
-                      {done.lock_days
-                        ? `Each copy is locked for ${done.lock_days} days, so nobody can delete it early, not even with this machine’s key. `
-                        : ''}
-                      {done.setup_token_deleted === false && (
-                        <>
-                          Nocheh couldn’t delete the setup token. Delete “nocheh-offsite-setup” in{' '}
-                          <OutLink href={cloudflareTokensPage}>Cloudflare’s API tokens</OutLink>.{' '}
-                        </>
-                      )}
-                      {s.saved('NOCHEH_OFFSITE') === 's3' && configured('NOCHEH_OFFSITE_PASSPHRASE')
-                        ? 'New copies go there from now on.'
-                        : 'Now type your passphrase below and save.'}
-                    </Notice>
-                  )
-                )}
               </div>
             )}
             {provider !== 'other' && connected && !again && (
@@ -325,7 +482,9 @@ function OffsiteSettings() {
                       forgetAccount();
                       setProblem(null);
                       setDone(null);
-                      setAgain(true);
+                      // Cloudflare connects again in its setup window; the connected storage stays until that works.
+                      if (provider === 'cloudflare') setSetupOpen(true);
+                      else setAgain(true);
                     }}
                   >
                     Connect again
@@ -334,90 +493,16 @@ function OffsiteSettings() {
               </SettingRow>
             )}
             {showForm && provider === 'cloudflare' && (
-              <>
-                <SettingRow
-                  title="1. Make a setup token"
-                  description={
-                    <>
-                      Cloudflare opens with the right permissions already chosen. Click Continue to summary, then Create
-                      Token, and copy it. First time with R2? <OutLink href={cloudflareR2Page}>Turn on R2</OutLink>{' '}
-                      first.
-                    </>
-                  }
-                >
-                  <div className="flex sm:justify-end">
-                    <Button size="sm" asChild>
-                      <a href={cloudflareTokenPage} target="_blank" rel="noreferrer">
-                        Open Cloudflare <ExternalLink aria-hidden className="size-3.5" />
-                      </a>
-                    </Button>
-                  </div>
-                </SettingRow>
-                <SettingRow
-                  htmlFor="offsite-cloudflare-token"
-                  title="2. Paste it here"
-                  description="Nocheh makes the bucket and a key for that bucket only, tests it, then deletes the setup token. The token itself is never saved."
-                >
-                  <div className="flex gap-2">
-                    <Input
-                      id="offsite-cloudflare-token"
-                      type="password"
-                      autoComplete="off"
-                      placeholder="Setup token"
-                      value={token}
-                      disabled={s.busy || busy}
-                      onChange={e => {
-                        // Another token may reach other accounts.
-                        setToken(e.target.value.trim());
-                        forgetAccount();
-                      }}
-                    />
-                    {!accounts && !askAccount && connectButton}
-                  </div>
-                </SettingRow>
-                {accounts && (
-                  <SettingRow
-                    htmlFor="offsite-cloudflare-account"
-                    title="Cloudflare account"
-                    description="This token reaches more than one account. Pick the one for the copies."
-                  >
-                    <div className="flex gap-2">
-                      <Select
-                        id="offsite-cloudflare-account"
-                        value={account}
-                        disabled={busy}
-                        onChange={e => setAccount(e.target.value)}
-                      >
-                        {accounts.map(row => (
-                          <option key={row.id} value={row.id}>
-                            {row.name || row.id}
-                          </option>
-                        ))}
-                      </Select>
-                      {connectButton}
-                    </div>
-                  </SettingRow>
-                )}
-                {askAccount && !accounts && (
-                  <SettingRow
-                    htmlFor="offsite-cloudflare-account-id"
-                    title="Account ID"
-                    description="Cloudflare didn’t say which account this token is for. Copy the Account ID from your Cloudflare account home."
-                  >
-                    <div className="flex gap-2">
-                      <Input
-                        id="offsite-cloudflare-account-id"
-                        autoComplete="off"
-                        placeholder="32 letters and digits"
-                        value={account}
-                        disabled={busy}
-                        onChange={e => setAccount(e.target.value.trim().toLowerCase())}
-                      />
-                      {connectButton}
-                    </div>
-                  </SettingRow>
-                )}
-              </>
+              <SettingRow
+                title="Cloudflare R2"
+                description="Not connected yet. Nocheh makes the bucket and its key from one setup token."
+              >
+                <div className="flex sm:justify-end">
+                  <Button size="sm" variant="primary" disabled={s.busy} onClick={() => setSetupOpen(true)}>
+                    Connect Cloudflare
+                  </Button>
+                </div>
+              </SettingRow>
             )}
             {showForm && provider === 'backblaze' && (
               <>

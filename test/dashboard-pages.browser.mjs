@@ -1038,8 +1038,13 @@ test('off-site storage connects from one Cloudflare token or a Backblaze key, th
   await page.getByRole('radiogroup', {name: 'Send off-site copies'}).getByRole('radio', {name: 'On'}).click();
   const storage = page.getByRole('radiogroup', {name: 'Storage'});
   assert.equal(await storage.getByRole('radio', {name: 'Cloudflare'}).getAttribute('aria-checked'), 'true');
+  // Cloudflare is set up in a window with two numbered steps and a status line.
+  await page.getByRole('button', {name: 'Connect Cloudflare'}).click();
+  const setup = page.getByRole('dialog', {name: 'Connect Cloudflare R2'});
+  await setup.getByRole('status').filter({hasText: 'Waiting for the token…'}).waitFor();
   // Cloudflare opens its token page with both permissions already chosen.
-  const link = new URL(await page.getByRole('link', {name: 'Open Cloudflare'}).getAttribute('href'));
+  const link = new URL(await setup.getByRole('link', {name: 'Open Cloudflare'}).getAttribute('href'));
+  assert.equal(link.searchParams.get('name'), 'nocheh-offsite-setup');
   assert.deepEqual(JSON.parse(link.searchParams.get('permissionGroupKeys')), [
     {key: 'workers_r2', type: 'edit'},
     {key: 'account_api_tokens', type: 'edit'},
@@ -1065,6 +1070,7 @@ test('off-site storage connects from one Cloudflare token or a Backblaze key, th
   await done.waitFor();
   assert.match(await done.textContent(), /locked for 7 days.*Now type your passphrase below and save\./);
   await page.getByText('Connected. Copies go to bucket nocheh-backups.').waitFor();
+  assert.equal(await setup.count(), 0, 'the setup window closes once connected');
   assert.equal(await token.count(), 0, 'the token form closes once connected');
   // Turning copies on is still the owner's unsaved edit, and saves with the passphrase.
   const bar = page.getByRole('region', {name: 'Save changes'});
