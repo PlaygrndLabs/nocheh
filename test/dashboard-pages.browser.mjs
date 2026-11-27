@@ -1049,13 +1049,13 @@ test('off-site storage connects from one Cloudflare token or a Backblaze key, th
   await page.getByRole('button', {name: 'Connect', exact: true}).click();
   const refused = page.getByRole('alert').filter({hasText: 'Cloudflare didn’t accept this token'});
   await refused.waitFor();
-  assert.doesNotMatch(await refused.textContent(), /Nocheh setup/);
+  assert.doesNotMatch(await refused.textContent(), /nocheh-offsite-setup/);
   // A stop after the token was accepted leaves it for another try, and says where to delete it.
   await token.fill('no-r2');
   await page.getByRole('button', {name: 'Connect', exact: true}).click();
   const stopped = page.getByRole('alert').filter({hasText: 'R2 isn’t turned on'});
   await stopped.waitFor();
-  assert.match(await stopped.textContent(), /delete “Nocheh setup”/);
+  assert.match(await stopped.textContent(), /delete “nocheh-offsite-setup”/);
   // A token that reaches two accounts asks which one.
   await token.fill('two-accounts');
   await page.getByRole('button', {name: 'Connect', exact: true}).click();

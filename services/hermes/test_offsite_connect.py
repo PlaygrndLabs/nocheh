@@ -111,7 +111,7 @@ class ConnectTests(unittest.TestCase):
     def setUp(self):
         cloudflare, bucket, backblaze = (server.server_port for server in self.servers)
         Cloudflare.accounts = [{'id': ACCOUNT, 'name': 'Example home'}]
-        Cloudflare.tokens = {SETUP: {'id': 'setup-id', 'name': 'Nocheh setup'}}
+        Cloudflare.tokens = {SETUP: {'id': 'setup-id', 'name': 'nocheh-offsite-setup'}}
         Cloudflare.buckets, Cloudflare.locks, Cloudflare.calls = set(), {}, []
         Cloudflare.r2_on, Cloudflare.can_mint, Cloudflare.minted, Cloudflare.lock_readable = True, True, 0, True
         Bucket.objects.clear(); Bucket.uploads.clear(); Bucket.requests.clear()

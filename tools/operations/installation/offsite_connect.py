@@ -25,7 +25,7 @@ BUCKET = 'nocheh-backups'
 OWN_BUCKET = re.compile(r'nocheh-backups(-[0-9a-f]{8})?')
 LOCK_RULE = 'nocheh-copies'
 LOCK_DAYS = 7
-TOKEN_NAME = 'Nocheh off-site copies'
+TOKEN_NAME = 'nocheh-offsite-backup'
 # "Object Read & Write" in Cloudflare's words: objects in the named buckets only, never bucket settings or locks.
 OBJECT_GROUPS = ('Workers R2 Storage Bucket Item Write', 'Workers R2 Storage Bucket Item Read')
 CHECK_KEY = 'nocheh-check/connect'
