@@ -1080,12 +1080,17 @@ test('off-site storage connects from one Cloudflare token or a Backblaze key, th
   await bar.getByText('No unsaved changes').waitFor();
   // Backblaze fills everything from a key limited to one bucket. Choosing it alone saves nothing.
   await storage.getByRole('radio', {name: 'Backblaze'}).click();
-  await page.getByText('Keep only the last version', {exact: false}).waitFor();
   assert.equal(await bar.getByText('No unsaved changes').count(), 1);
+  await page.getByRole('button', {name: 'Connect Backblaze'}).click();
+  const backblaze = page.getByRole('dialog', {name: 'Connect Backblaze B2'});
+  await backblaze.getByText('Keep only the last version', {exact: false}).waitFor();
+  await backblaze.getByRole('status').filter({hasText: 'Waiting for the key…'}).waitFor();
   await page.locator('#offsite-backblaze-key-id').fill('0041example');
   await page.getByLabel('Application key').fill('K004example');
+  await backblaze.getByRole('status').filter({hasText: 'Key pasted. Press Connect.'}).waitFor();
   await page.getByRole('button', {name: 'Connect', exact: true}).click();
   await page.getByRole('status').filter({hasText: 'Connected to bucket example-backups.'}).waitFor();
+  assert.equal(await backblaze.count(), 0, 'the setup window closes once connected');
   await bar.getByText('No unsaved changes').waitFor();
   // Other S3 storage keeps every field to fill in by hand, and is saved with Save.
   await storage.getByRole('radio', {name: 'Other S3'}).click();
@@ -1140,18 +1145,22 @@ test('your Gmail takes your Google keys, signs in through Google and disconnects
   const {page, problems} = await open('connections');
   const card = page.getByRole('region', {name: 'Your Gmail'});
   await card.getByText('Not connected').waitFor();
-  assert.equal(await card.getByRole('button', {name: 'Connect Gmail'}).isDisabled(), true);
-  await card.getByText('How to make your Google keys').click();
-  await card.getByText(origin + '/?connect=gmail').waitFor();
-  await card.getByLabel('Client ID').fill('not-a-client');
-  await card.getByLabel('Client secret').fill('synthetic-secret');
-  await card.getByRole('button', {name: 'Save keys'}).click();
-  await card.getByText('That doesn’t look like a Google client ID and secret.', {exact: false}).waitFor();
-  await card.getByLabel('Client ID').fill('123456789012-abcdef.apps.googleusercontent.com');
-  await card.getByRole('button', {name: 'Save keys'}).click();
-  await card.getByRole('button', {name: 'Change keys'}).waitFor();
+  // Setting up is one window: make the keys, paste them, then sign in, with a status line at the bottom.
+  await card.getByRole('button', {name: 'Set up Gmail'}).click();
+  const setup = page.getByRole('dialog', {name: 'Connect Gmail'});
+  assert.equal(await setup.getByRole('button', {name: 'Connect Gmail'}).isDisabled(), true);
+  await setup.getByText(origin + '/?connect=gmail').waitFor();
+  await setup.getByRole('status').filter({hasText: 'Waiting for your Google keys…'}).waitFor();
+  await setup.getByLabel('Client ID').fill('not-a-client');
+  await setup.getByLabel('Client secret').fill('synthetic-secret');
+  await setup.getByRole('button', {name: 'Save keys'}).click();
+  await setup.getByText('That doesn’t look like a Google client ID and secret.', {exact: false}).waitFor();
+  await setup.getByLabel('Client ID').fill('123456789012-abcdef.apps.googleusercontent.com');
+  await setup.getByRole('button', {name: 'Save keys'}).click();
+  await setup.getByRole('button', {name: 'Change keys'}).waitFor();
+  await setup.getByRole('status').filter({hasText: 'Keys saved. Press Connect Gmail.'}).waitFor();
   // Google's sign-in returns to the dashboard, which finishes it and cleans the address.
-  await card.getByRole('button', {name: 'Connect Gmail'}).click();
+  await setup.getByRole('button', {name: 'Connect Gmail'}).click();
   await page.getByRole('status').filter({hasText: 'Gmail is connected.'}).waitFor();
   await card.getByText('Connected to owner@example.com').waitFor();
   await card.getByText('owner@example.com', {exact: true}).waitFor();
@@ -1350,8 +1359,9 @@ test('a machine is added with its public key, tested, edited, turned off and rem
   await setup.getByRole('button', {name: 'Copy public key'}).click();
   await page.getByRole('status').filter({hasText: 'The public key is copied.'}).waitFor();
   assert.match(await page.evaluate(() => window.copied), /^ssh-ed25519 [A-Za-z0-9+/]+ nocheh lab-vm$/);
+  await setup.getByRole('status').filter({hasText: 'Waiting for the key on the machine.'}).waitFor();
   await setup.getByRole('button', {name: 'Test'}).click();
-  await setup.getByText('lab-vm is ready').waitFor();
+  await setup.getByText('lab-vm is ready').first().waitFor();
   await setup.getByRole('button', {name: 'Done'}).click();
   await row('lab-vm').getByText('Ready').waitFor();
   assert.match(await row('lab-vm').textContent(), /Host key: SHA256:[A-Za-z0-9+/]{43}/);

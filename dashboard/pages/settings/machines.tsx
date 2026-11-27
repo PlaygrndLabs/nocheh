@@ -49,6 +49,7 @@ import {
   Th,
 } from '../../ui/core';
 import {LinkButton} from '../../ui/link-button';
+import {SetupStep, SetupText, SetupWindow, setupStatus} from '../../ui/setup';
 import {Dialog, useFeedback} from '../../ui/overlay';
 
 const loginHint =
@@ -575,8 +576,17 @@ function AddMachine({open, onClose, taken}: {open: boolean; onClose: () => void;
       );
     } else setCopyFailed(true);
   };
+  const status = setupStatus({
+    busy: busy === 'add' ? 'Adding the machine…' : busy === 'test' ? 'Testing the connection…' : null,
+    problem: problem || (tested && !tested.ok),
+    waiting: tested?.ok
+      ? `${added?.name} is ready.`
+      : added
+        ? 'Waiting for the key on the machine. Then press Test.'
+        : 'Waiting for the machine’s details…',
+  });
   return (
-    <Dialog
+    <SetupWindow
       open={open}
       onOpenChange={next => !next && close()}
       title={added ? `Put the key on ${added.name}` : 'Add a machine'}
@@ -585,65 +595,79 @@ function AddMachine({open, onClose, taken}: {open: boolean; onClose: () => void;
           ? 'Nocheh made a key for this machine and keeps it. Only this public half leaves Nocheh.'
           : 'A machine you run, such as a VM, that Nocheh reaches over SSH.'
       }
-      footer={
-        added ? (
+      status={status}
+    >
+      <SetupStep number={1} title="Say where Nocheh reaches it" done={!!added}>
+        {added ? (
+          <SetupText>
+            {added.name}: {added.login}@{added.address}
+            {added.port && added.port !== 22 ? ':' + added.port : ''}
+          </SetupText>
+        ) : (
           <>
-            <Button onClick={close}>{tested?.ok ? 'Done' : 'Later'}</Button>
+            <MachineFields
+              id="add-machine"
+              draft={draft}
+              onChange={setDraft}
+              problems={checked ? problems : {}}
+              problem={problem}
+              onSubmit={() => void add()}
+            />
+            <div>
+              <Button variant="primary" type="submit" form="add-machine" busy={busy === 'add'}>
+                Add machine
+              </Button>
+            </div>
+          </>
+        )}
+      </SetupStep>
+      <SetupStep number={2} title="Put the key on the machine" done={!!tested?.ok}>
+        {added ? (
+          <>
+            <SetupText>{setupLine(added.login)}</SetupText>
+            <PublicKey value={setupCommand(added.public_key)} label={'Setup command for ' + added.name} />
+            <div className="flex flex-wrap items-center gap-2">
+              <Button size="sm" onClick={() => void copy('command')}>
+                <Copy aria-hidden /> Copy setup command
+              </Button>
+              <Button size="sm" variant="ghost" onClick={() => void copy('key')}>
+                <Copy aria-hidden /> Copy public key
+              </Button>
+              {copyFailed && (
+                <span className="text-[13px] text-muted">
+                  This browser didn’t allow copying. Select the command above.
+                </span>
+              )}
+            </div>
+          </>
+        ) : (
+          <SetupText>Nocheh makes a key for the machine once you add it.</SetupText>
+        )}
+      </SetupStep>
+      <SetupStep number={3} title="Test the connection" done={!!tested?.ok} last>
+        <SetupText>Nocheh signs in once, checks the machine and remembers its host key.</SetupText>
+        {added && (
+          <div className="flex flex-wrap gap-2">
             <Button variant="primary" busy={busy === 'test'} onClick={() => void test()}>
               <PlugZap aria-hidden /> {tested ? 'Test again' : 'Test'}
             </Button>
-          </>
-        ) : (
-          <>
-            <Button onClick={close}>Cancel</Button>
-            <Button variant="primary" type="submit" form="add-machine" busy={busy === 'add'}>
-              Add machine
-            </Button>
-          </>
-        )
-      }
-    >
-      {added ? (
-        <div className="space-y-3">
-          <p className="text-sm">{setupLine(added.login)}</p>
-          <PublicKey value={setupCommand(added.public_key)} label={'Setup command for ' + added.name} />
-          <div className="flex flex-wrap items-center gap-2">
-            <Button size="sm" onClick={() => void copy('command')}>
-              <Copy aria-hidden /> Copy setup command
-            </Button>
-            <Button size="sm" variant="ghost" onClick={() => void copy('key')}>
-              <Copy aria-hidden /> Copy public key
-            </Button>
-            {copyFailed && (
-              <span className="text-[13px] text-muted">
-                This browser didn’t allow copying. Select the command above.
-              </span>
-            )}
+            <Button onClick={close}>{tested?.ok ? 'Done' : 'Later'}</Button>
           </div>
-          {tested?.ok && (
-            <Notice tone="good" title={`${added.name} is ready`}>
-              {tested.system ? `It runs ${tested.system}. ` : ''}Nocheh now trusts its host key
-              {tested.host_key ? ` ${tested.host_key}` : ''}.
-            </Notice>
-          )}
-          {tested && !tested.ok && (
-            <Notice tone="warn" title={machineErrorWords(tested.error)}>
-              {machineAdvice(tested.error ?? '', added.login)}
-            </Notice>
-          )}
-          {problem && <Notice tone="bad">{problem}</Notice>}
-        </div>
-      ) : (
-        <MachineFields
-          id="add-machine"
-          draft={draft}
-          onChange={setDraft}
-          problems={checked ? problems : {}}
-          problem={problem}
-          onSubmit={() => void add()}
-        />
-      )}
-    </Dialog>
+        )}
+        {added && tested?.ok && (
+          <Notice tone="good" title={`${added.name} is ready`}>
+            {tested.system ? `It runs ${tested.system}. ` : ''}Nocheh now trusts its host key
+            {tested.host_key ? ` ${tested.host_key}` : ''}.
+          </Notice>
+        )}
+        {added && tested && !tested.ok && (
+          <Notice tone="warn" title={machineErrorWords(tested.error)}>
+            {machineAdvice(tested.error ?? '', added.login)}
+          </Notice>
+        )}
+        {added && problem && <Notice tone="bad">{problem}</Notice>}
+      </SetupStep>
+    </SetupWindow>
   );
 }
 
