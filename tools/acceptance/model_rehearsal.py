@@ -16,7 +16,6 @@ import json
 import os
 from pathlib import Path
 import re
-import shutil
 import stat
 import subprocess
 import time
@@ -32,16 +31,18 @@ UPSTREAM_TARGET = '/fixture/upstream.json'
 # moving the owner's zone between them lets the same chat start a second new session in one run.
 NEW_DAY_ZONES = ('Etc/GMT+12', 'Pacific/Kiritimati')
 HERMES_PROFILES = '/workspace/data/local/hermes/profiles'
-# Runs in the fixture's Hermes: lists each chat's session cursor, and with '1' moves each chat's day back and points it
+# Runs in the fixture's Hermes: lists each chat's session cursor. With '1' it moves each chat's day back and points it
 # at a session that was never stored, so the next turn opens a new day's session with no earlier message to carry
-# (daily_session.choose and start).
+# (daily_session.choose and start). With any other name it points each chat at a new session of that name, with no
+# day, so the next turn runs in it as today's.
 NEW_DAY = """import json,pathlib,sys
-root=pathlib.Path(sys.argv[1]);move=sys.argv[2]=='1';seen={}
+root=pathlib.Path(sys.argv[1]);move=sys.argv[2];seen={}
 for marker in root.rglob('space.json'):
     for cursor in marker.parent.glob('active-*.json'):
         value=json.loads(cursor.read_text());seen[str(cursor.relative_to(root))]=value.get('session_id')
-        if move:
-            value.update(session_id='nocheh-fixture-earlier-day',day='2000-01-01',last_active=0)
+        if move=='1':value.update(session_id='nocheh-fixture-earlier-day',day='2000-01-01',last_active=0)
+        elif move!='0':value.update(session_id='nocheh-fixture-'+move+'-'+cursor.stem[7:],day=None,last_active=0)
+        if move!='0':
             temporary=cursor.with_suffix('.tmp');temporary.write_text(json.dumps(value));temporary.replace(cursor)
 print(json.dumps(seen))"""
 DIGITS = str.maketrans('۰۱۲۳۴۵۶۷۸۹٠١٢٣٤٥٦٧٨٩', '01234567890123456789')
@@ -100,9 +101,8 @@ def read_upstream(path):
 def enable_relay(directory, manifest, upstream, model='claude-haiku-5-5', cap=5.0):
     """Attach only the model service to an egress network and hand it the private upstream file, the one model that
     answers every call, and the spend cap in dollars past which the relay refuses every call."""
-    copy = directory / 'state' / 'model-upstream.json'
-    shutil.copyfile(upstream, copy)
-    copy.chmod(0o600)
+    # The owner's file is mounted where it is, read only: no copy of its keys lands in the kept results.
+    source = Path(upstream).resolve()
     relay = manifest['services']['model-fixture']
     manifest['networks'][MODEL_EGRESS] = {'name': manifest['name'] + '-' + MODEL_EGRESS}
     relay['networks'] = {**(relay.get('networks') or {}), MODEL_EGRESS: None}
@@ -111,7 +111,7 @@ def enable_relay(directory, manifest, upstream, model='claude-haiku-5-5', cap=5.
         raise ValueError('model_and_cap_required')
     relay['environment'].update(NOCHEH_FIXTURE_UPSTREAM_MODEL=model, NOCHEH_FIXTURE_SPEND_CAP=str(cap))
     relay['volumes'] = [mount for mount in relay.get('volumes', []) if mount.get('target') != UPSTREAM_TARGET]
-    relay['volumes'].append({'type': 'bind', 'source': str(copy), 'target': UPSTREAM_TARGET, 'read_only': True})
+    relay['volumes'].append({'type': 'bind', 'source': str(source), 'target': UPSTREAM_TARGET, 'read_only': True})
     validate_model_egress(manifest)
     return manifest
 

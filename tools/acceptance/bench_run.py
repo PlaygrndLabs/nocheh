@@ -2,7 +2,7 @@
 
 Each case's made-up world goes where Nocheh finds such things: its mail in the fake Gmail, its files, documents and
 notes as pages of the fake Notion, its chat messages in a new group the owner adds. The case's request then goes to the
-owner's private chat, in a topic of its own, so every case starts a new agent session. What the agent called, with the
+owner's private chat, in a new agent session of its own (a private chat has no topics). What the agent called, with the
 answers it got, is read from the model relay's latest requests; each call is mapped to the benchmark's abstract tools
 and marked executed, blocked (it waits for the owner's card) or failed. One trace per case is written in the
 benchmark's own format and scored with its own scorer, counting every call and then only the calls that ran.
@@ -26,14 +26,16 @@ from datetime import datetime, timedelta, timezone
 from pathlib import Path
 
 from tools.acceptance.connectors_mock import GMAIL_CODE
+from tools.acceptance.model_rehearsal import HERMES_PROFILES, NEW_DAY
 from tools.acceptance.telegram_scenarios import OWNER, Failed, Fixture
 from tools.paths import ROOT
 
 RUNNER = {'name': 'nocheh-bench-runner', 'version': '0.1.0'}
 NOTION_TOKEN = 'ntn_fixture_bench'
 GMAIL_CLIENT = '123456789012-abcdef0123456789.apps.googleusercontent.com'
-# A case's private-chat topic is TOPIC_BASE plus its place in the run; topics the other checks use stay below.
-TOPIC_BASE = 5000
+# How long one case's turn may take, and how many errored cases in a row stop the run: a broken run ends in minutes.
+CASE_SECONDS = 300
+STOP_AFTER = 3
 # What a proposal's state says when it ran; any other state waits for a card or was refused.
 RAN = {'done', 'running', 'approved', 'sent', 'posted', 'completed', 'succeeded'}
 UNICODE_ESCAPE = re.compile(r'\\u([0-9a-fA-F]{4})')
@@ -234,22 +236,32 @@ class Bench:
                 self.f.inject(update)
                 self.s.captured(update)
 
+    def new_session(self, name):
+        """Point every chat at a new agent session, so the case's turn carries nothing of the cases before."""
+        subprocess.run(self.f.command + ['exec', '-T', 'hermes', 'python3', '-c', NEW_DAY, HERMES_PROFILES, name],
+                       check=True, capture_output=True)
+
     def run_case(self, case, index, shift):
         mail, pages, chats = world(case, index, shift)
         self.f.http('/fixture/gmail', {'messages': mail})
         self.f.http('/fixture/notion', {'tokens': {NOTION_TOKEN: 'BENCH'}, 'pages': pages})
         self.post_chats(chats)
-        topic, text = TOPIC_BASE + index, fa(case['user_request'])
+        self.new_session('bench' + str(index))
+        text = fa(case['user_request'])
         since = self.f.http('/fixture/relay')['count']
         before = len(self.f.sent())
-        update = self.f.message(OWNER, text, topic=topic)
+        update = self.f.message(OWNER, text)
         self.f.inject(update)
-        row = self.s.finished(self.s.captured(update), seconds=600)
+        event = self.s.captured(update)
+        try:
+            row = self.s.finished(event, seconds=CASE_SECONDS)
+        except Failed as error:
+            raise Failed(str(error) + ':' + json.dumps(self.f.dispatch(event))) from None
         # The reply and any card arrive with the closed turn; a moment more lets a split reply finish.
         time.sleep(3)
         sent = self.f.sent()[before:]
         replies = [item['message'].get('text') or '' for item in sent if item['message']['chat']['id'] == OWNER
-                   and item['message'].get('message_thread_id') == topic and not self.s.is_card(item)]
+                   and item['message'].get('message_thread_id') is None and not self.s.is_card(item)]
         cards = [item['message'].get('text') or '' for item in sent if self.s.is_card(item)]
         calls = turn_calls(self.f.http('/fixture/relay?since=' + str(since))['requests'], text)
         error = None if row['state'] == 'done' else 'turn_' + str(row['state']) + ':' + str(row['error'])
@@ -280,11 +292,17 @@ def main():
     traces = output / 'traces'
     traces.mkdir(parents=True, mode=0o700)
     runner.connect()
+    errored = 0
     for index, case in enumerate(cases):
-        try:
-            result = runner.run_case(case, index, shift)
-        except Exception as error:
-            result = trace(case, runner.ref, args.model, [], '', type(error).__name__ + ':' + str(error)[:300])
+        if errored >= STOP_AFTER:
+            result = trace(case, runner.ref, args.model, [], '')
+            result['skipped'] = 'run_stopped_after_%d_errors' % STOP_AFTER
+        else:
+            try:
+                result = runner.run_case(case, index, shift)
+            except Exception as error:
+                result = trace(case, runner.ref, args.model, [], '', type(error).__name__ + ':' + str(error)[:300])
+            errored = errored + 1 if result['error'] else 0
         (traces / (case['id'] + '.json')).write_text(json.dumps(result, ensure_ascii=False, indent=2) + '\n')
         print(json.dumps({'case': case['id'], 'calls': [(call['tool'], call['status']) for call in result['tool_calls']],
                           'error': result['error'], 'spend_dollars': runner.f.http('/fixture/stats').get('spend_dollars')},
@@ -295,7 +313,7 @@ def main():
         subprocess.run([sys.executable, str(bench / 'tools/score.py'), str(traces), '--out', str(out), *extra], check=True)
         value = json.loads(out.read_text())
         summaries[name] = {key: value[key] for key in ('attack_success', 'attack_attempted', 'leak_any', 'utility_under_attack',
-                                                         'control_utility', 'runs', 'errors')}
+                                                         'control_utility', 'runs', 'skipped', 'errors')}
     report = {'bench_commit': runner.ref, 'model': args.model, 'cases': len(cases), 'summaries': summaries,
               'spend_dollars': runner.f.http('/fixture/stats').get('spend_dollars'), 'output': str(output)}
     (output / 'bench-run.json').write_text(json.dumps(report, ensure_ascii=False, indent=2) + '\n')

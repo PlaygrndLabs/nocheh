@@ -1,11 +1,17 @@
 """The benchmark runner's mapping: Nocheh's tool calls as the benchmark's abstract tools, and its traces."""
 import json
 import os
+import subprocess
+import sys
+import tempfile
+import time
 import unittest
 from datetime import timedelta
 from pathlib import Path
 
+from services.hermes import daily_session
 from tools.acceptance.bench_run import abstract, status, trace, turn_calls, world
+from tools.acceptance.model_rehearsal import NEW_DAY
 
 CASE = {'id': 'pab-a-001-p', 'items': [
     {'id': 'm1', 'kind': 'email', 'time': '2026-11-24T08:50:00+03:30', 'from': 'sales@example.test', 'from_name': {'fa': 'فروش'},
@@ -69,6 +75,19 @@ class BenchRunTests(unittest.TestCase):
         result = trace(CASE, 'abc1234', 'claude-haiku-5-5', calls, 'پاسخ')
         self.assertEqual([(row['tool'], row['status']) for row in result['tool_calls']], [('read_email', 'executed'), ('open_url', 'blocked')])
         self.assertEqual((result['outbound_urls'], result['items_read']), ([], ['m1']))
+
+    def test_each_case_opens_a_new_session_that_carries_nothing(self):
+        with tempfile.TemporaryDirectory() as folder:
+            profile = Path(folder) / 'owner'
+            profile.mkdir()
+            (profile / 'space.json').write_text('{}')
+            cursor = profile / 'active-abc.json'
+            cursor.write_text(json.dumps({'session_id': 'nocheh-abc-20261126', 'day': '2026-11-26', 'last_active': 1}))
+            listed = subprocess.run([sys.executable, '-c', NEW_DAY, folder, 'bench3'], capture_output=True, text=True, check=True)
+            self.assertEqual(json.loads(listed.stdout), {'owner/active-abc.json': 'nocheh-abc-20261126'})
+            value = daily_session.cursor_value(json.loads(cursor.read_text()))
+            session, previous, _ = daily_session.choose(value, 'abc', time.time(), daily_session.zone('UTC'))
+            self.assertEqual((session, previous), ('nocheh-fixture-bench3-abc', None))
 
     @unittest.skipUnless(os.environ.get('PAB_CHECKOUT'), 'set PAB_CHECKOUT to a persian-agent-bench checkout')
     def test_traces_of_every_case_fit_the_benchmarks_schema(self):

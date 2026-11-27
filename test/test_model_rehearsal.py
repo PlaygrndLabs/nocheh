@@ -31,7 +31,9 @@ class ModelRehearsalReplyTests(unittest.TestCase):
             upstream.write_text('{}')
             valid = enable_relay(directory, manifest(), upstream)
             self.assertEqual(valid['networks']['model-egress'], {'name': PROJECT + '-model-egress'})
-            self.assertEqual(oct((directory / 'state/model-upstream.json').stat().st_mode & 0o777), '0o600')
+            # The owner's file is mounted where it is; no copy of its keys is left in the results.
+            self.assertEqual(list((directory / 'state').iterdir()), [])
+            self.assertEqual(valid['services']['model-fixture']['volumes'][-1]['source'], str(upstream.resolve()))
             self.assertNotIn('key', json.dumps(valid['services']['model-fixture']['environment']))
             self.assertEqual({key: value for key, value in valid['services']['model-fixture']['environment'].items() if 'MODEL' in key or 'CAP' in key},
                              {'NOCHEH_FIXTURE_UPSTREAM_MODEL': 'claude-haiku-5-5', 'NOCHEH_FIXTURE_SPEND_CAP': '5.0'})
