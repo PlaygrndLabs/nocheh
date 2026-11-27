@@ -8,20 +8,9 @@ import {useEffect, useRef, useState} from 'react';
 import {ExternalLink, KeyRound, Unplug} from 'lucide-react';
 import {apiPost, type ApiError} from '../../lib/api';
 import {refreshResources, useResource} from '../../lib/resource';
-import {
-  Badge,
-  Button,
-  Card,
-  CardHeader,
-  Facts,
-  Details,
-  Input,
-  LoadError,
-  LoadingRows,
-  Notice,
-  SettingRow,
-} from '../../ui/core';
+import {Badge, Button, Card, CardHeader, Facts, Input, LoadError, LoadingRows, Notice, SettingRow} from '../../ui/core';
 import {useFeedback} from '../../ui/overlay';
+import {CopyLine, SetupStep, SetupText, SetupWindow, setupStatus} from '../../ui/setup';
 import {errorWords, when} from '../memory/shared';
 
 type GmailStatus = {
@@ -86,6 +75,7 @@ export function GmailConnection() {
   const [editing, setEditing] = useState(false);
   const [clientId, setClientId] = useState('');
   const [secret, setSecret] = useState('');
+  const [setupOpen, setSetupOpen] = useState(false);
   useGmailReturn((message, failed) => (failed ? setProblem(message) : feedback.toast(message)));
 
   const run = async (name: string, work: () => Promise<void>) => {
@@ -135,9 +125,126 @@ export function GmailConnection() {
       </Card>
     );
   const data = status.data;
-  const showForm = !data.client || editing;
+  const keysNeeded = !data.client || editing;
+  const signedIn = data.connected || data.reconnect;
+  const setupState = setupStatus({
+    busy: busy === 'keys' ? 'Checking your Google keys…' : busy === 'connect' ? 'Opening Google…' : null,
+    problem,
+    waiting: keysNeeded
+      ? clientId.trim() && secret.trim()
+        ? 'Keys pasted. Press Save keys.'
+        : 'Waiting for your Google keys…'
+      : 'Keys saved. Press Connect Gmail.',
+  });
+  const problemNotice = problem && <Notice tone="bad">{problem}</Notice>;
+  const connectButton = (
+    <Button
+      variant={data.connected ? 'secondary' : 'primary'}
+      busy={busy === 'connect'}
+      disabled={!data.client || !!busy}
+      onClick={() => void connect()}
+    >
+      <ExternalLink aria-hidden /> {data.connected ? 'Connect again' : 'Connect Gmail'}
+    </Button>
+  );
+  const changeKeys = () => {
+    setProblem(null);
+    setEditing(true);
+    setSetupOpen(true);
+  };
   return (
     <Card aria-labelledby="gmail-title">
+      <SetupWindow
+        open={setupOpen}
+        onOpenChange={next => {
+          setSetupOpen(next);
+          if (!next) setEditing(false);
+        }}
+        title="Connect Gmail"
+        description="Your own Google keys, then one Google sign-in."
+        status={setupState}
+      >
+        <SetupStep number={1} title="Make your Google keys" done={!keysNeeded}>
+          {keysNeeded && (
+            <>
+              <ol className="grid list-decimal gap-1.5 pl-5 text-[13px] text-muted">
+                <li>
+                  Signed in to Google with the Gmail you want Nocheh to read, open{' '}
+                  <a className="underline" href={personalPage} target="_blank" rel="noreferrer">
+                    Google’s Personal mode page
+                  </a>
+                  .
+                </li>
+                <li>Keep the project it offers, and pick Web application as the application type.</li>
+                <li>Under Authorized redirect URIs, add this address:</li>
+              </ol>
+              <CopyLine value={returnAddress()} label="Address" />
+              <ol start={4} className="grid list-decimal gap-1.5 pl-5 text-[13px] text-muted">
+                <li>Press Continue, then copy the Client ID and Client secret. Google shows the secret only once.</li>
+                <li>
+                  Turn on the{' '}
+                  <a className="underline" href={gmailApi} target="_blank" rel="noreferrer">
+                    Gmail API
+                  </a>{' '}
+                  for that project.
+                </li>
+              </ol>
+            </>
+          )}
+        </SetupStep>
+        <SetupStep number={2} title="Paste the keys" done={!keysNeeded}>
+          {keysNeeded ? (
+            <form
+              className="flex flex-wrap gap-2"
+              onSubmit={event => {
+                event.preventDefault();
+                void saveKeys();
+              }}
+            >
+              <Input
+                aria-label="Client ID"
+                autoComplete="off"
+                placeholder="Client ID (…apps.googleusercontent.com)"
+                value={clientId}
+                maxLength={200}
+                className="min-w-0 flex-1 basis-64"
+                onChange={event => setClientId(event.target.value)}
+              />
+              <Input
+                type="password"
+                aria-label="Client secret"
+                autoComplete="off"
+                placeholder="Client secret"
+                value={secret}
+                maxLength={256}
+                className="min-w-0 flex-1 basis-48"
+                onChange={event => setSecret(event.target.value)}
+              />
+              <Button type="submit" busy={busy === 'keys'} disabled={!clientId.trim() || !secret.trim() || !!busy}>
+                <KeyRound aria-hidden /> Save keys
+              </Button>
+              {editing && (
+                <Button variant="ghost" type="button" onClick={() => setEditing(false)}>
+                  Cancel
+                </Button>
+              )}
+            </form>
+          ) : (
+            <div className="flex flex-wrap items-center gap-2">
+              <SetupText>Saved for the client {data.client?.split('-')[0]}….</SetupText>
+              <Button size="sm" variant="ghost" disabled={!!busy} onClick={changeKeys}>
+                <KeyRound aria-hidden /> Change keys
+              </Button>
+            </div>
+          )}
+          {keysNeeded && problemNotice}
+        </SetupStep>
+        <SetupStep number={3} title="Sign in with Google" last>
+          <SetupText>Google opens in this tab. Choose your account and allow reading your email.</SetupText>
+          <div>{connectButton}</div>
+          {!keysNeeded && problemNotice}
+        </SetupStep>
+      </SetupWindow>
       <CardHeader
         id="gmail-title"
         title="Your Gmail"
@@ -157,125 +264,70 @@ export function GmailConnection() {
         }
       />
       <div className="mt-3 border-t border-line">
-        {problem && (
+        {problem && !setupOpen && (
           <div className="px-5 pt-4">
             <Notice tone="bad">{problem}</Notice>
           </div>
         )}
-        <SettingRow
-          title="Google keys"
-          stack={showForm}
-          description={
-            data.client
-              ? 'Saved for the client ' + data.client.split('-')[0] + '…. New keys sign you out of Gmail here.'
-              : 'Google lets only you sign in to a project you make in Personal mode, with no review and no sign-in that runs out.'
-          }
-        >
-          {showForm ? (
-            <div className="grid gap-3">
-              <Details summary="How to make your Google keys">
-                <ol className="grid list-decimal gap-1.5 pl-5 text-[13px] text-muted">
-                  <li>
-                    Signed in to Google with the Gmail you want Nocheh to read, open{' '}
-                    <a className="underline" href={personalPage} target="_blank" rel="noreferrer">
-                      Google’s Personal mode page
-                    </a>
-                    .
-                  </li>
-                  <li>Keep the project it offers, and pick Web application as the application type.</li>
-                  <li>
-                    Under Authorized redirect URIs, add <code className="break-all text-fg">{returnAddress()}</code>
-                  </li>
-                  <li>
-                    Press Continue, then copy the Client ID and Client secret below. Google shows the secret only once.
-                  </li>
-                  <li>
-                    Turn on the{' '}
-                    <a className="underline" href={gmailApi} target="_blank" rel="noreferrer">
-                      Gmail API
-                    </a>{' '}
-                    for that project.
-                  </li>
-                </ol>
-              </Details>
-              <form
-                className="flex flex-wrap gap-2"
-                onSubmit={event => {
-                  event.preventDefault();
-                  void saveKeys();
-                }}
-              >
-                <Input
-                  aria-label="Client ID"
-                  autoComplete="off"
-                  placeholder="Client ID (…apps.googleusercontent.com)"
-                  value={clientId}
-                  maxLength={200}
-                  className="min-w-0 flex-1 basis-64"
-                  onChange={event => setClientId(event.target.value)}
-                />
-                <Input
-                  type="password"
-                  aria-label="Client secret"
-                  autoComplete="off"
-                  placeholder="Client secret"
-                  value={secret}
-                  maxLength={256}
-                  className="min-w-0 flex-1 basis-48"
-                  onChange={event => setSecret(event.target.value)}
-                />
-                <Button type="submit" busy={busy === 'keys'} disabled={!clientId.trim() || !secret.trim() || !!busy}>
-                  <KeyRound aria-hidden /> Save keys
-                </Button>
-                {editing && (
-                  <Button variant="ghost" type="button" onClick={() => setEditing(false)}>
-                    Cancel
-                  </Button>
-                )}
-              </form>
-            </div>
-          ) : (
-            <Button variant="secondary" onClick={() => setEditing(true)}>
-              <KeyRound aria-hidden /> Change keys
-            </Button>
-          )}
-        </SettingRow>
-        <SettingRow
-          title="Gmail sign-in"
-          description={
-            data.connected ? (
-              <>
-                <Facts
-                  rows={[
-                    ['Account', data.email],
-                    ['Signed in', data.connected_at ? when(new Date(data.connected_at * 1000).toISOString()) : ''],
-                  ]}
-                />
-                <span className="mt-1.5 block">Nocheh only reads.</span>
-              </>
-            ) : data.reconnect ? (
-              'Google ended the sign-in. Connect again to keep using it.'
-            ) : (
-              'Google opens in this tab. Choose your account and allow reading your email.'
-            )
-          }
-        >
-          <div className="flex flex-wrap gap-2 sm:justify-end">
-            <Button
-              variant={data.connected ? 'secondary' : 'primary'}
-              busy={busy === 'connect'}
-              disabled={!data.client || !!busy}
-              onClick={() => void connect()}
+        {signedIn ? (
+          <>
+            <SettingRow
+              title="Google keys"
+              description={
+                'Saved for the client ' + (data.client ?? '').split('-')[0] + '…. New keys sign you out of Gmail here.'
+              }
             >
-              <ExternalLink aria-hidden /> {data.connected ? 'Connect again' : 'Connect Gmail'}
-            </Button>
-            {(data.connected || data.reconnect) && (
-              <Button variant="ghost" busy={busy === 'disconnect'} disabled={!!busy} onClick={() => void disconnect()}>
-                <Unplug aria-hidden /> Disconnect
+              <Button variant="secondary" onClick={changeKeys}>
+                <KeyRound aria-hidden /> Change keys
               </Button>
-            )}
-          </div>
-        </SettingRow>
+            </SettingRow>
+            <SettingRow
+              title="Gmail sign-in"
+              description={
+                data.connected ? (
+                  <>
+                    <Facts
+                      rows={[
+                        ['Account', data.email],
+                        ['Signed in', data.connected_at ? when(new Date(data.connected_at * 1000).toISOString()) : ''],
+                      ]}
+                    />
+                    <span className="mt-1.5 block">Nocheh only reads.</span>
+                  </>
+                ) : (
+                  'Google ended the sign-in. Connect again to keep using it.'
+                )
+              }
+            >
+              <div className="flex flex-wrap gap-2 sm:justify-end">
+                {connectButton}
+                <Button
+                  variant="ghost"
+                  busy={busy === 'disconnect'}
+                  disabled={!!busy}
+                  onClick={() => void disconnect()}
+                >
+                  <Unplug aria-hidden /> Disconnect
+                </Button>
+              </div>
+            </SettingRow>
+          </>
+        ) : (
+          <SettingRow
+            title="Gmail"
+            description={
+              data.client
+                ? 'Your Google keys are saved. Sign in with Google to finish.'
+                : 'Make your Google keys, paste them here, then sign in with Google. Google lets only you sign in to a project you make in Personal mode, with no review and no sign-in that runs out.'
+            }
+          >
+            <div className="flex sm:justify-end">
+              <Button variant="primary" onClick={() => setSetupOpen(true)}>
+                Set up Gmail
+              </Button>
+            </div>
+          </SettingRow>
+        )}
       </div>
     </Card>
   );

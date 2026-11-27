@@ -543,9 +543,10 @@ without it no copy can be opened.
 
 Pick the storage under Storage:
 
-- **Cloudflare** (R2, free up to 10 GB): press Open Cloudflare, which opens
-  Cloudflare's token page with the permissions already chosen. Create the token,
-  paste it and press Connect. Nocheh makes its own bucket (`nocheh-backups`, or
+- **Cloudflare** (R2, free up to 10 GB): press Connect Cloudflare. A window
+  shows two steps: Open Cloudflare opens Cloudflare's token page with the
+  permissions already chosen (or copy its link), then you paste the token and
+  press Connect. A line at the bottom says what Nocheh is waiting for. Nocheh makes its own bucket (`nocheh-backups`, or
   that name plus a random ending when the account already has one), locks each
   copy for 7 days so it can't be deleted early, keeps a key for that bucket only,
   tests it and deletes the setup token. If connecting stops with an error, the
