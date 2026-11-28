@@ -18,7 +18,7 @@ export function quotedExcerpts(text:string):string[] {
 
 /**
  * Who hid a message: the owner, or Nocheh because Telegram said the message is gone when Nocheh replied to it, reacted
- * to it or edited it (ADR-0317).
+ * to it or edited it (ADR-0319).
  */
 export const retirementAuthorities=['owner','telegram'] as const;
 const authorities=retirementAuthorities.map(value=>`'${value}'`).join(',');
@@ -44,7 +44,7 @@ ALTER TABLE source_retirements DROP CONSTRAINT IF EXISTS source_retirements_deci
 ALTER TABLE source_retirements ADD CONSTRAINT source_retirements_decision_authority_check CHECK(decision_authority IN (${authorities}));
 ALTER TABLE source_retirement_history DROP CONSTRAINT IF EXISTS source_retirement_history_decision_authority_check;
 ALTER TABLE source_retirement_history ADD CONSTRAINT source_retirement_history_decision_authority_check CHECK(decision_authority IN (${authorities}));
--- ADR-0317: each failed send Telegram answered with message_not_found is checked once.
+-- ADR-0319: each failed send Telegram answered with message_not_found is checked once.
 CREATE TABLE IF NOT EXISTS telegram_gone_checks (
  send_id bigint PRIMARY KEY,object_id text NOT NULL,
  outcome text NOT NULL CHECK(outcome IN ('hidden','not_archived','decided')),
@@ -53,7 +53,7 @@ CREATE TABLE IF NOT EXISTS telegram_gone_checks (
 CREATE INDEX IF NOT EXISTS telegram_gone_checks_hidden ON telegram_gone_checks(checked_at) WHERE outcome='hidden';
 `;
 
-/** A retirement is an owner control decision, or Nocheh's when Telegram says a message it touched is gone (ADR-0317). */
+/** A retirement is an owner control decision, or Nocheh's when Telegram says a message it touched is gone (ADR-0319). */
 export class SourceRetirementRepository {
   constructor(readonly stores:StorePools,readonly archive:ArchiveRepository){}
   private async identity(eventId:string):Promise<string> {
@@ -285,7 +285,7 @@ export class SourceRetirementRepository {
     return result;
   }
   /**
-   * Hide the messages Telegram said are gone (ADR-0317): a reply, reaction or edit Nocheh sent to a message failed with
+   * Hide the messages Telegram said are gone (ADR-0319): a reply, reaction or edit Nocheh sent to a message failed with
    * message_not_found. Each such send is checked once. Its message is hidden as the owner's hide would, with Nocheh's own
    * direct replies to it, unless the owner already decided about it; the owner's Undo stands. Replies Nocheh delivers to a
    * hidden message within the next hour are hidden too. Returns each hidden message's events, for the caller to stop a

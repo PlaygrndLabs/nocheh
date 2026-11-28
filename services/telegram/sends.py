@@ -218,7 +218,7 @@ class Sends:
                 'account': self.account, 'at': datetime.now(timezone.utc).isoformat(timespec='milliseconds').replace('+00:00', 'Z'),
                 'kind': kind, 'method': method, 'chat': chat, 'thread': _text(parameters.get('message_thread_id')),
                 # An edit or a reaction names the message it changes; a delivered send gets its new id from Telegram; a reply
-                # refused because the message it answers is gone names that message (ADR-0317).
+                # refused because the message it answers is gone names that message (ADR-0319).
                 'message_id': _text(parameters.get('message_id')) or _text(message)
                 or (replied_to(parameters) if state == 'failed' and code == 'message_not_found' else None),
                 'detail': detail_of(method, parameters),

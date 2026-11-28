@@ -1,4 +1,4 @@
-# ADR-0317: Hide a message Telegram says is gone
+# ADR-0319: Hide a message Telegram says is gone
 
 <status>
 Accepted on 2026-11-28. The owner picked "Auto-hide when Telegram says gone" after a live test: a group message was

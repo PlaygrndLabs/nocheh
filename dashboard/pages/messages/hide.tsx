@@ -17,7 +17,7 @@ type Retirement = {
   event_id: string;
   retired: boolean;
   revision: number;
-  /** 'telegram': Nocheh hid it because Telegram said the message is gone (ADR-0317). */
+  /** 'telegram': Nocheh hid it because Telegram said the message is gone (ADR-0319). */
   authority?: 'owner' | 'telegram';
   history?: {revision: number; retired: boolean; created_at: string}[];
   related_replies?: Related[];
