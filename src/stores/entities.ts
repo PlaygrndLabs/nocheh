@@ -122,6 +122,18 @@ export async function accountPeopleNames(control:Pick<pg.Pool,'query'>,accountId
   for(const identity of identities){const name=names.get(identity.id);if(name)found.set(identity.account,name);}
   return found;
 }
+/** The active person entity bound to the owner's own Telegram account (ADR-0318), following merges a few steps, or null. */
+export async function ownerEntityId(control:Pick<pg.Pool,'query'>,ownerId:string|null):Promise<string|null> {
+  if(!ownerId)return null;
+  let id=(await control.query(`SELECT entity_id FROM memory_entity_bindings WHERE source_object_id=$1 AND binding_kind='source_identity'
+    AND state IN ('exact','confirmed') ORDER BY state='confirmed' DESC,updated_at DESC,id LIMIT 1`,[telegramActor(ownerId).id])).rows[0]?.entity_id as string|undefined;
+  for(let step=0;id&&step<5;step++) {
+    const row=(await control.query('SELECT kind,state,merged_into FROM memory_entities WHERE id=$1',[id])).rows[0];
+    if(row?.state==='active')return row.kind==='person'?id:null;
+    id=row?.state==='merged'?row.merged_into:undefined;
+  }
+  return null;
+}
 /** The owner's People name (ADR-0318): the name the owner chose for their own Telegram account on the People page, or
  * null when there is none. Nocheh names the owner by it to everyone else. */
 export async function ownerPublicName(control:Pick<pg.Pool,'query'>,ownerId:string|null):Promise<string|null> {
@@ -745,7 +757,10 @@ export class EntityRepository {
     const memory=await this.readableClaims(principal,entity.id),bindings=principal.admin?(await this.stores.control.query('SELECT * FROM memory_entity_bindings WHERE entity_id=$1 ORDER BY id',[entity.id])).rows:[];
     // The owner's private note, only for the owner (ADR-0274).
     const note=principal.admin&&entity.kind==='person'?(await this.ownerNotes(principal,[entity.id])).get(entity.id)??{note:'',revision:0}:null;
-    return {entity,bindings,...memory,...(note?{note}:{})};
+    // The owner sees whether everyone reads this name and whether this person is themselves (ADR-0274, ADR-0318).
+    const flags=principal.admin&&entity.kind==='person'?{...((await this.namedByOwner([entity])).has(entity.id)?{people_name:true as const}:{}),
+      ...(entity.id===await ownerEntityId(this.stores.control,this.access.policy().owner_id)?{owner:true as const}:{})}:{};
+    return {entity:{...entity,...flags},bindings,...memory,...(note?{note}:{})};
   }
   async history(principal:Reader,id:string,before?:number) {
     if(before!==undefined&&(!Number.isSafeInteger(before)||before<1||before>2147483647))throw new HttpError(400,'invalid_entity_revision');
@@ -801,12 +816,12 @@ export class EntityRepository {
     }
     return named;
   }
-  async list(principal:Reader,input:{query?:string;kind?:string;after?:string;state?:string}={}):Promise<{entities:(MemoryEntity&{people_name?:true})[];next:string|null}> {
+  async list(principal:Reader,input:{query?:string;kind?:string;after?:string;state?:string}={}):Promise<{entities:(MemoryEntity&{people_name?:true;owner?:true})[];next:string|null}> {
     const page=await this.listPage(principal,input);
     if(!principal.admin)return page;
-    // The owner sees which names everyone reads (ADR-0274).
-    const named=await this.namedByOwner(page.entities);
-    return {...page,entities:page.entities.map(entity=>named.has(entity.id)?{...entity,people_name:true as const}:entity)};
+    // The owner sees which names everyone reads (ADR-0274), and which person is themselves (ADR-0318).
+    const named=await this.namedByOwner(page.entities),self=await ownerEntityId(this.stores.control,this.access.policy().owner_id);
+    return {...page,entities:page.entities.map(entity=>({...entity,...(named.has(entity.id)?{people_name:true as const}:{}),...(entity.id===self?{owner:true as const}:{})}))};
   }
   private async listPage(principal:Reader,input:{query?:string;kind?:string;after?:string;state?:string}={}) {
     const query=String(input.query??'').trim().toLocaleLowerCase(),kind=input.kind??'',after=input.after??'',state=input.state??'active';

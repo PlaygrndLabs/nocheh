@@ -532,7 +532,7 @@ const machineAt=(id:string)=>{const machine=machines.find(row=>row.id===id);if(!
 const memoryProjects:any[]=[memoryMapNodes[1].detail.project,{id:hx('cd'),name:'Garden redesign',description:'Ideas and suppliers for the back garden.',state:'active',revision:1},{id:hx('ce'),name:'Old apartment move',description:'',state:'archived',revision:2}];
 const devonId=hx('d1');
 const personNotes=new Map<string,{note:string;revision:number}>();
-const people:any[]=[{id:personId,kind:'person',name:'Mira Chen',state:'active',project_id:null,merged_into:null,revision:2,people_name:true},{id:devonId,kind:'person',name:'Devon',state:'active',project_id:null,merged_into:null,revision:1},
+const people:any[]=[{id:personId,kind:'person',name:'Mira Chen',state:'active',project_id:null,merged_into:null,revision:2,people_name:true},{id:devonId,kind:'person',name:'Devon',state:'active',project_id:null,merged_into:null,revision:1,owner:true},
  {id:projectEntityId,kind:'project',name:'Aurora field guide',state:'active',project_id:projectId,merged_into:null,revision:1}];
 const claim=(id:string,subject:string,object:string|null,predicate:string,content:string,extra:any={})=>({id,subject_entity_id:subject,object_entity_id:object,predicate,revision:1,content,relationship_kind:object?'associated':null,attribution:'direct',speaker_entity_id:subject,uncertainty:'explicit',author:'learning',retired:false,evidence:[{id}],created_at:minutesAgo(900),...extra});
 // Mira's preference came from the owner's message (named on People in the owner's words, ADR-0261 step 4); the other

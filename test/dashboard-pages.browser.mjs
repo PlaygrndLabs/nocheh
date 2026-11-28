@@ -4638,12 +4638,17 @@ test('People says a name the owner set is shown to everyone, and keeps a private
   const {page, problems} = await open('memory?view=people');
   const notice = page.getByRole('status').filter({hasText: 'Names you set are shown to everyone'});
   await notice.getByText('Mira Chen', {exact: false}).waitFor();
-  const mira = page.getByRole('list', {name: 'People'}).getByRole('button', {name: /Mira Chen/});
-  await mira.getByText('Shown', {exact: true}).waitFor();
-  assert.equal(
-    await page.getByRole('list', {name: 'People'}).getByRole('button', {name: /Devon/}).getByText('Shown').count(),
-    0,
-  );
+  const people = page.getByRole('table', {name: 'People'});
+  const mira = people.getByRole('row', {name: /Mira Chen/});
+  const devon = people.getByRole('row', {name: /Devon/});
+  // The phone copy under the name is in the page too, hidden: the last is the one on a wide screen.
+  await mira.getByText('Shown', {exact: true}).last().waitFor();
+  assert.equal(await devon.getByText('Shown').count(), 0);
+  // The owner's own person comes first with a You badge, and says others hear "the owner" until a name is saved (ADR-0318).
+  await devon.getByText('You', {exact: true}).waitFor();
+  await devon.getByText('Others hear “the owner” until you save a name.', {exact: false}).last().waitFor();
+  assert.equal(await mira.getByText('You', {exact: true}).count(), 0);
+  assert.match(await people.locator('tbody tr').first().innerText(), /Devon/);
   await notice.getByRole('button', {name: 'Got it'}).click();
   await notice.waitFor({state: 'detached'});
   await mira.click();
