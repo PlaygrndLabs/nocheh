@@ -263,11 +263,14 @@ export function storageServer(s:StorageServices,config:Settings,call:RuntimeCall
     if(req.method==='GET'&&knowledgeProposal)return json(res,200,await s.knowledge.proposal(principal,knowledgeProposal[1]!));
     // Task lists: the owner's private chat reaches every list, a project's chat only its own. A change asked in the
     // owner's private chat that a project's chats would see gets its card there instead (ADR-0243).
-    if(req.method==='GET'&&path==='/v1/owner/tasks')return json(res,200,await s.tasks.chatList(principal,taskQuery(url.searchParams)));
-    if(req.method==='POST'&&path==='/v1/owner/tasks')return json(res,200,await s.actionCommands.offer('task',await s.tasks.chatCreate(principal,await readJson(req,64*1024))));
+    // A turn's answer from Nocheh's own records lets their ids through the secret check, so the agent can name them in its
+    // next call (ADR-0314). Everything else in it is still checked when the agent hands it to the model.
+    const withIds=async(value:unknown)=>{if(!principal.admin)await s.prepared.allowIds(principal,value);json(res,200,value);};
+    if(req.method==='GET'&&path==='/v1/owner/tasks')return withIds(await s.tasks.chatList(principal,taskQuery(url.searchParams)));
+    if(req.method==='POST'&&path==='/v1/owner/tasks')return withIds(await s.actionCommands.offer('task',await s.tasks.chatCreate(principal,await readJson(req,64*1024))));
     const chatTask=path.match(/^\/v1\/owner\/tasks\/([a-f0-9]{64})(\/comments)?$/);
-    if(req.method==='GET'&&chatTask&&!chatTask[2])return json(res,200,await s.tasks.chatGet(principal,chatTask[1]!));
-    if(req.method==='POST'&&chatTask)return json(res,200,await s.actionCommands.offer('task',
+    if(req.method==='GET'&&chatTask&&!chatTask[2])return withIds(await s.tasks.chatGet(principal,chatTask[1]!));
+    if(req.method==='POST'&&chatTask)return withIds(await s.actionCommands.offer('task',
       await (chatTask[2]?s.tasks.chatComment:s.tasks.chatUpdate).call(s.tasks,principal,chatTask[1]!,await readJson(req,64*1024))));
     // The owner may read all of their own data from a live owner-private turn, and a schedule's run there, such as a morning
     // brief, may too (ADR-0266). Fixed read views map onto existing owner handlers; no mutation is reachable.
@@ -279,9 +282,9 @@ export function storageServer(s:StorageServices,config:Settings,call:RuntimeCall
       if(view==='telegram-identities') {
         // As before, a group Nocheh does not serve is left out; the directory decides, so an unknown chat is left out too.
         const found=await telegramDirectory(s.stores.control,reader,s.stores.archive),directory=await currentChats(),all=!policy.enabled||!policy.owner_id;
-        return json(res,200,{...found,groups:found.groups.filter(group=>all||directory.served(group.id))});
+        return withIds({...found,groups:found.groups.filter(group=>all||directory.served(group.id))});
       }
-      if(view==='conversations')return json(res,200,await s.supervision.conversations(reader,{q:url.searchParams.get('q')??'',after:url.searchParams.get('after')??'',
+      if(view==='conversations')return withIds(await s.supervision.conversations(reader,{q:url.searchParams.get('q')??'',after:url.searchParams.get('after')??'',
         limit:limit(url.searchParams.get('limit'),50,100),kind:url.searchParams.get('kind')??'',state:url.searchParams.get('state')??''},await s.supervision.outsiders(policy)));
       if(view==='conversation-context') {
         const space=url.searchParams.get('space')??'';
@@ -291,11 +294,11 @@ export function storageServer(s:StorageServices,config:Settings,call:RuntimeCall
         // The owner's private note about each person shows here, in the owner's own private chat only (ADR-0274).
         const found=await s.entities.list(reader,{query:url.searchParams.get('q')??'',kind:url.searchParams.get('kind')??'',
           after:url.searchParams.get('after')??'',state:'active'}),notes=await s.entities.ownerNotes(reader,found.entities.map(entity=>entity.id));
-        return json(res,200,{...found,entities:found.entities.map(entity=>notes.get(entity.id)?.note?{...entity,private_note:notes.get(entity.id)!.note}:entity)});
+        return withIds({...found,entities:found.entities.map(entity=>notes.get(entity.id)?.note?{...entity,private_note:notes.get(entity.id)!.note}:entity)});
       }
       const target=({conversations:'/v1/conversations','conversation-context':'/v1/conversations/context',projects:'/v1/projects',
         'project-assignments':'/v1/projects/assignments','memory-map':'/v1/memory-map'} as Record<string,string>)[view]!;
-      return json(res,200,await owner.request(reader,'GET',new URL(target+url.search,url)));
+      return withIds(await owner.request(reader,'GET',new URL(target+url.search,url)));
     }
     if(await owner.handle(principal,req,res,url))return;
     if(path==='/v1/runtime/profiles'||path==='/v1/runtime/profiles/resolve') {
@@ -386,7 +389,7 @@ export function storageServer(s:StorageServices,config:Settings,call:RuntimeCall
     const privateScopes=async(filters:ArchiveFilters):Promise<ArchiveFilters>=>filters.private_chats?
       {...filters,private_scopes:await otherPrivateScopes(s.stores.control,s.access.policy())}:filters;
     const result=async(value:unknown,prepared=false)=>{
-      if(!principal.admin){if(prepared)await s.prepared.allow(principal,value);else value=await s.prepared.prepare(principal,value,s.detect);await s.turns.assertAudience(principal);}
+      if(!principal.admin){await s.prepared.allowIds(principal,value);if(prepared)await s.prepared.allow(principal,value);else value=await s.prepared.prepare(principal,value,s.detect);await s.turns.assertAudience(principal);}
       return json(res,200,value);
     };
     if(path==='/v1/telegram/destinations'&&req.method==='GET')return result(await s.telegramActions.destinations(principal));
