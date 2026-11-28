@@ -1,10 +1,10 @@
 /** System › Backups: back up, restore, export, check and restart, with a history of past tasks. */
 import {useState, type ReactNode} from 'react';
-import {Download, History} from 'lucide-react';
+import {Download, History, Settings} from 'lucide-react';
 import {apiPost, download} from '../../lib/api';
 import {useParam, useSubTab} from '../../lib/navigation';
 import {refreshResources, useResource} from '../../lib/resource';
-import {setParams} from '../../lib/routes';
+import {href, setParams} from '../../lib/routes';
 import {
   ago,
   count,
@@ -257,15 +257,24 @@ export function BackupsView() {
         </Notice>
       )}
       {jobs.error && !jobs.data && <LoadError what="tasks" />}
-      <SubTabs
-        label="Backups"
-        value={tab}
-        onChange={setTab}
-        tabs={[
-          {id: 'actions', label: 'Actions'},
-          {id: 'history', label: 'History'},
-        ]}
-      />
+      <div className="flex flex-wrap items-center justify-between gap-2">
+        <SubTabs
+          label="Backups"
+          value={tab}
+          onChange={setTab}
+          tabs={[
+            {id: 'actions', label: 'Actions'},
+            {id: 'history', label: 'History'},
+          ]}
+        />
+        {/* Automatic backups and off-site copies are set up in Settings › Privacy & data. */}
+        <Button asChild size="sm" variant="ghost">
+          <a href={href('settings', {view: 'privacy', tab: 'records'})}>
+            <Settings aria-hidden />
+            Settings
+          </a>
+        </Button>
+      </div>
       {tab === 'actions' && (
         <SubPanel id="actions" current={tab}>
           <Card className="overflow-hidden">
@@ -297,7 +306,7 @@ export function BackupsView() {
                         {schedule.skipped === 'low_disk' && 'The last one was skipped: not enough free disk space. '}
                         <a
                           className="text-accent-text underline-offset-2 hover:underline"
-                          href="#settings?view=privacy"
+                          href={href('settings', {view: 'privacy', tab: 'records'})}
                         >
                           Change
                         </a>
@@ -334,7 +343,10 @@ export function BackupsView() {
                   offsite && (
                     <p className="text-xs">
                       {offsiteSummary(offsite, !!latest('offsite') && running(latest('offsite')!))}{' '}
-                      <a className="text-accent-text underline-offset-2 hover:underline" href="#settings?view=privacy">
+                      <a
+                        className="text-accent-text underline-offset-2 hover:underline"
+                        href={href('settings', {view: 'privacy', tab: 'offsite'})}
+                      >
                         {offsite.enabled ? 'Change' : 'Set up'}
                       </a>
                     </p>
