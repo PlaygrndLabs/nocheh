@@ -199,6 +199,13 @@ def private_answer(value):
     return value
 
 
+def owner_name(body):
+    """The owner's People name a turn carries (ADR-0318): at most 200 characters on one line, else None (the reply then
+    says "the owner")."""
+    value=body.get('owner_name')
+    return value.strip() if _one_line(value,200) and value.strip() else None
+
+
 def member_read(value):
     """The owner's ask about a member (step 4b): its ask, as its pass names it, and the member as Nocheh's own frame
     names them. Its frame is already the turn's text. Anything else is refused."""
@@ -344,6 +351,8 @@ async def _run_process(profile, scope, body, model, credentials, session_id, emi
                'memory_context':os.environ.get('NOCHEH_MEMORY_CONTEXT','legacy'),
                'images':[file['sha256'] for file in body.get('files',[]) if file['kind']=='image'],
                'turn_deadline_epoch':background['hard_deadline'] if background else time.time()+230,'prompts':body.get('prompts') or {},
+               # The owner's People name (ADR-0318), for replies that speak of the owner to anyone else; never in the owner's own chat.
+               **({'owner_name':owner_name(body)} if not scope.owner and owner_name(body) else {}),
                # Each native note's source, as storage labels it from this parent's records, by the note's key.
                'note_sources':note_sources or {}}
     if body.get('channel')=='scheduler':

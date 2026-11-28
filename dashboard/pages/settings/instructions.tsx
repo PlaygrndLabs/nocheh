@@ -65,6 +65,11 @@ export const instructions: {key: string; title: string; hint: string}[] = [
     hint: 'Added when Nocheh answers your question about what a member said in their own private chat with it. That answer reads only that member’s chat, comes as a separate message in your private chat and is not kept in your conversation.',
   },
   {
+    key: 'reply.owner_name',
+    title: 'Naming you to others',
+    hint: 'Added everywhere except your private chat when you gave yourself a name on the People page: Nocheh then calls you by that name, not “the owner”, in groups, private answers and members’ chats. Keep {name}; Nocheh fills it in. Without a name it says “the owner”.',
+  },
+  {
     key: 'reply.schedules',
     title: 'Setting schedules',
     hint: 'Added in your private chat: how Nocheh sets a schedule, such as a morning brief, when you ask for one.',
@@ -107,7 +112,7 @@ export const instructions: {key: string; title: string; hint: string}[] = [
   {
     key: 'telegram.not_allowed',
     title: 'Reply to people who may not talk in a group',
-    hint: 'Sent in a group, as a reply, when someone who may not talk to Nocheh there asks it something: someone who isn’t a member, or a member who is paused or switched off there. At most once a UTC day per person in each group. No model is used.',
+    hint: 'Sent in a group, as a reply, when someone who may not talk to Nocheh there asks it something: someone who isn’t a member, or a member who is paused or switched off there. At most once a UTC day per person in each group. No model is used. {owner} is your name from the People page, or “the owner” without one.',
   },
   {
     key: 'telegram.member_daily_limit',

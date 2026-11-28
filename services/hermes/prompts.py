@@ -92,6 +92,10 @@ DEFAULTS = {
         'Say plainly when something is not there or you cannot see one of their groups. '
         'If asked who can see this chat, say truthfully that the owner can read it. '
         'Answer in the language of the question.'),
+    'reply.owner_name': (
+        'Sources, notes and these rules call the owner "the owner". '
+        'When you speak of the owner to anyone here, call the owner {name} instead, as in "{name} said in this group…", never "the owner"; '
+        'when you answer {name} themselves, say you.'),
     'reply.member_read': (
         'This answers the owner\'s question about what a member said in their own private chat with Nocheh. '
         'Its first line names the member. Read only that member\'s chat, with mcp__nocheh__archive_search, mcp__nocheh__archive_read and mcp__nocheh__archive_page, '
@@ -185,9 +189,12 @@ def text(prompts, key):
     return DEFAULTS[key]
 
 
-def reply(prompts, owner, private=False, member=False):
+def reply(prompts, owner, private=False, member=False, owner_name=None):
     """The reply rules for every chat, then the owner's private chat's, a member's own private chat's (step 4), a
-    private answer's or a group's. A member's chat is never the owner's: asking for both reads as neither."""
+    private answer's or a group's. A member's chat is never the owner's: asking for both reads as neither. Outside the
+    owner's private chat, the owner's People name follows when there is one (ADR-0318)."""
     if member and (owner or private): raise ValueError('invalid_member_turn')
-    return text(prompts, 'reply.common') + ' ' + text(prompts, 'reply.owner' if owner else 'reply.member' if member else
-                                                      'reply.private' if private else 'reply.group')
+    rules = text(prompts, 'reply.common') + ' ' + text(prompts, 'reply.owner' if owner else 'reply.member' if member else
+                                                       'reply.private' if private else 'reply.group')
+    if owner or not owner_name: return rules
+    return rules + ' ' + text(prompts, 'reply.owner_name').replace('{name}', owner_name)

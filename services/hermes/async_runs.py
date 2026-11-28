@@ -125,8 +125,8 @@ class AsyncRuns:
                 previous=json.loads(path.read_bytes())
                 # Credentials can expire between delivery attempts. They are not
                 # execution identity, but every domain handler rechecks them. A
-                # retry keeps the instruction texts its first request carried.
-                omit=lambda value:{k:v for k,v in value.items() if k not in ('archive_credential','asynchronous','prompts')}
+                # retry keeps the instruction texts and the owner's People name its first request carried.
+                omit=lambda value:{k:v for k,v in value.items() if k not in ('archive_credential','asynchronous','prompts','owner_name')}
                 if canonical(omit(previous))!=canonical(omit(body)):raise ValueError('run_identity_conflict')
             else:
                 # The pass stays in memory with the run it launches here; the request on disk never holds it.

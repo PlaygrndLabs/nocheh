@@ -431,7 +431,7 @@ def run(body, emit=None, relay=None, feed=None):
             # A job run's budget ends at the job's soft deadline; Hermes's own notice at 80% of it asks for the report.
             run_budget_seconds=run_budget(body) if background else prefs['agent.run_budget_seconds'],
             reasoning_config=reasoning(credentials,prefs),ephemeral_system_prompt=(
-                (prompt('reply.common')+' '+prompt('reply.member_read') if member_read else reply(body.get('prompts'),body['owner'],answer,member))+
+                (prompt('reply.common')+' '+prompt('reply.member_read') if member_read else reply(body.get('prompts'),body['owner'],answer,member,body.get('owner_name')))+
                 # A scheduled run's result goes to its chat by itself; one with nothing to send answers [SILENT] (ADR-0266).
                 (' '+prompt('reply.scheduled') if body.get('channel')=='scheduler' else '')+
                 (' '+prompt('reply.member_schedules' if member else 'reply.schedules') if schedules else '')+long_term))

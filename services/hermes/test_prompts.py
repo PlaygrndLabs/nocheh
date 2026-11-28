@@ -33,6 +33,17 @@ class PromptTests(unittest.TestCase):
             self.assertEqual(prompts.text({'reply.group': value}, 'reply.group'), prompts.DEFAULTS['reply.group'])
         self.assertEqual(prompts.text(None, 'memory.limited'), prompts.DEFAULTS['memory.limited'])
 
+    def test_others_hear_the_owner_by_their_people_name_and_the_owners_chat_keeps_saying_you(self):
+        # ADR-0318: outside the owner's private chat the rules add the owner's People name; labels keep "the owner".
+        named = prompts.DEFAULTS['reply.owner_name'].replace('{name}', 'Robin')
+        self.assertIn('"Robin said in this group', named)
+        self.assertNotIn('{name}', named)
+        group, member, answer = prompts.reply({}, False, owner_name='Robin'), prompts.reply({}, False, member=True, owner_name='Robin'), prompts.reply({}, False, True, owner_name='Robin')
+        for rules in (group, member, answer): self.assertTrue(rules.endswith(' ' + named))
+        self.assertEqual(prompts.reply({}, True, owner_name='Robin'), prompts.reply({}, True))
+        self.assertEqual(prompts.reply({}, False, owner_name=None), prompts.reply({}, False))
+        self.assertTrue(prompts.reply({'reply.owner_name': 'Say {name}.'}, False, owner_name='Robin').endswith(' Say Robin.'))
+
     def test_the_model_is_told_what_each_note_source_means_and_reviews_leave_labels_to_nocheh(self):
         # ADR-0257: from and label are Nocheh's; the evidence text explains them, and a review never copies the records line.
         from .prompts import DEFAULTS
