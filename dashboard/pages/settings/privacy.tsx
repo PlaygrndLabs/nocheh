@@ -4,7 +4,7 @@ import {apiPost, type ApiError} from '../../lib/api';
 import {useSubTab} from '../../lib/navigation';
 import {adoptSavedSettings, useSettings, type SettingsView} from '../../lib/settings';
 import {operationError} from '../../lib/system-format';
-import {Button, Card, CardHeader, Input, Notice, Segmented, Select, SettingRow} from '../../ui/core';
+import {Button, Card, CardHeader, Input, Notice, SecretInput, Segmented, Select, SettingRow} from '../../ui/core';
 import {useFeedback} from '../../ui/overlay';
 import {CopyLine, SetupStep, SetupText, SetupWindow, setupStatus} from '../../ui/setup';
 import {SubPanel, SubTabs} from '../../ui/page';
@@ -207,16 +207,27 @@ function OffsiteSettings() {
       }
       description={description}
     >
-      <Input
-        id={key}
-        type={secret ? 'password' : 'text'}
-        autoComplete="off"
-        placeholder={secret && configured(key) ? 'Saved. Type to replace.' : placeholder}
-        value={s.value(key)}
-        disabled={s.busy}
-        // A secret is kept exactly as typed: trimming on every key would drop the spaces between words.
-        onChange={e => s.set(key, secret ? e.target.value : e.target.value.trim())}
-      />
+      {secret ? (
+        <SecretInput
+          id={key}
+          saved={configured(key)}
+          placeholder={placeholder}
+          value={s.value(key)}
+          disabled={s.busy}
+          // A secret is kept exactly as typed: trimming on every key would drop the spaces between words.
+          onChange={e => s.set(key, e.target.value)}
+        />
+      ) : (
+        <Input
+          id={key}
+          type="text"
+          autoComplete="off"
+          placeholder={placeholder}
+          value={s.value(key)}
+          disabled={s.busy}
+          onChange={e => s.set(key, e.target.value.trim())}
+        />
+      )}
     </SettingRow>
   );
   const connectButton = (
@@ -421,7 +432,7 @@ function OffsiteSettings() {
               disabled={s.busy}
               onChange={value => s.set('NOCHEH_OFFSITE', value)}
               options={[
-                {value: 's3', label: 'On'},
+                {value: 's3', label: 'On', tone: 'good'},
                 {value: 'off', label: 'Off'},
               ]}
             />
@@ -643,7 +654,7 @@ function BackupSettings() {
               disabled={s.busy}
               onChange={value => s.set('NOCHEH_BACKUP_SCHEDULE', value)}
               options={[
-                {value: 'daily', label: 'On'},
+                {value: 'daily', label: 'On', tone: 'good'},
                 {value: 'off', label: 'Off'},
               ]}
             />
@@ -826,7 +837,7 @@ export function PrivacySettings() {
                   disabled={s.busy}
                   onChange={value => s.set('NOCHEH_GUARD_MODE', value)}
                   options={[
-                    {value: 'on', label: 'On'},
+                    {value: 'on', label: 'On', tone: 'good'},
                     {value: 'off', label: 'Off'},
                   ]}
                 />

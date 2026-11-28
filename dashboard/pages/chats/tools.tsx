@@ -26,9 +26,9 @@ export const toolNames: [Tool, string, string][] = [
   ['browser', 'Web pages', 'Read an approved public page. No logins.'],
   ['mcp', 'Outside tools', 'Propose an exact call to a public tool server, including Notion.'],
 ];
-const choices: {value: Choice; label: string}[] = [
+const choices: {value: Choice; label: string; tone?: 'good'}[] = [
   {value: 'default', label: 'Default'},
-  {value: 'on', label: 'On'},
+  {value: 'on', label: 'On', tone: 'good'},
   {value: 'off', label: 'Off'},
 ];
 const choiceOf = (value: boolean | null): Choice => (value === null ? 'default' : value ? 'on' : 'off');

@@ -1085,6 +1085,14 @@ test('off-site storage connects from one Cloudflare token or a Backblaze key, th
   assert.equal(await plain.count(), 0, 'the warning goes once a passphrase is typed');
   await bar.getByRole('button', {name: 'Save'}).click();
   await bar.getByText('No unsaved changes').waitFor();
+  // A saved passphrase shows as masked dots with a green Saved mark, and On shows a green dot.
+  const passphrase = page.locator('#NOCHEH_OFFSITE_PASSPHRASE');
+  assert.equal(await passphrase.inputValue(), '');
+  assert.equal(await passphrase.getAttribute('placeholder'), '••••••••••••');
+  await passphrase.locator('xpath=..').getByText('Saved', {exact: true}).waitFor();
+  const sending = page.getByRole('radiogroup', {name: 'Send off-site copies'});
+  assert.equal(await sending.getByRole('radio', {name: 'On'}).locator('.bg-good').count(), 1);
+  assert.equal(await sending.getByRole('radio', {name: 'Off'}).locator('.bg-good').count(), 0);
   // Backblaze fills everything from a key limited to one bucket. Choosing it alone saves nothing.
   await storage.getByRole('radio', {name: 'Backblaze'}).click();
   assert.equal(await bar.getByText('No unsaved changes').count(), 1);

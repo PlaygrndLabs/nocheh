@@ -289,6 +289,36 @@ export function Input({className, ...props}: React.ComponentProps<'input'>) {
   return <input className={cn(controlStyles, 'h-9', className)} {...props} />;
 }
 
+/**
+ * A password-style field for a secret. Once one is saved and nothing new is typed, it shows masked dots and a
+ * green "Saved" mark, so a saved secret never looks empty.
+ */
+export function SecretInput({
+  saved,
+  placeholder,
+  className,
+  ...props
+}: Omit<React.ComponentProps<'input'>, 'type'> & {saved?: boolean}) {
+  const showSaved = !!saved && !props.value;
+  return (
+    <div className="relative">
+      <Input
+        type="password"
+        autoComplete="off"
+        placeholder={showSaved ? '••••••••••••' : placeholder}
+        className={cn(showSaved && 'pr-20 placeholder:text-fg', className)}
+        {...props}
+      />
+      {showSaved && (
+        <span className="pointer-events-none absolute top-1/2 right-3 flex -translate-y-1/2 items-center gap-1.5 text-xs text-good">
+          <Dot tone="good" />
+          Saved
+        </span>
+      )}
+    </div>
+  );
+}
+
 export function Textarea({className, ...props}: React.ComponentProps<'textarea'>) {
   return <textarea className={cn(controlStyles, 'min-h-20 py-2', className)} {...props} />;
 }
@@ -338,7 +368,8 @@ export function Segmented<T extends string>({
   size = 'md',
 }: {
   value: T;
-  options: {value: T; label: React.ReactNode}[];
+  /** A tone shows as a dot beside the chosen option, for example green for On. */
+  options: {value: T; label: React.ReactNode; tone?: Tone}[];
   onChange: (value: T) => void;
   label: string;
   disabled?: boolean;
@@ -358,8 +389,10 @@ export function Segmented<T extends string>({
             'rounded-md px-3 font-medium text-muted transition-colors disabled:opacity-50',
             size === 'sm' ? 'h-7 text-xs' : 'h-8 text-[13px]',
             value === option.value ? 'bg-surface text-fg shadow-card' : 'hover:text-fg',
+            value === option.value && option.tone && 'inline-flex items-center gap-1.5',
           )}
         >
+          {value === option.value && option.tone && <Dot tone={option.tone} />}
           {option.label}
         </button>
       ))}

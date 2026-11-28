@@ -10,7 +10,21 @@ import {setParams} from '../../lib/routes';
 import {useResource} from '../../lib/resource';
 import {useSettings, type ProviderPart, type ProviderRow} from '../../lib/settings';
 import {cn} from '../../lib/utils';
-import {Badge, Button, Card, CardHeader, Empty, Field, Input, Notice, Select, Table, Td, Th} from '../../ui/core';
+import {
+  Badge,
+  Button,
+  Card,
+  CardHeader,
+  Empty,
+  Field,
+  Input,
+  Notice,
+  SecretInput,
+  Select,
+  Table,
+  Td,
+  Th,
+} from '../../ui/core';
 import {Dialog, useFeedback} from '../../ui/overlay';
 import {SubPanel, SubTabs} from '../../ui/page';
 
@@ -516,13 +530,12 @@ function ProviderDialog({
         >
           <div className="relative">
             <KeyRound className="pointer-events-none absolute top-2.5 left-3 size-4 text-muted" aria-hidden />
-            <Input
+            <SecretInput
               id="provider-key"
-              type="password"
-              autoComplete="off"
               className="pl-9"
               value={key}
-              placeholder={savedKey && !addressChanged ? '****' : 'Paste the key'}
+              saved={savedKey && !addressChanged}
+              placeholder="Paste the key"
               onChange={e => setKey(e.target.value)}
               autoFocus={!custom}
             />
