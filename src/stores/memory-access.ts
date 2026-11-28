@@ -28,6 +28,12 @@ const tokens=(value:string)=>new Set((value.toLocaleLowerCase().match(/[\p{L}\p{
 const relevant=(query:string,text:string)=>{const wanted=tokens(query),available=tokens(text);if(wanted.size<2)return false;let hits=0;for(const word of wanted)if(available.has(word))hits++;
   return hits>=Math.max(2,Math.ceil(Math.min(wanted.size,6)/2));};
 
+/** The dashboard's Inbox at the address the owner set in NOCHEH_DASHBOARD_URL, or null when none is set (ADR-0315). */
+export function dashboardInbox(configured=process.env.NOCHEH_DASHBOARD_URL):string|null {
+  const value=configured?.trim();if(!value)return null;
+  try {if(!['http:','https:'].includes(new URL(value).protocol))return null;}catch{return null;}
+  return value.replace(/\/$/,'')+'/#inbox';
+}
 type Settings={suggestions:'related'|'off';notify_owner:boolean;auto_followup:boolean;request_ttl_seconds:number;default_grant_mode:'one_time'|'persistent'};
 type Fact={id:string;subject_entity_id:string;predicate:string;object_entity_id:string|null;active_revision:number;revision:number;content:string;
   relationship_kind:string|null;attribution:string;uncertainty:string;retired:boolean;evidence:SourceReference[];input_binding:GuardBinding};
@@ -152,16 +158,29 @@ export class MemoryAccessRepository {
       [id,requestHash,source,principal.space,principal.scope,logical,digest(query),selected.id,selected.revision,proposal,binding,JSON.stringify(path),JSON.stringify(selected.evidence),expires]);
     const row=(await this.stores.control.query('SELECT * FROM memory_access_requests WHERE id=$1',[id])).rows[0];
     if(setting.notify_owner&&!row.notification_action_id) {
-      const owner=ownerChat(this.access.policy());if(owner)try {const action=await this.actions.approvedSystem({...principal,logical_profile:logical},source,binding,owner,
-        `A memory access suggestion needs review: ${this.dashboardLink(id)}`,'memory-access-notification:'+id,'notice');
-        await this.stores.control.query('UPDATE memory_access_requests SET notification_action_id=$2,updated_at=now() WHERE id=$1 AND notification_action_id IS NULL',[id,action.id]);} catch {/* The request remains durable and visible in the dashboard. */}
+      const owner=ownerChat(this.access.policy());if(owner)await this.notifyOwner(id,owner,{...principal,logical_profile:logical},source,binding);
     }
     return {id};
   }
-  private dashboardLink(requestId:string) {
-    const configured=process.env.NOCHEH_DASHBOARD_URL?.trim();let base='http://localhost:'+(process.env.NOCHEH_DASHBOARD_PORT??'8783');
-    if(configured)try {if(['http:','https:'].includes(new URL(configured).protocol))base=configured;}catch{/* Keep the safe local dashboard route. */}
-    return base.replace(/\/$/,'')+'/#inbox?kind=memory_access&decision='+encodeURIComponent(requestId);
+  /**
+   * One notice tells the owner that suggestions wait in the Inbox; while one sent in the last hour still has a suggestion
+   * waiting, a new suggestion sends none, so several in a row are one message (ADR-0315). The notice names no request id,
+   * which the secret check would hide, and links to the dashboard only at its configured address: a local address does
+   * not open from the owner's phone.
+   */
+  private async notifyOwner(id:string,owner:string,principal:Reader,source:SourceReference,binding:GuardBinding) {
+    const lock=await this.stores.control.connect();
+    try {
+      await lock.query("SELECT pg_advisory_lock(hashtextextended('memory-access-notice',0))");
+      const recent=(await lock.query(`SELECT 1 FROM memory_access_requests r JOIN telegram_action_requests a ON a.id=r.notification_action_id
+        WHERE r.id<>$1 AND r.state='pending' AND a.created_at>now()-interval '1 hour' LIMIT 1`,[id])).rowCount;
+      if(recent)return;
+      const link=dashboardInbox();
+      const text=link?`Memory sharing suggestions wait for your review: ${link}`:'Memory sharing suggestions wait for your review in Inbox, in the dashboard or the Nocheh app.';
+      const action=await this.actions.approvedSystem(principal,source,binding,owner,text,'memory-access-notification:'+id,'notice');
+      await lock.query('UPDATE memory_access_requests SET notification_action_id=$2,updated_at=now() WHERE id=$1 AND notification_action_id IS NULL',[id,action.id]);
+    } catch {/* The request remains durable and visible in the dashboard. */}
+    finally {await lock.query("SELECT pg_advisory_unlock(hashtextextended('memory-access-notice',0))").catch(()=>{});lock.release();}
   }
   async list(principal:Reader,after='',destination='') {admin(principal);if(after)identity(after);if(destination)validateSpace(destination);await this.reconcile();const rows=(await this.stores.control.query("SELECT * FROM memory_access_requests WHERE id>$1 AND ($2='' OR destination=$2) ORDER BY id LIMIT 101",[after,destination])).rows;
     const page=rows.slice(0,100),artifacts=await this.artifacts(page,'proposal_reference'),requests=await Promise.all(page.map(async row=>{const artifact=artifacts.get(row.proposal_reference.id);
