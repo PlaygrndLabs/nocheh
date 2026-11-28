@@ -1,5 +1,5 @@
 import {useState} from 'react';
-import {ExternalLink} from 'lucide-react';
+import {ArrowRight, ExternalLink} from 'lucide-react';
 import {apiPost, type ApiError} from '../../lib/api';
 import {useSubTab} from '../../lib/navigation';
 import {adoptSavedSettings, useSettings, type SettingsView} from '../../lib/settings';
@@ -80,6 +80,18 @@ function OutLink({href, children}: {href: string; children: React.ReactNode}) {
     <a className="text-accent-text underline-offset-2 hover:underline" href={href} target="_blank" rel="noreferrer">
       {children}
     </a>
+  );
+}
+
+/** Opens System › Backups, where backups and off-site copies are sent, tested and listed. */
+function SeeBackups() {
+  return (
+    <Button asChild size="sm" variant="ghost">
+      <a href={href('system', {view: 'backups'})}>
+        See backups
+        <ArrowRight aria-hidden />
+      </a>
+    </Button>
   );
 }
 
@@ -766,22 +778,25 @@ export function PrivacySettings() {
   const tab = open === 'offsite' && !offsite ? 'password' : open;
   return (
     <>
-      <SubTabs
-        label="Privacy and data settings"
-        value={tab}
-        onChange={setTab}
-        tabs={subTabs
-          .filter(id => id !== 'offsite' || offsite)
-          .map(id => ({
-            id,
-            label: (
-              <>
-                {subTabNames[id]}
-                <UnsavedDot show={subTabKeys[id].some(key => s.changed(key))} />
-              </>
-            ),
-          }))}
-      />
+      <div className="flex flex-wrap items-center justify-between gap-2">
+        <SubTabs
+          label="Privacy and data settings"
+          value={tab}
+          onChange={setTab}
+          tabs={subTabs
+            .filter(id => id !== 'offsite' || offsite)
+            .map(id => ({
+              id,
+              label: (
+                <>
+                  {subTabNames[id]}
+                  <UnsavedDot show={subTabKeys[id].some(key => s.changed(key))} />
+                </>
+              ),
+            }))}
+        />
+        {tab !== 'password' && <SeeBackups />}
+      </div>
       <SubPanel id="password" current={tab}>
         <PasswordSettings />
         <Card>
