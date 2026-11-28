@@ -61,6 +61,11 @@ test('waiting approvals carry across reaction epochs and stop after any other ep
       const actor={...reader(await s.guards.state(),operation.id),logical_profile:profile};await s.turns.register(actor,{logical_profile:profile,job:'fixture-job'});return actor;
     };
     const job=await a.propose(await step('step-1'),{kind:'shell',arguments:{command:'printf job-step'}});
+    // Messages for another group wait for the owner's card, as tool actions do (ADR-0320).
+    const send=(text:string)=>s.telegramActions.request(asker,{destination:other,text});
+    const sendWaiting=await send('A made-up note for the other group'),sendStopped=await send('Another made-up note');
+    assert.equal(sendWaiting.state,'proposed');assert.equal(sendStopped.state,'proposed');
+    const sendRow=async(id:string)=>(await stores.control.query('SELECT state,error_code FROM telegram_action_requests WHERE id=$1',[id])).rows[0];
     const inbox=async(id:string)=>(await s.supervision.decision(owner,'controlled_action',id)).observation;
     const standing=async()=>(await s.supervision.context(owner,asking)).external_actions.permissions.find((row:any)=>row.id===grant.id)!.current;
 
@@ -69,6 +74,9 @@ test('waiting approvals carry across reaction epochs and stop after any other ep
     assert.deepEqual((await stores.control.query('SELECT reason FROM guard_quiet_epochs WHERE generation=$1 AND epoch=$2',[quiet.generation,quiet.epoch])).rows,[{reason:'reaction'}]);
     assert.equal((await a.decide(owner,{id:waiting.id,fingerprint:waiting.fingerprint,decision:'approve'})).state,'approved');
     await a.decide(owner,{id:late.id,fingerprint:late.fingerprint,decision:'approve'});
+    assert.equal((await s.telegramActions.decide(owner,{id:sendWaiting.id,fingerprint:sendWaiting.fingerprint,decision:'approve'})).state,'approved',
+      'a message approved after a reaction elsewhere still goes out');
+    assert.deepEqual(await sendRow(sendWaiting.id),{state:'approved',error_code:null});
     assert.equal((await a.preview(owner,{action_id:stopped.id})).decision.outcome,'ask');
     assert.equal(await inbox(stopped.id),'current','the Inbox keeps Approve open after a reaction');
     // The tools workflow claims a waiting action again; it keeps waiting.
@@ -116,6 +124,8 @@ test('waiting approvals carry across reaction epochs and stop after any other ep
     const changed=await s.guards.state();assert.ok(changed.epoch>quiet.epoch);
     await assert.rejects(a.decide(owner,{id:stopped.id,fingerprint:stopped.fingerprint,decision:'approve'}),{code:'guard_context_changed'});
     assert.equal((await a.preview(owner,{action_id:stopped.id})).decision.outcome,'deny');
+    const closed=await s.telegramActions.decide(owner,{id:sendStopped.id,fingerprint:sendStopped.fingerprint,decision:'approve'});
+    assert.deepEqual([closed.state,closed.error_code],['cancelled','action_context_changed'],'a message stops after an epoch that is not quiet');
     assert.equal(await inbox(stopped.id),'stale');assert.equal(await standing(),false);
     assert.equal((await x.claim(await host(late.id))).claimed,false);
     const rejected=await a.row(late.id);assert.equal(rejected.state,'rejected');assert.equal(rejected.error_code,'guard_context_changed');
