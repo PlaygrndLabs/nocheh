@@ -508,6 +508,8 @@ class ProblemNoticeTests(unittest.TestCase):
         stores = ('Memory labels: looking up where notes came from failed 2 times today. Recall and the Notes page showed '
                   'those notes as “source not available right now” or without their chat, and replies may have seen them '
                   'without their chat. The notes and what was recorded about them are kept.')
+        # Held until they last: ten minutes on, both still fail.
+        self.check(NOW - 600, noting(hermes=(1, 0), stores=(2, 0)))
         self.check(NOW, noting(hermes=(1, 0), stores=(2, 0)))
         self.assertEqual(self.sent[-1]['problems'], [hermes, stores])
         # The stores' Notes-page poll works while every Hermes record still fails: only the stores' line is working again.
@@ -522,7 +524,38 @@ class ProblemNoticeTests(unittest.TestCase):
         self.check(NOW + 4020, noting(hermes=(1, 1), stores=(2, 1)))
         self.assertEqual(self.edits[-1]['resolved'], ['Working again since 13:07 UTC', 'Working again since 12:02 UTC'])
         self.check(NOW + 4140, noting(hermes=(1, 1), stores=(3, 1)))
+        self.assertEqual(len(self.sent), 1, 'held until it lasts')
+        self.check(NOW + 4740, noting(hermes=(1, 1), stores=(3, 1)))
         self.assertEqual(self.sent[-1]['problems'], [stores.replace('2 times', '3 times')])
+
+    def test_a_memory_label_failure_is_told_only_once_it_lasts(self):
+        stores = lambda count: ('Memory labels: looking up where notes came from failed '
+                                f"{problems._plural(count, 'time', 'times')} today. Recall and the Notes page showed "
+                                'those notes as “source not available right now” or without their chat, and replies may have seen them '
+                                'without their chat. The notes and what was recorded about them are kept.')
+        # One failure that works again on the next check is no news, and never comes back as news.
+        self.check(NOW, noting(stores=(1, 5)))
+        self.check(NOW + 120, noting(stores=(1, 6)))
+        self.check(NOW + 1200, noting(stores=(1, 6)))
+        self.assertEqual(self.sent, [])
+        # A failure with no working step after it is told ten minutes on, counted from the dropped one.
+        self.check(NOW + 1320, noting(stores=(2, 6)))
+        self.check(NOW + 1440, noting(stores=(2, 6)))
+        self.assertEqual(self.sent, [], 'still within ten minutes')
+        self.outcome = 'unavailable'
+        self.check(NOW + 1920, noting(stores=(2, 6)))
+        self.outcome = 'done'
+        self.check(NOW + 2040, noting(stores=(2, 6)))
+        self.assertEqual([body['problems'] for body in self.sent], [[stores(2)], [stores(2)]], 'an unsent notice is tried again at once')
+        self.assertEqual(self.sent[0]['id'], self.sent[1]['id'])
+        # Failing again and again is told at once, even with steps that work in between.
+        self.check(NOW + 6000, noting(stores=(4, 8)))
+        self.check(NOW + 6120, noting(stores=(5, 9)))
+        self.assertEqual(self.sent[-1]['problems'], [stores(5)])
+        # Hermes's own memory step is held the same way.
+        self.check(NOW + 6240, noting(hermes=(1, 0), stores=(5, 9)))
+        self.check(NOW + 6360, noting(hermes=(1, 1), stores=(5, 9)))
+        self.assertEqual(len(self.sent), 3)
 
 
 if __name__ == '__main__':
