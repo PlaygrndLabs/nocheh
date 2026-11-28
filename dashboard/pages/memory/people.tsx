@@ -38,6 +38,8 @@ type Entity = {
   revision: number;
   /** The owner set this name, so everyone reads it: groups, members and memory. */
   people_name?: true;
+  /** This person is the owner: groups and members hear the owner by this name once the owner sets it. */
+  owner?: true;
 };
 /** The owner's private note about a person: only the owner reads it. */
 type PrivateNote = {note: string; revision: number};
@@ -168,6 +170,11 @@ export function People() {
                     {entity.name.trim().slice(0, 1).toUpperCase() || '?'}
                   </span>
                   <span className="min-w-0 flex-1 truncate text-sm font-medium">{entity.name}</span>
+                  {entity.owner && (
+                    <Badge tone="accent" title="This is you. Groups and members hear you by this name once you set it.">
+                      You
+                    </Badge>
+                  )}
                   {entity.people_name && (
                     <Badge title="You set this name. Everyone sees it.">
                       <Eye aria-hidden className="size-3" /> Shown
@@ -192,9 +199,13 @@ export function People() {
 }
 
 function PersonDrawer({id, onClose}: {id: string | null; onClose: () => void}) {
-  const detail = useResource<{entity: Entity; claims: Claim[]; bindings: unknown[]; partial: boolean; note?: PrivateNote}>(
-    id ? '/entities/' + id : null,
-  );
+  const detail = useResource<{
+    entity: Entity;
+    claims: Claim[];
+    bindings: unknown[];
+    partial: boolean;
+    note?: PrivateNote;
+  }>(id ? '/entities/' + id : null);
   const entity = detail.data?.entity;
   return (
     <Drawer open={!!id} onOpenChange={open => !open && onClose()} title={entity?.name ?? 'Person'} wide>
@@ -231,7 +242,9 @@ function PersonDetail({
   return (
     <div className="space-y-6">
       <NameEditor entity={entity} mergedInto={names(entity.merged_into)} />
-      {entity.state === 'active' && data.note && <NoteEditor key={data.note.revision} entity={entity} saved={data.note} />}
+      {entity.state === 'active' && data.note && (
+        <NoteEditor key={data.note.revision} entity={entity} saved={data.note} />
+      )}
 
       <section>
         <h3 className="mb-2 text-sm font-semibold">What Nocheh knows</h3>
@@ -292,7 +305,8 @@ function PersonDetail({
   );
 }
 
-const SHOWN_NAME = 'Everyone sees this name: in groups, to members, and in memory. Use the private note for anything only for you.';
+const SHOWN_NAME =
+  'Everyone sees this name: in groups, to members, and in memory. Use the private note for anything only for you.';
 const RENAMED_SEEN = 'nocheh.people.renamed-notice';
 
 /** Once: the names the owner set, which everyone now reads (ADR-0274). Dismissed for this browser. */
