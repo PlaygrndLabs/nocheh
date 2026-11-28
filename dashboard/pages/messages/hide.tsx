@@ -1,6 +1,6 @@
 /**
  * Hide a message from the assistant, or bring it back. Hiding is the owner's
- * reversible decision: the original stays kept and a reply already sent in
+ * reversible decision, or Nocheh's when Telegram said the message is gone: the original stays kept and a reply already sent in
  * Telegram is not recalled. Delivered replies that answered or quote the
  * message are offered, never hidden implicitly.
  */
@@ -17,6 +17,8 @@ type Retirement = {
   event_id: string;
   retired: boolean;
   revision: number;
+  /** 'telegram': Nocheh hid it because Telegram said the message is gone (ADR-0319). */
+  authority?: 'owner' | 'telegram';
   history?: {revision: number; retired: boolean; created_at: string}[];
   related_replies?: Related[];
 };
@@ -112,7 +114,7 @@ export function HideControl({id}: {id: string}) {
       </div>
       <p className="text-[13px] text-muted">
         {state.retired
-          ? 'The assistant won’t use this message or its edits in replies or learning. The original is still kept.'
+          ? `${state.authority === 'telegram' ? 'Hidden by Nocheh because Telegram said this message was deleted. ' : ''}The assistant won’t use this message or its edits in replies or learning. The original is still kept.`
           : 'Hiding never deletes the original or recalls a reply already sent in Telegram. You can undo it.'}
       </p>
 
