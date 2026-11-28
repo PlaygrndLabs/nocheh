@@ -1068,14 +1068,21 @@ test('off-site storage connects from one Cloudflare token or a Backblaze key, th
   await page.getByRole('button', {name: 'Connect', exact: true}).click();
   const done = page.getByRole('status').filter({hasText: 'Connected to bucket nocheh-backups.'});
   await done.waitFor();
-  assert.match(await done.textContent(), /locked for 7 days.*Now type your passphrase below and save\./);
+  assert.match(
+    await done.textContent(),
+    /locked for 7 days.*Now choose a passphrase below if you want one, and save\./,
+  );
   await page.getByText('Connected. Copies go to bucket nocheh-backups.').waitFor();
   assert.equal(await setup.count(), 0, 'the setup window closes once connected');
   assert.equal(await token.count(), 0, 'the token form closes once connected');
   // Turning copies on is still the owner's unsaved edit, and saves with the passphrase.
   const bar = page.getByRole('region', {name: 'Save changes'});
   await bar.getByText('1 unsaved change').waitFor();
-  await page.locator('#NOCHEH_OFFSITE_PASSPHRASE').fill('a long synthetic passphrase');
+  // The passphrase is optional; without one the page warns that copies are not encrypted.
+  const plain = page.getByText('Copies are not encrypted.');
+  await plain.waitFor();
+  await page.locator('#NOCHEH_OFFSITE_PASSPHRASE').fill('short');
+  assert.equal(await plain.count(), 0, 'the warning goes once a passphrase is typed');
   await bar.getByRole('button', {name: 'Save'}).click();
   await bar.getByText('No unsaved changes').waitFor();
   // Backblaze fills everything from a key limited to one bucket. Choosing it alone saves nothing.

@@ -20,8 +20,8 @@ verified snapshots of [ADR-0023](0023-consistent-backups-and-inactive-restore.md
 <decision>
 - Settings › Privacy & data has "Off-site copies", off by default:
   `NOCHEH_OFFSITE` (`off` or `s3`), the storage address (https only), bucket,
-  region (`auto` by default), access key ID, secret access key, a passphrase of
-  at least 16 characters and how many copies to keep (default 14). The secret
+  region (`auto` by default), access key ID, secret access key, an optional passphrase of
+  any length and how many copies to keep (default 14). The secret
   key and the passphrase are secrets: saved, never shown again. The settings
   work live, without Apply.
 - A copy is the finished backup folder as one tar stream, encrypted on this
@@ -63,3 +63,10 @@ verified snapshots of [ADR-0023](0023-consistent-backups-and-inactive-restore.md
   one.
 - A copy needs free disk space about the size of the backup while it is made.
 </consequences>
+
+Amended on 2026-11-28, at the owner's request: the passphrase is optional and
+has no minimum length. With one, copies are encrypted as above. Without one, a
+copy is the magic line, the header `{"cipher":"none"}` and the plain tar
+stream, still checked against its manifest when opened; the storage can read it.
+The settings page warns while no passphrase is set, and the job result says
+when a copy was not encrypted. Opening a plain copy never asks for a passphrase.

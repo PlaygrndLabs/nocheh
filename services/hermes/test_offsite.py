@@ -123,10 +123,30 @@ class EncryptionTests(unittest.TestCase):
             offsite.decrypt_backup(self.root / 'copy', self.root / 'out', PASSPHRASE)
         self.assertFalse((self.root / 'out').exists())
 
-    def test_short_passphrase_is_refused(self):
+    def test_any_passphrase_length_works(self):
         snapshot(self.root / 'backup')
-        with self.assertRaisesRegex(offsite.OffsiteError, 'too_short'):
-            offsite.encrypt_backup(self.root / 'backup', self.root / 'copy', 'short')
+        offsite.encrypt_backup(self.root / 'backup', self.root / 'copy', 'abc')
+        with self.assertRaisesRegex(offsite.OffsiteError, 'wrong_passphrase'):
+            offsite.decrypt_backup(self.root / 'copy', self.root / 'wrong', 'abd')
+        offsite.decrypt_backup(self.root / 'copy', self.root / 'out', 'abc')
+        self.assertTrue((self.root / 'out/manifest.json').exists())
+
+    def test_no_passphrase_makes_a_plain_copy(self):
+        snapshot(self.root / 'backup')
+        offsite.encrypt_backup(self.root / 'backup', self.root / 'copy', '')
+        data = (self.root / 'copy').read_bytes()
+        self.assertTrue(data.startswith(offsite.MAGIC + offsite.PLAIN))
+        self.assertIn(b'backup/manifest.json', data)
+        # A plain copy never asks for a passphrase, and any saved one is ignored.
+        asked = []
+        offsite.decrypt_backup(self.root / 'copy', self.root / 'out', lambda: asked.append(1) or 'x')
+        self.assertEqual(asked, [])
+        self.assertTrue((self.root / 'out/manifest.json').exists())
+        offsite.decrypt_backup(self.root / 'copy', self.root / 'out2', PASSPHRASE)
+        # A plain copy is still checked against its manifest.
+        (self.root / 'copy').write_bytes(data.replace(b'synthetic dump', b'synthetic dumq', 1))
+        with self.assertRaisesRegex(offsite.OffsiteError, 'backup_invalid'):
+            offsite.decrypt_backup(self.root / 'copy', self.root / 'out3', '')
 
 
 class SignatureTests(unittest.TestCase):
@@ -147,10 +167,12 @@ class SettingsTests(unittest.TestCase):
         full = {'NOCHEH_OFFSITE': 's3', 'NOCHEH_OFFSITE_ENDPOINT': 'https://account.r2.cloudflarestorage.com', 'NOCHEH_OFFSITE_BUCKET': 'nocheh-backups',
                 'NOCHEH_OFFSITE_ACCESS_KEY_ID': 'id', 'NOCHEH_OFFSITE_SECRET_ACCESS_KEY': 'secret', 'NOCHEH_OFFSITE_PASSPHRASE': PASSPHRASE}
         offsite.validate(full)
+        offsite.validate({**full, 'NOCHEH_OFFSITE_PASSPHRASE': 'abc'})
+        offsite.validate({**full, 'NOCHEH_OFFSITE_PASSPHRASE': ''})
         for change, message in (({'NOCHEH_OFFSITE_ENDPOINT': 'http://account.r2.cloudflarestorage.com'}, 'https'),
                                 ({'NOCHEH_OFFSITE_ENDPOINT': 'https://user:pw@host'}, 'https'),
                                 ({'NOCHEH_OFFSITE_BUCKET': 'Bad_Bucket'}, 'bucket'),
-                                ({'NOCHEH_OFFSITE_PASSPHRASE': 'short'}, '16'),
+                                ({'NOCHEH_OFFSITE_PASSPHRASE': 'it"s'}, 'quotes'),
                                 ({'NOCHEH_OFFSITE_KEEP': '0'}, '1-365'),
                                 ({'NOCHEH_OFFSITE_SECRET_ACCESS_KEY': ''}, 'need'),
                                 ({'NOCHEH_OFFSITE': 'ftp'}, 'off or s3'),

@@ -329,7 +329,7 @@ export function BackupsView() {
                 {row(
                   'offsite',
                   'Off-site copy',
-                  'Sends the newest backup, encrypted with your passphrase on this machine, to your own storage. The storage only sees scrambled data.',
+                  'Sends the newest backup to your own storage, encrypted on this machine first when you set a passphrase.',
                   'Send copy now',
                   offsite && (
                     <p className="text-xs">
@@ -344,7 +344,7 @@ export function BackupsView() {
                 {row(
                   'offsite-check',
                   'Test the off-site copy',
-                  'Downloads the newest copy, opens it with your passphrase and checks every file. Nothing is restored.',
+                  'Downloads the newest copy, opens it and checks every file. Nothing is restored.',
                   'Run test',
                   offsite?.enabled && <p className="text-xs">{checkSummary(offsite)}</p>,
                   !offsite?.enabled,
