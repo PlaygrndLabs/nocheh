@@ -2,7 +2,7 @@ import {useSubTab} from '../../lib/navigation';
 import {useResource} from '../../lib/resource';
 import {useSettings} from '../../lib/settings';
 import {href} from '../../lib/routes';
-import {Badge, Card, CardHeader, Facts, Input, Notice, Segmented, SettingRow, Switch} from '../../ui/core';
+import {Badge, Card, CardHeader, Facts, Input, Notice, SecretInput, Segmented, SettingRow, Switch} from '../../ui/core';
 import {LinkButton} from '../../ui/link-button';
 import {SubPanel, SubTabs} from '../../ui/page';
 import {FindIdButton, FoundPeople, useFindTelegramId} from './telegram-id';
@@ -160,12 +160,11 @@ export function TelegramSettings() {
               }
               htmlFor="telegram-token"
             >
-              <Input
+              <SecretInput
                 id="telegram-token"
-                type="password"
-                autoComplete="off"
                 value={s.value('TELEGRAM_BOT_TOKEN')}
-                placeholder={token?.configured ? '****' : 'Paste the bot token'}
+                saved={token?.configured}
+                placeholder="Paste the bot token"
                 disabled={s.busy}
                 onChange={e => s.set('TELEGRAM_BOT_TOKEN', e.target.value.trim())}
               />
@@ -477,12 +476,11 @@ export function TelegramSettings() {
               }
               htmlFor="mini-app-tunnel"
             >
-              <Input
+              <SecretInput
                 id="mini-app-tunnel"
-                type="password"
-                autoComplete="off"
                 value={s.value('CLOUDFLARE_TUNNEL_TOKEN')}
-                placeholder={tunnel?.configured ? '****' : 'Paste the tunnel token'}
+                saved={tunnel?.configured}
+                placeholder="Paste the tunnel token"
                 disabled={s.busy}
                 onChange={e => s.set('CLOUDFLARE_TUNNEL_TOKEN', e.target.value.trim())}
               />

@@ -1,6 +1,6 @@
 import {useSettings, type SettingsView} from '../../lib/settings';
 import {settingLabel, settingLabels} from '../../lib/setting-labels';
-import {Card, CardHeader, Input, SettingRow, Switch} from '../../ui/core';
+import {Card, CardHeader, Input, SecretInput, SettingRow, Switch} from '../../ui/core';
 import {Unsaved, telegramKeys} from './telegram';
 import {speedKeys} from './speed';
 import {privacyKeys} from './privacy';
@@ -65,13 +65,20 @@ export function AdvancedSettings() {
                     onChange={on => s.set(key, on ? 'true' : 'false')}
                   />
                 </div>
+              ) : field.secret ? (
+                <SecretInput
+                  id={'adv-' + key}
+                  saved={field.configured}
+                  value={s.value(key)}
+                  disabled={s.busy}
+                  onChange={e => s.set(key, e.target.value)}
+                />
               ) : (
                 <Input
                   id={'adv-' + key}
-                  type={field.secret ? 'password' : 'text'}
+                  type="text"
                   autoComplete="off"
                   value={s.value(key)}
-                  placeholder={field.secret && field.configured ? '****' : ''}
                   disabled={s.busy}
                   onChange={e => s.set(key, e.target.value)}
                 />
