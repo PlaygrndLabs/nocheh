@@ -28,7 +28,7 @@ const tokens=(value:string)=>new Set((value.toLocaleLowerCase().match(/[\p{L}\p{
 const relevant=(query:string,text:string)=>{const wanted=tokens(query),available=tokens(text);if(wanted.size<2)return false;let hits=0;for(const word of wanted)if(available.has(word))hits++;
   return hits>=Math.max(2,Math.ceil(Math.min(wanted.size,6)/2));};
 
-/** The dashboard's Inbox at the address the owner set in NOCHEH_DASHBOARD_URL, or null when none is set (ADR-0316). */
+/** The dashboard's Inbox at the address the owner set in NOCHEH_DASHBOARD_URL, or null when none is set (ADR-0317). */
 export function dashboardInbox(configured=process.env.NOCHEH_DASHBOARD_URL):string|null {
   const value=configured?.trim();if(!value)return null;
   try {if(!['http:','https:'].includes(new URL(value).protocol))return null;}catch{return null;}
@@ -164,7 +164,7 @@ export class MemoryAccessRepository {
   }
   /**
    * One notice tells the owner that suggestions wait in the Inbox; while one sent in the last hour still has a suggestion
-   * waiting, a new suggestion sends none, so several in a row are one message (ADR-0316). The notice names no request id,
+   * waiting, a new suggestion sends none, so several in a row are one message (ADR-0317). The notice names no request id,
    * which the secret check would hide, and links to the dashboard only at its configured address: a local address does
    * not open from the owner's phone.
    */

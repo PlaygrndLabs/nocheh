@@ -626,7 +626,7 @@ export const mcpTools:readonly McpTool[]=[
       notion_pages:{type:'array',minItems:1,maxItems:5,items:{type:'string',maxLength:300},
         description:'With start and machine, only when the job must read pages of the owner\'s own Notion: each page\'s id or notion.so address. '+
         'A machine job reads only the chat and period on its card, from before the owner approves, and only the Notion pages named here.'}},['action']),run:backgroundJob},
-  {name:'telegram_destinations',description:'In a group: list the groups, with names and exact IDs, the person asking may post to through Nocheh: this group, and for the owner or a member who may post to their other groups, those groups. Use an exact ID from here as an action destination; a message to another group waits for a card.',
+  {name:'telegram_destinations',description:'In a group: list the groups, with names, exact IDs and, for the owner, each group\'s project, the person asking may post to through Nocheh: this group, and for the owner or a member who may post to their other groups, those groups. Use an exact ID from here as an action destination; a message to another group waits for a card.',
     inputSchema:shape({}),run:destinations},
   {name:'shell',description:'Propose a bounded shell command in this profile workspace. No network, credentials or other profiles are mounted. Owner approval, a standing permission or a rule the owner set for this chat is required; when one already allows it, this call returns its result.',
     inputSchema:shape({command:{type:'string',maxLength:16000},summary:SUMMARY},['command']),run:(args,context)=>controlled('shell',args,context)},
