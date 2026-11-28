@@ -30,7 +30,7 @@ import type {GuardRepository,GuardBinding} from './guards.js';
 import type {PreparedContextRepository} from './prepared-context.js';
 import {closedAs,ownerResolutions} from './controlled-action-schema.js';
 import type {RuntimeTurnRepository} from './turns.js';
-import {currentChats} from './chats.js';
+import {chatLabel,currentChats} from './chats.js';
 import type {SendClass} from '../send-classes.js';
 
 const protocol='telegram-action-v2';
@@ -276,7 +276,10 @@ export class TelegramActionRepository {
     if(!user||user===this.access.policy().owner_id||String(row.destination)===row.space_id||!this.allowedGroups(user,row.scope).includes(target))return null;
     return {user,space:row.space_id};
   }
-  /** The groups a live group turn's writer may post to (allowedGroups), with their known names, for exact destinations. */
+  /** The groups a live group turn's writer may post to (allowedGroups), with their names, for exact destinations. A group
+   *  is named as the owner's directory and its card name it (chatLabel): its title from captured messages, else the owner's
+   *  last refresh, else its public @name. For the owner each group also carries its project's name, which tells apart groups
+   *  named alike as their cards do; a member never sees project names (ADR-0316). */
   async destinations(principal:Reader) {
     if(principal.admin||!principal.scope||readOnlyReader(principal)!==null||principal.purpose&&principal.purpose!=='assistant')throw new HttpError(403,'group_turn_required');
     const turn=await this.turns.binding(principal);if(turn.owner||turn.job)throw new HttpError(403,'group_turn_required');
@@ -285,12 +288,16 @@ export class TelegramActionRepository {
     const original=await this.access.archive.verify(source);
     if(original.origin!=='live'||original.channel!=='telegram')throw new HttpError(403,'external_effect_requires_live_turn');
     const requester=await this.requester(source.id,original.scope),groups=requester?this.allowedGroups(requester,principal.scope):[];
-    // A group's name once the owner has refreshed it and Telegram answered, as before step 2b: the name that refresh
-    // answered, never one a later update shows (ADR-0252; the old refresh table is only the seeder's now).
-    const titles=new Map((await this.stores.control.query(`SELECT chat_id,refreshed_title FROM chat_details
-      WHERE chat_id=ANY($1::text[]) AND refreshed_state='available' AND refreshed_title IS NOT NULL`,[groups])).rows
-      .map(row=>[row.chat_id as string,row.refreshed_title as string]));
-    return {groups:groups.map(group=>({destination:group,name:titles.get(group)??null,current:group===principal.scope})),
+    const owner=requester===this.access.policy().owner_id;
+    const rows=new Map((await this.stores.control.query(`SELECT c.id,c.kind,c.app_type,
+        coalesce(c.title,CASE WHEN d.refreshed_state='available' THEN d.refreshed_title END) AS title,
+        coalesce(d.username,CASE WHEN d.refreshed_state='available' THEN d.refreshed_username END) AS username,p.name AS project
+      FROM chats c LEFT JOIN chat_details d ON d.chat_id=c.id
+      LEFT JOIN project_assignments a ON a.space_id=c.id AND a.mode='assigned'
+      LEFT JOIN projects p ON p.id=a.project_id AND p.state='active'
+      WHERE c.id=ANY($1::text[])`,[groups])).rows.map(row=>[row.id as string,row]));
+    const named=(group:string)=>{const row=rows.get(group);return row?chatLabel(row,row.username,null):null;};
+    return {groups:groups.map(group=>({destination:group,name:named(group),...owner?{project:rows.get(group)?.project??null}:{},current:group===principal.scope})),
       note:'Use \'current\', or a chat id from this list or from owner_read; a topic has its own chat id. Nocheh posts only in the owner\'s private chat and its topics, the owner\'s selected groups and their topics, and the private chats of the owner\'s members in those groups. A message to this same group is posted without approval; a member confirms their own message to another group from this list on a card, and a message to any other chat is shown to the owner to approve first.'};
   }
   private async propose(principal:Reader,turn:{scope:string;logical_profile:string;owner?:boolean;job?:string|null},binding:GuardBinding,
