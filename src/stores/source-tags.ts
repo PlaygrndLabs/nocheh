@@ -38,6 +38,14 @@ function shownForward(original:unknown,shown:unknown) {
  *  answer, a member's private chat, the owner's ask about a member). */
 export const ownerReader=(principal:Reader)=>principal.admin||principal.scope===null&&boundReader(principal)===null;
 
+/** Why a tag request failed, by code only (an HttpError's, a database's or the error's name), never its message, which
+ *  may name what it read. */
+function failureCode(error:unknown):string {
+  if(error instanceof HttpError)return error.code;
+  const code=(error as {code?:unknown})?.code;
+  return typeof code==='string'&&/^[A-Za-z0-9_]{1,40}$/.test(code)?code:error instanceof Error?error.name:'unknown';
+}
+
 /**
  * Source tags for the sources a reader asked about (ADR-0261), built by code in a few batched reads: who may read each
  * (SourceAccessRepository.readable, which is canRead), what each message is (classesFor), its sender as the reader's own
@@ -77,6 +85,7 @@ export class SourceTagRepository {
       return result;
     } catch(error) {
       if(bindingMoved(error))throw error;
+      console.warn(JSON.stringify({event:'source_tags_failed',code:failureCode(error)}));
       await countMemoryStep(this.stores.control,'source_tags',false);
       const failed=unavailableTag('now');
       for(const id of ids)result.set(id,readable&&readable.get(id)!==true?null:{source:'nocheh:event:'+id,tag:failed.tag,by:failed.by,at:null});
@@ -99,6 +108,7 @@ export class SourceTagRepository {
       open=references.filter(reference=>readable.get(reference.id)===true);
     } catch(error) {
       if(bindingMoved(error))throw error;
+      console.warn(JSON.stringify({event:'source_tags_failed',code:failureCode(error)}));
       await countMemoryStep(this.stores.control,'source_tags',false);
       return result;
     }

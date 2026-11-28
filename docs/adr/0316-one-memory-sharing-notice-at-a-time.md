@@ -1,4 +1,4 @@
-# ADR-0315: One memory sharing notice at a time, with no id and no local link
+# ADR-0316: One memory sharing notice at a time, with no id and no local link
 
 <status>
 Accepted on 2026-11-28, after a live test: four owner notices in two minutes each read "A memory access suggestion needs
