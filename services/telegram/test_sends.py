@@ -154,6 +154,22 @@ class HelperTests(unittest.TestCase):
                 self.assertEqual(path.stat().st_mode & 0o777, 0o600)
                 self.assertNotIn(b'synthetic', path.read_bytes())
 
+    def test_a_reply_refused_because_its_message_is_gone_names_that_message(self):
+        with tempfile.TemporaryDirectory() as folder:
+            sends = Sends(Path(folder), '123456')
+            gone = refusal(400, 'Bad Request: message to be replied not found')
+            reply = sends.answered('sendMessage', {'chat_id': -20, 'text': 'synthetic', 'reply_parameters': json.dumps({'message_id': 11})},
+                                   'telegram:123456:update:4', gone)
+            self.assertEqual((reply['kind'], reply['message_id'], reply['error_code']), ('reply', '11', 'message_not_found'))
+            plain = sends.answered('sendMessage', {'chat_id': -20, 'text': 'synthetic', 'reply_to_message_id': 12}, 'telegram:123456:update:5', gone)
+            self.assertEqual(plain['message_id'], '12')
+            other = sends.answered('sendMessage', {'chat_id': -20, 'text': 'synthetic', 'reply_parameters': {'message_id': 13, 'chat_id': -30}},
+                                   'telegram:123456:update:6', gone)
+            self.assertIsNone(other['message_id'], 'a reply into another chat names no message of this one')
+            refused = sends.answered('sendMessage', {'chat_id': -20, 'text': 'synthetic', 'reply_parameters': json.dumps({'message_id': 14})},
+                                     'telegram:123456:update:7', refusal(403, 'Forbidden: bot was blocked by the user'))
+            self.assertIsNone(refused['message_id'], 'another refusal still names no message')
+
     def test_typing_is_never_recorded_not_even_when_it_fails(self):
         with tempfile.TemporaryDirectory() as folder:
             sends = Sends(Path(folder), '123456')

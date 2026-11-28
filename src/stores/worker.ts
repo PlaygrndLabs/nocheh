@@ -20,6 +20,9 @@ export function startStorageCapture(s:StorageServices,config:Settings,interval=1
     // The owner's "Keep delivery logs" days expire them, checked hourly.
     sends:async()=>{
       await s.chatSends.drain(config.dataDir);
+      // A message Telegram said is gone when Nocheh replied, reacted or edited is hidden, and a reply running for it stops,
+      // as the owner's hide does (ADR-0319).
+      for(const events of await s.retirements.hideGone()){await s.telegram.cancelRetired(events);await s.continuations.cancelRetired(events);}
       if(Date.now()-sendsExpired<3600000)return;sendsExpired=Date.now();await s.chatSends.expire();
     },
     reconciliation:()=>s.capture.reconcile(),

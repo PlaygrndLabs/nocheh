@@ -136,6 +136,17 @@ def not_sent_code(held):
     return code if code in HELD else 'refused'
 
 
+def replied_to(parameters):
+    """The message a send replies to in its own chat, from its reply parameters, or None."""
+    value = parameters.get('reply_parameters')
+    if isinstance(value, str):
+        try: value = json.loads(value)
+        except ValueError: return None
+    if not isinstance(value, dict): return _text(parameters.get('reply_to_message_id'))
+    chat = value.get('chat_id')
+    return _text(value.get('message_id')) if chat is None or _chat(chat) == _chat(parameters.get('chat_id')) else None
+
+
 def detail_of(method, parameters):
     """A reaction's emoji, or "clear" when it is removed; nothing for any other send."""
     if method != 'setMessageReaction': return None
@@ -206,8 +217,11 @@ class Sends:
         return {'version': 2, 'key': f'send:{self.channel}:{self.account or ""}:{uuid.uuid4().hex}', 'channel': self.channel,
                 'account': self.account, 'at': datetime.now(timezone.utc).isoformat(timespec='milliseconds').replace('+00:00', 'Z'),
                 'kind': kind, 'method': method, 'chat': chat, 'thread': _text(parameters.get('message_thread_id')),
-                # An edit or a reaction names the message it changes; a delivered send gets its new id from Telegram.
-                'message_id': _text(parameters.get('message_id')) or _text(message), 'detail': detail_of(method, parameters),
+                # An edit or a reaction names the message it changes; a delivered send gets its new id from Telegram; a reply
+                # refused because the message it answers is gone names that message (ADR-0319).
+                'message_id': _text(parameters.get('message_id')) or _text(message)
+                or (replied_to(parameters) if state == 'failed' and code == 'message_not_found' else None),
+                'detail': detail_of(method, parameters),
                 'state': state, 'status': status if type(status) is int and 0 <= status < 1000 else 0,
                 'error_code': None if state == 'sent' else code,
                 'reference': dispatch if kind not in ('setup', 'reaction') and isinstance(dispatch, str) and len(dispatch) <= 300 else None,

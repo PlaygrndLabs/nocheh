@@ -1,7 +1,7 @@
 import {canonical,digest,type Envelope} from './archive.js';
 import {desktopChannelTypes,desktopTopicId,legacyChat,telegramTopicId} from './chats-telegram.js';
 import {eventSpace} from './spaces.js';
-import {legacySource,sourceDescriptor,type SourceDescriptor,type SourceIdentity,type SourceRelation} from './source-model.js';
+import {legacySource,sourceDescriptor,sourceObjectId,type SourceDescriptor,type SourceIdentity,type SourceRelation} from './source-model.js';
 
 const record=(v:unknown):Record<string,any>=>v&&typeof v==='object'&&!Array.isArray(v)?v as Record<string,any>:{};
 const external=(v:unknown):string|undefined=>typeof v==='number'&&Number.isSafeInteger(v)?String(v):
@@ -14,6 +14,8 @@ export interface ObservedReaction {
   counts:{type:Record<string,unknown>;total_count:number}[]|null;
 }
 const messageIdentity=(chat:string,id:string):SourceIdentity=>({platform:'telegram',namespace:canonical(['bot-api','chat',chat]),kind:'message',external_id:id});
+/** The archive's object for a live Bot API message, by its chat and the id Telegram gives it there. */
+export const telegramMessageObject=(chat:string,id:string):string=>sourceObjectId(messageIdentity(chat,id));
 const conversation=(id:string):SourceIdentity=>({platform:'telegram',namespace:'bot-api',kind:'conversation',external_id:id});
 function reactionList(value:unknown):Record<string,unknown>[]|null {
   if(!Array.isArray(value)||value.length>100)return null;

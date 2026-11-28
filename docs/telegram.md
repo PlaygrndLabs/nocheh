@@ -142,6 +142,11 @@ may still be answered after it disappears from Telegram. Sending
 a second voice note creates a separate request; it does not cancel the first.
 The Bot API's `deleted_business_messages` update applies to connected business
 accounts, not ordinary bot chats.
+Telegram does say a message is gone when Nocheh replies to it, reacts to it or
+edits it: that send fails with `message_not_found`. Nocheh then hides the
+message from the assistant, with its own direct replies to it, unless the owner
+already decided about it; Messages says why and offers Undo
+([ADR-0319](adr/0319-hide-a-message-telegram-says-is-gone.md)).
 
 In **Messages**, open the exact captured message and choose **Hide from
 assistant** to stop future agent use and learning. This works for text, voice,
