@@ -2890,6 +2890,17 @@ test('System pages are sub-tabs of tables: failed tasks open filtered, and a bac
     'Check services',
     'Restart Nocheh',
   ]);
+  // Backups and their settings link to each other.
+  await page.getByRole('main').getByRole('link', {name: 'Settings', exact: true}).click();
+  await page.getByRole('tab', {name: 'Records and backups', selected: true}).waitFor();
+  await page.getByRole('tab', {name: 'Off-site copies'}).click();
+  await page.getByRole('link', {name: 'See backups'}).click();
+  await actions.waitFor();
+  assert.equal(new URL(page.url()).hash, '#system?view=backups');
+  assert.match(
+    await actions.getByRole('row').filter({hasText: 'Send copy now'}).getByRole('link').getAttribute('href'),
+    /tab=offsite/,
+  );
   await page.getByRole('tab', {name: 'History'}).click();
   const history = page.getByRole('table', {name: 'History'});
   await history.getByRole('button', {name: 'Archive export'}).click();
