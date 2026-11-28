@@ -38,6 +38,20 @@ const covers=(text:string,found:readonly string[],batch:readonly string[])=>{
     return literalSpans(text,batch).every(span=>spans.some(cover=>cover.start<=span.start&&span.end<=cover.end));
   } catch {return false;}
 };
+/** Keys other than `id`, `*_id` and `*_ids` under which Nocheh's own answers name its own records (ADR-0314). */
+const ID_KEYS:ReadonlySet<string>=new Set(['parent','scope','project','group','task','event','source','source_event','repeated_to','repeated_from']);
+/** Fields whose keys and values someone else chose, such as a task's owner-named properties or an outside app's ids: never Nocheh's ids. */
+const NOT_IDS:ReadonlySet<string>=new Set(['properties','external']);
+const OWN_ID=/^[a-f0-9]{64}$/;
+/** Nocheh's own record ids in an answer of one of its routes: each whole 64-hex value under an id key (ADR-0314). A value
+ *  in free text, such as a task's title or notes, is not one, so the secret check still reads it. */
+export function ownIds(value:unknown,key='',found=new Set<string>(),depth=0):Set<string> {
+  if(depth>60||NOT_IDS.has(key))return found;
+  if(typeof value==='string'){if(OWN_ID.test(value)&&(key==='id'||/_ids?$/.test(key)||ID_KEYS.has(key)))found.add(value);}
+  else if(Array.isArray(value))for(const item of value)ownIds(item,key,found,depth+1);
+  else if(value&&typeof value==='object')for(const [name,item] of Object.entries(value))ownIds(item,name,found,depth+1);
+  return found;
+}
 export interface PrepareOptions {
   /** The value is a model request: its role, type, name and model fields and its tool ids are structure (ADR-0251). */
   request?:boolean;
@@ -75,6 +89,12 @@ export class PreparedContextRepository {
         [batch.map(text=>digest(canonical([scope,binding,text]))),scope,binding.generation,binding.epoch,batch.map(text=>Buffer.from(text))]);
     }
     await this.audience.assert(principal);
+  }
+
+  /** Nocheh's own record ids in an answer a turn reads pass the secret check, here and when the agent hands that answer to
+   *  the model: a 64-hex id looks like a key to the check, and a hidden id cannot be used again (ADR-0314). */
+  async allowIds(principal:Reader,value:unknown):Promise<void> {
+    const ids=ownIds(value);if(ids.size)await this.allow(principal,[...ids]);
   }
 
   /** A job run's preparation runs again when an epoch it carries across commits meanwhile (ADR-0208). */

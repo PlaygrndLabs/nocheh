@@ -1,4 +1,4 @@
-# ADR-0314: Memory-label notices wait until the failure lasts
+# ADR-0315: Memory-label notices wait until the failure lasts
 
 <status>
 Accepted on 2026-11-28, after a live test where the "Memory labels" notice was sent and marked

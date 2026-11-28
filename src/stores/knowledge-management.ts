@@ -167,6 +167,8 @@ export class KnowledgeManagementRepository {
    if(principal.admin)return result;
    // Owner access and provider guarding are separate. Never mark raw names,
    // claims, rule wording, or descriptions as preapproved provider content.
+   // Nocheh's own ids in it are not names or claims: they pass, so a later call can name them (ADR-0314).
+   await this.s.prepared.allowIds(principal,result);
    const value=await this.s.prepared.prepare(principal,result,this.s.detect);
    await this.s.turns.assertAudience(principal);return value as Record<string,unknown>;
   };

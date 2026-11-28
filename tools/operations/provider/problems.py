@@ -6,7 +6,7 @@ problems is on (off by default), sends the owner's private chat one message that
 System › Health and the count on System in the dashboard's menu show the same problems either way. A problem repeats at most once an hour, and only when it got
 worse; one that goes away and comes back is new again. A memory-label step that fails is told only once it lasts:
 it is held until a check finds it still failing ten minutes on, or failing three more times, and a step that works
-before then drops it without a message (ADR-0314). Failed and uncertain background
+before then drops it without a message (ADR-0315). Failed and uncertain background
 tasks are kept forever, so only their growth is news: the first check after an
 installation that can read them records the totals it finds without a message.
 
@@ -48,7 +48,7 @@ COUNTED_TODAY = ('model', 'reader', 'notes', 'memory_read', 'note_labels', 'forw
 NOTE_LINES = ('notes', 'memory_read', 'note_labels', 'forwards_read', 'source_tags', 'note_refs')
 # A note line falls back to a less exact source and usually works again on the next try, so a new or worse one is held:
 # told once it still fails HOLD_SECONDS after it was first held, or failed HOLD_FAILURES more times since it was last
-# told; dropped without a message when a step works after its last failure first (ADR-0314).
+# told; dropped without a message when a step works after its last failure first (ADR-0315).
 HOLD_SECONDS = 600
 HOLD_FAILURES = 3
 # Sends of the notices themselves, left out of the 'sends' count so a notice that fails cannot feed itself.
