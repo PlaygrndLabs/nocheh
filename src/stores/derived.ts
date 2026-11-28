@@ -72,11 +72,18 @@ export class DerivedRepository {
       original?null:JSON.stringify(input.source)]);
     const stored=(await db.query('SELECT * FROM derived_artifacts WHERE operation_id=$1',[input.operation_id])).rows[0];
     if(stored?.imported)throw new HttpError(409,'imported_result_not_execution_receipt');
-    if(!stored||stored.content_hash!==contentHash||stored.input_hash!==inputHash||stored.event_id!==(original?.id??null)||
-      canonical(stored.operation_reference)!==canonical(original?null:input.source)||
-      stored.artifact_id!==(input.file?.id??null)||stored.kind!==input.kind||stored.source_revision!==(original?.revision??'0')||
-      stored.producer!==input.producer||stored.producer_version!==input.producer_version||stored.configuration_hash!==configurationHash||
-      canonical(stored.provenance)!==canonical(provenance))throw new HttpError(409,'derivative_identity_conflict');
+    if(!stored)throw new HttpError(409,'derivative_identity_conflict');
+    const differs=Object.entries({content_hash:stored.content_hash!==contentHash,input_hash:stored.input_hash!==inputHash,
+      event_id:stored.event_id!==(original?.id??null),operation_reference:canonical(stored.operation_reference)!==canonical(original?null:input.source),
+      artifact_id:stored.artifact_id!==(input.file?.id??null),kind:stored.kind!==input.kind,source_revision:stored.source_revision!==(original?.revision??'0'),
+      producer:stored.producer!==input.producer,producer_version:stored.producer_version!==input.producer_version,
+      configuration_hash:stored.configuration_hash!==configurationHash,provenance:canonical(stored.provenance)!==canonical(provenance)})
+      .filter(([,different])=>different).map(([name])=>name);
+    if(differs.length) {
+      // Which fields differ, by name only, so a conflict can be traced without its content.
+      console.warn(JSON.stringify({event:'derivative_identity_conflict',kind:input.kind,fields:differs}));
+      throw new HttpError(409,'derivative_identity_conflict');
+    }
     return {store:'derived',kind:'artifact',id,input_hash:contentHash};
   }
 }
