@@ -68,9 +68,12 @@ def main(argv=None):
         while not stopping:
             time.sleep(.75)
             current = snapshot(args.watch)
-            if current != previous or child.poll() is not None:
+            exited = child.poll()
+            if current != previous or exited is not None:
+                # Say which one it was: a source change, or the child exiting on its own (with its exit code).
+                print('Development source changed; restarting process' if current != previous else
+                      f'Development process exited with code {exited}; restarting process', flush=True)
                 previous = current
-                print('Development source changed; restarting process', flush=True)
                 stop(child)
                 if not stopping:
                     child = subprocess.Popen(command, start_new_session=True)
