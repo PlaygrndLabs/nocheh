@@ -757,7 +757,10 @@ export class EntityRepository {
     const memory=await this.readableClaims(principal,entity.id),bindings=principal.admin?(await this.stores.control.query('SELECT * FROM memory_entity_bindings WHERE entity_id=$1 ORDER BY id',[entity.id])).rows:[];
     // The owner's private note, only for the owner (ADR-0274).
     const note=principal.admin&&entity.kind==='person'?(await this.ownerNotes(principal,[entity.id])).get(entity.id)??{note:'',revision:0}:null;
-    return {entity,bindings,...memory,...(note?{note}:{})};
+    // The owner sees whether everyone reads this name and whether this person is themselves (ADR-0274, ADR-0318).
+    const flags=principal.admin&&entity.kind==='person'?{...((await this.namedByOwner([entity])).has(entity.id)?{people_name:true as const}:{}),
+      ...(entity.id===await ownerEntityId(this.stores.control,this.access.policy().owner_id)?{owner:true as const}:{})}:{};
+    return {entity:{...entity,...flags},bindings,...memory,...(note?{note}:{})};
   }
   async history(principal:Reader,id:string,before?:number) {
     if(before!==undefined&&(!Number.isSafeInteger(before)||before<1||before>2147483647))throw new HttpError(400,'invalid_entity_revision');

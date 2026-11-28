@@ -20,6 +20,9 @@ import {
   LoadingRows,
   Notice,
   Pager,
+  Table,
+  Td,
+  Th,
   Segmented,
   Select,
   Technical,
@@ -106,6 +109,8 @@ export function People() {
   const waiting = suggestions.data?.suggestions.length ?? 0;
   const people = list.data?.entities ?? [];
   const renamed = people.filter(entity => entity.people_name);
+  // The owner first, then everyone by name.
+  const sorted = [...people].sort((a, b) => Number(!!b.owner) - Number(!!a.owner) || a.name.localeCompare(b.name));
 
   return (
     <>
@@ -154,37 +159,59 @@ export function People() {
               : 'People appear here when Nocheh learns about them from chats it may learn from.'}
           </Empty>
         ) : (
-          // A person here is only a name, so the names sit side by side instead of one long column.
-          <ul aria-label="People" className="grid gap-x-2 p-2 sm:grid-cols-2 xl:grid-cols-3">
-            {people.map(entity => (
-              <li key={entity.id}>
-                <button
-                  type="button"
+          <Table aria-label="People">
+            <thead>
+              <tr>
+                <Th scope="col">Person</Th>
+                <Th scope="col" className="max-sm:hidden">
+                  Name
+                </Th>
+                <Th scope="col" className="w-8">
+                  <span className="sr-only">Open</span>
+                </Th>
+              </tr>
+            </thead>
+            <tbody>
+              {sorted.map(entity => (
+                <tr
+                  key={entity.id}
                   onClick={() => setParams({person: entity.id})}
-                  className="flex w-full items-center gap-2.5 rounded-lg px-3 py-1.5 text-left transition-colors hover:bg-subtle/60 focus-visible:bg-subtle/60 focus-visible:outline-none"
+                  className="cursor-pointer transition-colors hover:bg-subtle/60"
                 >
-                  <span
-                    aria-hidden
-                    className="grid size-6 shrink-0 place-items-center rounded-full bg-accent-soft text-xs font-semibold text-accent-text"
-                  >
-                    {entity.name.trim().slice(0, 1).toUpperCase() || '?'}
-                  </span>
-                  <span className="min-w-0 flex-1 truncate text-sm font-medium">{entity.name}</span>
-                  {entity.owner && (
-                    <Badge tone="accent" title="This is you. Groups and members hear you by this name once you set it.">
-                      You
-                    </Badge>
-                  )}
-                  {entity.people_name && (
-                    <Badge title="You set this name. Everyone sees it.">
-                      <Eye aria-hidden className="size-3" /> Shown
-                    </Badge>
-                  )}
-                  <ChevronRight className="size-4 shrink-0 text-muted" aria-hidden />
-                </button>
-              </li>
-            ))}
-          </ul>
+                  <Td className="align-middle">
+                    <div className="flex min-w-0 items-center gap-2.5">
+                      <span
+                        aria-hidden
+                        className="grid size-7 shrink-0 place-items-center rounded-full bg-accent-soft text-xs font-semibold text-accent-text"
+                      >
+                        {entity.name.trim().slice(0, 1).toUpperCase() || '?'}
+                      </span>
+                      <button
+                        type="button"
+                        className="min-w-0 truncate text-left text-sm font-medium focus-visible:underline focus-visible:outline-none"
+                      >
+                        {entity.name}
+                      </button>
+                      {entity.owner && (
+                        <Badge tone="accent" title="This is you.">
+                          You
+                        </Badge>
+                      )}
+                    </div>
+                    <div className="mt-1 pl-9.5 text-[13px] text-muted sm:hidden">
+                      <NameSource entity={entity} />
+                    </div>
+                  </Td>
+                  <Td className="align-middle text-[13px] text-muted max-sm:hidden">
+                    <NameSource entity={entity} />
+                  </Td>
+                  <Td className="w-8 align-middle">
+                    <ChevronRight className="size-4 text-muted" aria-hidden />
+                  </Td>
+                </tr>
+              ))}
+            </tbody>
+          </Table>
         )}
         <Pager
           page={paging.page}
@@ -196,6 +223,18 @@ export function People() {
       <PersonDrawer id={person} onClose={() => setParams({person: null})} />
     </>
   );
+}
+
+/** Where a person's name comes from, and for the owner what others hear without a name they set (ADR-0318). */
+function NameSource({entity}: {entity: Entity}) {
+  if (entity.people_name)
+    return (
+      <Badge title="You set this name. Everyone sees it.">
+        <Eye aria-hidden className="size-3" /> Shown
+      </Badge>
+    );
+  if (entity.owner) return <>From Telegram. Others hear “the owner” until you save a name.</>;
+  return <>From Telegram</>;
 }
 
 function PersonDrawer({id, onClose}: {id: string | null; onClose: () => void}) {
@@ -454,7 +493,8 @@ function NameEditor({entity, mergedInto}: {entity: Entity; mergedInto: string | 
           variant="primary"
           size="sm"
           busy={command.busy}
-          disabled={!name.trim() || name.trim() === entity.name}
+          // A name Nocheh took from Telegram can be kept as it is: saving it makes it the name everyone reads.
+          disabled={!name.trim() || (name.trim() === entity.name && !!entity.people_name)}
         >
           Save name
         </Button>

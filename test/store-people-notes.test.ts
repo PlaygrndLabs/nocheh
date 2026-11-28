@@ -9,7 +9,7 @@ import type {Reader} from '../src/access.js';
 import {honchoEngine} from '../src/memory/honcho.js';
 import {connectStores,initializeStoreDatabases} from '../src/stores/connections.js';
 import {ensureAccount,ensureConnection} from '../src/stores/chats.js';
-import {accountPeopleNames,ownerEntityId} from '../src/stores/entities.js';
+import {accountPeopleNames,ownerEntityId,ownerPublicName} from '../src/stores/entities.js';
 import {fixtureServices} from './fixture-agent.js';
 
 // ADR-0274: the name the owner sets in People is the person's name everywhere; the owner's private note is never.
@@ -56,6 +56,12 @@ test('a People name reaches groups and memory; the owner\'s private note reaches
     assert.equal(everyone.find(entity=>entity.id===mine.id)?.owner,true);
     assert.equal(everyone.find(entity=>entity.id===person.id)?.owner,undefined);
     assert.equal(await ownerEntityId(stores.control,'123'),mine.id);assert.equal(await ownerEntityId(stores.control,null),null);
+    const self=(await s.entities.inspect(owner,mine.id) as any).entity;
+    assert.deepEqual([self.owner,self.people_name],[true,undefined],'the drawer knows it is the owner, with a name taken from Telegram');
+    // Saving the Telegram name as it is makes it the owner's chosen name, which others hear (ADR-0318).
+    await s.entities.rename(owner,mine.id,{name:mine.name,expected_revision:mine.revision,operation_id:key+':keep'});
+    assert.equal((await s.entities.inspect(owner,mine.id) as any).entity.people_name,true);
+    assert.equal(await ownerPublicName(stores.control,'123'),mine.name);
     const unnamed=await s.entities.list(owner,{kind:'person',query:'bob'});
     assert.equal(unnamed.entities.find(entity=>entity.id===person.id)?.people_name,undefined,'a name Nocheh gave by itself is not the owner\'s');
 
