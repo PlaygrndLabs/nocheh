@@ -39,7 +39,7 @@ const covers=(text:string,found:readonly string[],batch:readonly string[])=>{
   } catch {return false;}
 };
 /** Keys other than `id`, `*_id` and `*_ids` under which Nocheh's own answers name its own records (ADR-0314). */
-const ID_KEYS:ReadonlySet<string>=new Set(['parent','scope','project','group','task','event','source','source_event','repeated_to','repeated_from']);
+const ID_KEYS:ReadonlySet<string>=new Set(['parent','scope','project','group','task','event','source','source_event','repeated_to','repeated_from','destination']);
 /** Fields whose keys and values someone else chose, such as a task's owner-named properties or an outside app's ids: never Nocheh's ids. */
 const NOT_IDS:ReadonlySet<string>=new Set(['properties','external']);
 const OWN_ID=/^[a-f0-9]{64}$/;
