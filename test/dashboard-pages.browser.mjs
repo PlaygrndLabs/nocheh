@@ -3861,7 +3861,10 @@ async function openMember(id, options = {}) {
     page.on('response', async response => {
       if (!new URL(response.url()).pathname.startsWith('/api/member/')) return;
       // A test may close its page while an answer is still being read; that late answer is dropped, not an unhandled error.
-      const headers = await response.request().allHeaders().catch(() => null);
+      const headers = await response
+        .request()
+        .allHeaders()
+        .catch(() => null);
       if (headers === null) return;
       answers.push({
         path: new URL(response.url()).pathname,
