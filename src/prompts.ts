@@ -17,17 +17,22 @@ export const promptKeys=['reply.common','reply.owner','reply.group','reply.priva
   'background.job','background.resume','background.restart','background.limit','background.card','background.texts','background.box','background.repo','background.machine',
   'background.member_spend','background.member_paused','background.member_texts','telegram.chat_adds','telegram.member_daily_limit','telegram.group_tools_texts',
   'telegram.member_private_daily_limit','members.local_laws','reply.member_read','telegram.member_read','telegram.member_read_texts',
-  'members.reminder','members.reminder_texts','reply.scheduled','reply.schedules','schedules.notice_texts','reply.member_schedules'] as const;
+  'members.reminder','members.reminder_texts','reply.scheduled','reply.schedules','schedules.notice_texts','reply.member_schedules','reply.owner_name'] as const;
 export type PromptKey=typeof promptKeys[number];
 export const PROMPT_LIMIT=20000;
 /** Values Nocheh fills in; the text must keep them. */
 export const promptPlaceholders:Partial<Record<PromptKey,string[]>>={'learning.interpret':['{trigger_id}','{citable_ids}'],
-  'telegram.approval_card':['{text}'],'telegram.approval_action':['{arguments}'],'telegram.approval_task':['{change}','{chats}','{fields}'],'telegram.action_continued':['{actions}'],'telegram.private_answer':['{group}','{groups}'],'telegram.member_read':['{member}'],'tasks.reminder':['{title}'],'members.reminder':['{title}'],'system.problems':['{problems}'],
+  'reply.owner_name':['{name}'],'telegram.approval_card':['{text}'],'telegram.approval_action':['{arguments}'],'telegram.approval_task':['{change}','{chats}','{fields}'],'telegram.action_continued':['{actions}'],'telegram.private_answer':['{group}','{groups}'],'telegram.member_read':['{member}'],'tasks.reminder':['{title}'],'members.reminder':['{title}'],'system.problems':['{problems}'],
   'background.job':['{instruction}'],'background.card':['{instruction}'],'background.machine':['{steps}']};
 
 /** Sent in a group, without a model and at most once a UTC day per person and group, to someone who addressed Nocheh but
- * may not use it there: a stranger, or a member who is paused or switched off there (step 3). */
-export const notAllowedReply='Sorry, in this group I only work with the owner and the owner\'s members.';
+ * may not use it there: a stranger, or a member who is paused or switched off there (step 3). {owner} is the owner's
+ * People name, or "the owner" without one (ADR-0318). */
+export const notAllowedReply='Sorry, in this group I only work with {owner} and {owner}\'s members.';
+/** How Nocheh names the owner to anyone else (ADR-0318): the owner's People name, or "the owner" without one. */
+export const ownerCalled=(name:string|null|undefined)=>name?.trim()||'the owner';
+/** A fixed reply with {owner} filled in as ownerCalled names the owner. */
+export const withOwnerName=(text:string,name:string|null|undefined)=>text.replaceAll('{owner}',ownerCalled(name));
 /** Sent, without a model and at most once a day, to anyone who writes to Nocheh privately and may not use it there: a
  * stranger, or a member who is paused or has private chat off (step 4). */
 export const notAllowedPrivateReply='Sorry, this is a private assistant. It only works for its owner and the people they add.';
@@ -527,12 +532,18 @@ export function withPrompts(call:RuntimeCall,control:Pick<pg.Pool,'query'>):Runt
     return call(operation,{...input,prompts:await replacements(control)},timeout);
   };
 }
-/** The agent, with the owner's replacement texts sent with every turn it starts and every notes review it runs. */
-export function agentWithPrompts(agent:Agent,control:Pick<pg.Pool,'query'>):Agent {
+/** The agent, with the owner's replacement texts sent with every turn it starts and every notes review it runs. A turn
+ * also carries the owner's People name (`owner_name`, ADR-0318) when there is one; the agent uses it only where it speaks
+ * to someone other than the owner, and the source labels keep saying "the owner". */
+export function agentWithPrompts(agent:Agent,control:Pick<pg.Pool,'query'>,ownerName?:()=>Promise<string|null>):Agent {
   const withTexts=async(input:Readonly<Record<string,unknown>>)=>({...input,prompts:await replacements(control)}),review=agent.reviewNotes;
+  const named=async(input:Readonly<Record<string,unknown>>)=>{
+    const name=ownerName?await ownerName().catch(()=>null):null;
+    return name?{...input,owner_name:name}:input;
+  };
   // Every other operation, and the lack of one, comes from the agent itself.
   return Object.assign(Object.create(agent) as Agent,{
-    startTurn:async(ref:TurnRef,input:TurnInput)=>agent.startTurn(ref,await withTexts(input)),
+    startTurn:async(ref:TurnRef,input:TurnInput)=>agent.startTurn(ref,await withTexts(await named(input))),
     ...(review?{reviewNotes:async(input:Readonly<Record<string,unknown>>)=>review.call(agent,await withTexts(input))}:{}),
   });
 }
