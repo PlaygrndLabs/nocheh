@@ -26,7 +26,7 @@ import {OperationRepository,type OperationReference} from './operations.js';
 import {RuntimeProfileRepository} from './runtime-profiles.js';
 import type {SourceAccessRepository} from './access.js';
 import type {DerivedRepository,DerivativeReference} from './derived.js';
-import type {GuardRepository,GuardBinding} from './guards.js';
+import {carriesForward,type GuardRepository,type GuardBinding} from './guards.js';
 import type {PreparedContextRepository} from './prepared-context.js';
 import {closedAs,ownerResolutions} from './controlled-action-schema.js';
 import type {RuntimeTurnRepository} from './turns.js';
@@ -76,7 +76,7 @@ export class TelegramActionRepository {
     if(!row)throw new HttpError(404,'action_not_found');return row;
   }
   private effect(row:any):Effect {return {id:row.id,kind:'telegram.send',scope:row.scope,profile:row.profile,fingerprint:row.fingerprint};}
-  private async memoryAuthority(row:any,workflow:unknown) {
+  private async memoryAuthority(row:any,workflow:unknown,live:GuardBinding=row.binding) {
     if(typeof workflow!=='string'||!workflow.startsWith('memory-access-followup:'))return;
     const id=workflow.slice('memory-access-followup:'.length);
     const grant=(await this.stores.control.query(`SELECT g.* FROM memory_fact_grants g JOIN memory_access_requests r ON r.id=g.request_id
@@ -88,7 +88,7 @@ export class TelegramActionRepository {
     if(!grant)throw new HttpError(403,'action_delivery_denied');
     let current=false;
     try {
-      const guarded=await this.guards.read('derived_artifacts:'+grant.representation_reference.id,row.binding),raw=String((guarded.value as any).text??'');
+      const guarded=await this.guards.read('derived_artifacts:'+grant.representation_reference.id,live),raw=String((guarded.value as any).text??'');
       const fact=(await this.stores.derived.query(`SELECT e.active_revision,v.retired,v.evidence FROM entity_claims e
         JOIN entity_claim_versions v ON v.claim_id=e.id AND v.revision=e.active_revision WHERE e.id=$1`,[grant.fact_id])).rows[0];
       current=!!fact&&!fact.retired&&fact.active_revision===grant.fact_revision&&guarded.revision===grant.guard_revision&&
@@ -105,8 +105,11 @@ export class TelegramActionRepository {
     if(!(await this.stores.control.query(`SELECT 1 FROM memory_fact_grants WHERE id=$1 AND state='active' AND revision=$2
       AND (expires_at IS NULL OR expires_at>now())`,[id,grant.revision])).rowCount)throw new HttpError(403,'action_delivery_denied');
   }
+  /** The approved text, checked against its proposal. While `current`, the send's binding must still carry to the current one:
+   *  later epochs that are only reactions or automatic learning do not stop it, as they do not stop a tool action (ADR-0200,
+   *  ADR-0320); any other change does. Nothing is rebound: the request keeps its binding, fingerprint and guarded revision. */
   private async text(row:any,current=true):Promise<string> {
-    if(current)await this.guards.assertCurrent(row.binding);
+    const live=current?await this.guards.assertCarried(row.binding):null;
     const source=(await this.stores.derived.query('SELECT content_hash,provenance FROM derived_artifacts WHERE id=$1',[row.proposal_reference.id])).rows[0];
     if(source?.content_hash!==row.proposal_reference.input_hash)throw new HttpError(409,'action_proposal_changed');
     let value:any;
@@ -118,17 +121,18 @@ export class TelegramActionRepository {
     }
     if(typeof value?.text!=='string'||digest(value.text)!==row.text_hash||digest(canonical({destination:row.destination,text:value.text}))!==row.fingerprint)
       throw new HttpError(409,'action_proposal_changed');
-    if(current) {
-      const active=await this.guards.read('derived_artifacts:'+row.proposal_reference.id,row.binding);
+    if(live) {
+      const active=await this.guards.read('derived_artifacts:'+row.proposal_reference.id,live);
       if(active.revision!==row.guard_revision||digest(String((active.value as any).text))!==row.text_hash)throw new HttpError(409,'action_proposal_changed');
-      await this.memoryAuthority(row,source.provenance?.trusted_workflow);
-      await this.guards.assertCurrent(row.binding);
+      await this.memoryAuthority(row,source.provenance?.trusted_workflow,live);
+      await this.guards.assertCarried(row.binding);
     }
     return value.text;
   }
   private async fence(db:pg.PoolClient,binding:GuardBinding) {
     const state=(await db.query('SELECT i.generation,g.epoch,g.mode FROM installation i CROSS JOIN guard_state g WHERE i.singleton AND g.singleton FOR SHARE OF i,g')).rows[0];
-    if(!state||canonical({generation:state.generation,epoch:Number(state.epoch),mode:state.mode})!==canonical(binding))throw new HttpError(409,'action_context_changed');
+    // A send stays bound to its own epoch; only later quiet epochs carry it (ADR-0200, ADR-0320).
+    if(!state||!await carriesForward(db,binding,{generation:state.generation,epoch:Number(state.epoch),mode:state.mode}))throw new HttpError(409,'action_context_changed');
     if((await db.query(`SELECT 1 FROM guard_publications WHERE ${blockingPublications} LIMIT 1`)).rowCount)throw new HttpError(409,'guard_transition_pending');
   }
   async request(principal:Reader,value:unknown) {
@@ -480,7 +484,7 @@ export class TelegramActionRepository {
     await this.text(row);
     if((await evaluate(this.stores.control,this.effect(row),row.authority??'exact_owner_approval')).outcome!=='allow')
       throw new HttpError(403,'action_delivery_denied');
-    await this.guards.assertCurrent(row.binding);return {valid:true};
+    await this.guards.assertCarried(row.binding);return {valid:true};
   }
   async decide(principal:Reader,value:unknown,source?:SourceReference) {
     admin(principal);const body=object(value);
