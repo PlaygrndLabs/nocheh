@@ -68,7 +68,7 @@ test('storage binds an answer pass to its record on every request and refuses ev
     if(!open)throw new HttpError(409,'private_answer_closed');return {...principal,reads};};
   const s={stores:{control:{query:async(sql:string,values:unknown[])=>{calls.push(['imports',values[0]]);return {rows:[]};}},archive:{query:async()=>({rows:[]})}},
     access:{bindReads:async(principal:Reader)=>bound(principal),bindMachine:async(principal:Reader)=>principal,reads:(principal:Reader)=>principal.reads,policy:()=>groupsPolicy()},
-    turns:{assertKey:async()=>{},assertAudience:async()=>{}},guards:{state:async()=>({mode:'on'})},configuration:{assert:async()=>{}},prepared:{allow:async()=>{}},
+    turns:{assertKey:async()=>{},assertAudience:async()=>{}},guards:{state:async()=>({mode:'on'})},configuration:{assert:async()=>{}},prepared:{allow:async()=>{},allowIds:async()=>{}},
     sources:{search:async(principal:Reader,query:string)=>{calls.push(['search',principal.reads,query]);return [];}},
     telegramActions:{request:async()=>{calls.push(['request']);return {};}},actionCommands:{offer:async()=>({})}};
   const server=storageServer(s as unknown as Parameters<typeof storageServer>[0],{token:secret,dataDir:root,guardMode:'on'} as Parameters<typeof storageServer>[1],async()=>({}));
