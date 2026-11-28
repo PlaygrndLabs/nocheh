@@ -83,7 +83,7 @@ function OutLink({href, children}: {href: string; children: React.ReactNode}) {
   );
 }
 
-/** Encrypted off-site copies of finished backups in the owner's own storage (ADR-0229, ADR-0236). */
+/** Off-site copies of finished backups, encrypted when there is a passphrase, in the owner's own storage (ADR-0229, ADR-0236). */
 function OffsiteSettings() {
   const s = useSettings();
   const feedback = useFeedback();
@@ -389,7 +389,7 @@ function OffsiteSettings() {
       {setupDialog}
       <CardHeader
         title="Off-site copies"
-        description="After each automatic backup, an encrypted copy goes to your own storage. It is locked with your passphrase on this machine, so the storage only ever holds scrambled data."
+        description="After each automatic backup, a copy goes to your own storage. With a passphrase, it is encrypted on this machine first, so the storage only holds scrambled data."
         className="pb-3"
       />
       <div className="border-t border-line">
@@ -462,9 +462,9 @@ function OffsiteSettings() {
                             <OutLink href={cloudflareTokensPage}>Cloudflare’s API tokens</OutLink>.{' '}
                           </>
                         )}
-                        {s.saved('NOCHEH_OFFSITE') === 's3' && configured('NOCHEH_OFFSITE_PASSPHRASE')
+                        {s.saved('NOCHEH_OFFSITE') === 's3'
                           ? 'New copies go there from now on.'
-                          : 'Now type your passphrase below and save.'}
+                          : 'Now choose a passphrase below if you want one, and save.'}
                       </Notice>
                     )}
               </div>
@@ -545,9 +545,16 @@ function OffsiteSettings() {
             {text(
               'NOCHEH_OFFSITE_PASSPHRASE',
               'Passphrase',
-              'At least 16 characters, without quotes or backslashes. Write it down somewhere safe away from this machine: without it, no copy can be opened, not even by us. Changing it applies to new copies only.',
-              'A long phrase you will not forget',
+              'Optional, any length, without quotes or backslashes. With one, copies are encrypted, and a longer one is harder to guess. Write it down somewhere safe away from this machine: without it, no encrypted copy can be opened, not even by us. Changing it applies to new copies only.',
+              'Optional: a phrase you will not forget',
               true,
+            )}
+            {!configured('NOCHEH_OFFSITE_PASSPHRASE') && !s.value('NOCHEH_OFFSITE_PASSPHRASE') && (
+              <div className="border-t border-line px-5 py-4">
+                <Notice tone="warn" title="Copies are not encrypted.">
+                  Without a passphrase, anyone who gets into this storage account can read your messages and files.
+                </Notice>
+              </div>
             )}
             <SettingRow
               htmlFor="NOCHEH_OFFSITE_KEEP"

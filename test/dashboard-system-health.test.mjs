@@ -317,7 +317,7 @@ test('backups and off-site copies that did not happen need a look and open Syste
   );
   assert.equal(
     found[3].detail,
-    'Not enough free disk space to make the encrypted copy. Free some space, then try again.',
+    'Not enough free disk space to make the copy. Free some space, then try again.',
   );
 });
 

@@ -536,10 +536,12 @@ space is under twice the newest automatic backup (at least 1 GiB). Copies stay
 on the same disk. See [ADR-0187](adr/0187-daily-automatic-backups.md).
 
 To survive losing the machine, turn on Off-site copies in the same settings.
-Each new automatic backup is then encrypted on this machine with your
-passphrase and sent to storage you choose; the storage only ever holds
-scrambled data. Keep the passphrase somewhere other than this machine:
-without it no copy can be opened.
+Each new automatic backup is then sent to storage you choose. The passphrase
+is optional and can be any length. With one, each copy is encrypted on this
+machine first, so the storage only holds scrambled data; keep the passphrase
+somewhere other than this machine, because without it no encrypted copy can be
+opened. Without one, copies are not encrypted and anyone who can read the
+storage can read them; the page warns about this.
 
 Pick the storage under Storage:
 
@@ -560,7 +562,7 @@ Pick the storage under Storage:
   and bucket from Backblaze and tests the key.
 - **Other S3**: fill in the storage address, bucket, region and keys yourself.
 
-Then type the passphrase and Save. See
+Then type a passphrase if you want one, and Save. See
 [ADR-0236](adr/0236-off-site-storage-from-one-pasted-credential.md).
 
 System › Backups shows the last copy, sends
@@ -568,7 +570,8 @@ one now, and tests that the newest copy opens and checks out. A copy is
 written to this disk before upload, so it is skipped while free space is under
 the backup's size plus 1 GiB. On a new machine, install the Python
 `cryptography` package (for example `pip install cryptography`), then get a
-backup folder back and restore it; the passphrase is asked for:
+backup folder back and restore it; the passphrase is asked for when the copy
+is encrypted:
 
 ```sh
 export NOCHEH_OFFSITE_ENDPOINT=https://… NOCHEH_OFFSITE_BUCKET=… NOCHEH_OFFSITE_REGION=… \

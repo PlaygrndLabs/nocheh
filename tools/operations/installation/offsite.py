@@ -1,8 +1,9 @@
-"""Encrypted off-site copies of finished backups (ADR-0229, ADR-0236).
+"""Off-site copies of finished backups (ADR-0229, ADR-0236).
 
-A copy is the backup folder as one tar stream, encrypted on this machine with a key derived from the
-owner's passphrase, then uploaded to S3-compatible storage such as Cloudflare R2. The storage only
-ever holds ciphertext; without the passphrase a copy cannot be read, including by us."""
+A copy is the backup folder as one tar stream, uploaded to S3-compatible storage such as Cloudflare R2.
+With a passphrase the stream is encrypted on this machine with a key derived from it, so the storage only
+holds ciphertext and nobody can read a copy without the passphrase. The passphrase is optional: without
+one the copy is the plain tar stream, readable by anyone who can read the storage."""
 import base64
 import hashlib
 import hmac
@@ -31,11 +32,12 @@ PREFIX = 'nocheh-backups/'
 LOCKED = 'offsite_storage_ObjectLockedByBucketPolicy'
 SUFFIX = '.nocheh-backup'
 MAGIC = b'NOCHEH-OFFSITE-1\n'
+# The header line of a copy made without a passphrase; the plain tar stream follows it.
+PLAIN = json.dumps({'cipher': 'none'}, separators=(',', ':')).encode() + b'\n'
 CHUNK = 4 * 1024 * 1024
 PART = 16 * 1024 * 1024
 # scrypt costs about 32 MiB of memory and well under a second; the salt is new for every copy.
 KDF = {'name': 'scrypt', 'n': 2 ** 15, 'r': 8, 'p': 1}
-MINIMUM_PASSPHRASE = 16
 EMPTY_SHA256 = hashlib.sha256(b'').hexdigest()
 
 
@@ -81,12 +83,11 @@ def validate(values):
     region = str(values.get('NOCHEH_OFFSITE_REGION', ''))
     if region and not re.fullmatch(r'[a-z0-9-]{1,32}', region): raise ValueError('NOCHEH_OFFSITE_REGION must be a region such as auto or eu-central-1')
     passphrase = str(values.get('NOCHEH_OFFSITE_PASSPHRASE', ''))
-    if passphrase and len(passphrase) < MINIMUM_PASSPHRASE: raise ValueError(f'NOCHEH_OFFSITE_PASSPHRASE must be at least {MINIMUM_PASSPHRASE} characters')
     # Settings files read quotes and backslashes differently; refuse them rather than save a passphrase that reads back changed.
-    if any(c in passphrase for c in '\'"\\'): raise ValueError('NOCHEH_OFFSITE_PASSPHRASE cannot contain quotes or backslashes')
+    if any(c in passphrase for c in '\'"\\'): raise ValueError('The passphrase cannot contain quotes or backslashes')
     if mode == 's3':
         missing = [key for key in ('NOCHEH_OFFSITE_ENDPOINT', 'NOCHEH_OFFSITE_BUCKET', 'NOCHEH_OFFSITE_ACCESS_KEY_ID',
-                                   'NOCHEH_OFFSITE_SECRET_ACCESS_KEY', 'NOCHEH_OFFSITE_PASSPHRASE') if not values.get(key)]
+                                   'NOCHEH_OFFSITE_SECRET_ACCESS_KEY') if not values.get(key)]
         if missing: raise ValueError('Off-site copies need ' + ', '.join(missing))
 
 
@@ -115,7 +116,7 @@ class EncryptingWriter(io.RawIOBase):
     def __init__(self, out, passphrase):
         from cryptography.hazmat.primitives.ciphers.aead import AESGCM
         self.closed_stream = True
-        if len(passphrase) < MINIMUM_PASSPHRASE: raise OffsiteError('offsite_passphrase_too_short')
+        if not passphrase: raise OffsiteError('offsite_passphrase_missing')
         self.out, self.buffer, self.index = out, bytearray(), 0
         header = {'kdf': {**KDF, 'salt': base64.b64encode(secrets.token_bytes(16)).decode()}, 'cipher': 'aes-256-gcm', 'chunk': CHUNK,
                   'nonce_prefix': base64.b64encode(secrets.token_bytes(8)).decode()}
@@ -147,10 +148,9 @@ class EncryptingWriter(io.RawIOBase):
 class DecryptingReader(io.RawIOBase):
     """A read-only stream over an encrypted copy. Any change, reordering or cut-off raises."""
 
-    def __init__(self, source, passphrase):
+    def __init__(self, source, passphrase, header_line):
         from cryptography.hazmat.primitives.ciphers.aead import AESGCM
-        if source.read(len(MAGIC)) != MAGIC: raise OffsiteError('offsite_not_a_copy')
-        self.header_line = source.readline(4096)
+        self.header_line = header_line
         try:
             header = json.loads(self.header_line)
             if header.get('cipher') != 'aes-256-gcm' or header.get('chunk') != CHUNK: raise ValueError
@@ -186,30 +186,41 @@ class DecryptingReader(io.RawIOBase):
         return count
 
 
+def _write_tar(snapshot, stream):
+    with tarfile.open(fileobj=stream, mode='w|', format=tarfile.PAX_FORMAT) as tar:
+        for path in sorted(snapshot.rglob('*')):
+            if path.is_symlink() or not path.is_file(): continue
+            tar.add(path, arcname='backup/' + path.relative_to(snapshot).as_posix(), recursive=False)
+
+
 def encrypt_backup(snapshot, out_path, passphrase):
-    """Writes the backup folder as one encrypted tar stream; returns the copy's size in bytes."""
+    """Writes the backup folder as one tar stream, encrypted when there is a passphrase; returns the copy's size."""
     snapshot = Path(snapshot)
     with open(out_path, 'xb') as out:
-        writer = EncryptingWriter(out, passphrase)
-        with io.BufferedWriter(writer, buffer_size=CHUNK) as buffered:
-            with tarfile.open(fileobj=buffered, mode='w|', format=tarfile.PAX_FORMAT) as tar:
-                for path in sorted(snapshot.rglob('*')):
-                    if path.is_symlink() or not path.is_file(): continue
-                    tar.add(path, arcname='backup/' + path.relative_to(snapshot).as_posix(), recursive=False)
+        if passphrase:
+            with io.BufferedWriter(EncryptingWriter(out, passphrase), buffer_size=CHUNK) as buffered: _write_tar(snapshot, buffered)
+        else:
+            out.write(MAGIC + PLAIN); _write_tar(snapshot, out)
         out.flush(); os.fsync(out.fileno())
     Path(out_path).chmod(0o600)
     return Path(out_path).stat().st_size
 
 
 def decrypt_backup(copy_path, output, passphrase):
-    """Restores a backup folder from an encrypted copy and checks every checksum in its manifest."""
+    """Restores a backup folder from a copy and checks every checksum in its manifest. The passphrase may be a
+    function that returns it; it is asked for only when the copy is encrypted."""
     output = Path(output)
     if output.exists(): raise OffsiteError('offsite_output_exists')
     staging = Path(tempfile.mkdtemp(prefix='.offsite-', dir=output.parent))
     try:
         with open(copy_path, 'rb') as source:
-            reader = DecryptingReader(source, passphrase)
-            with io.BufferedReader(reader, buffer_size=CHUNK) as buffered, tarfile.open(fileobj=buffered, mode='r|') as tar:
+            if source.read(len(MAGIC)) != MAGIC: raise OffsiteError('offsite_not_a_copy')
+            header_line = source.readline(4096)
+            if header_line == PLAIN: buffered = source
+            else:
+                key = passphrase() if callable(passphrase) else passphrase
+                buffered = io.BufferedReader(DecryptingReader(source, key, header_line), buffer_size=CHUNK)
+            with buffered, tarfile.open(fileobj=buffered, mode='r|') as tar:
                 for member in tar:
                     parts = Path(member.name).parts
                     if not member.isfile() or len(parts) < 2 or parts[0] != 'backup' or '..' in parts or member.name.startswith('/'):
@@ -446,9 +457,11 @@ def send(state, values, opener=None):
         record['sent'][backup] = {'key': key, 'at': _now().isoformat(), 'bytes': size}
         record['sent'] = dict(sorted(record['sent'].items(), key=lambda item: item[1]['at'])[-100:])
         extra = {**({'locked': locked} if locked else {}), **({'prune_error': prune_error} if prune_error else {})}
-        record['last'] = {'state': 'sent', 'at': _now().isoformat(), 'backup': backup, 'key': key, 'bytes': size, 'removed': removed, **extra}
+        encrypted = bool(config['passphrase'])
+        record['last'] = {'state': 'sent', 'at': _now().isoformat(), 'backup': backup, 'key': key, 'bytes': size, 'removed': removed,
+                          'encrypted': encrypted, **extra}
         write_record(state, record)
-        return {'status': 'offsite_sent', 'backup': backup, 'key': key, 'bytes': size, 'removed': removed, **extra}
+        return {'status': 'offsite_sent', 'backup': backup, 'key': key, 'bytes': size, 'removed': removed, 'encrypted': encrypted, **extra}
     except Exception as error:
         _failed(state, backup, error); raise
     finally:
@@ -499,7 +512,8 @@ def status(state, values):
 def main(state, rest):
     """`nocheh offsite list|fetch|decrypt`: get a backup back from an off-site copy, for example on a new
     machine. Storage settings come from this installation, or from NOCHEH_OFFSITE_* variables when there is
-    none; the passphrase is asked for when NOCHEH_OFFSITE_PASSPHRASE is not set. Then run `nocheh restore`."""
+    none; for an encrypted copy the passphrase is asked for when NOCHEH_OFFSITE_PASSPHRASE is not set. Then run
+    `nocheh restore`."""
     import argparse, getpass, sys
     parser = argparse.ArgumentParser(prog='nocheh offsite', description=main.__doc__)
     sub = parser.add_subparsers(dest='action', required=True)
@@ -526,7 +540,7 @@ def main(state, rest):
     passphrase = lambda: values.get('NOCHEH_OFFSITE_PASSPHRASE') or getpass.getpass('Off-site passphrase: ')
     try:
         if args.action == 'decrypt':
-            result = decrypt_backup(args.copy, args.output.resolve(), passphrase())
+            result = decrypt_backup(args.copy, args.output.resolve(), passphrase)
             print(json.dumps({'status': 'decrypted', 'output': str(args.output.resolve()), 'created_at': result.get('created_at')})); return 0
         config = settings(values)
         for key in ('endpoint', 'bucket', 'access_key', 'secret_key'):
@@ -539,7 +553,7 @@ def main(state, rest):
         if not key: raise OffsiteError('offsite_no_copy')
         with tempfile.TemporaryDirectory(dir=output.parent) as work:
             copy = Path(work) / 'copy'; storage.get(key, copy)
-            result = decrypt_backup(copy, output, passphrase())
+            result = decrypt_backup(copy, output, passphrase)
         print(json.dumps({'status': 'fetched', 'key': key, 'output': str(output), 'created_at': result.get('created_at')})); return 0
     except OffsiteError as error:
         print(json.dumps({'error': str(error)}), file=sys.stderr); return 1

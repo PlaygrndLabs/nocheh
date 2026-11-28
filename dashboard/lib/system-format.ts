@@ -326,9 +326,12 @@ export function jobOutcome(job: {kind: string; state: string; error?: string | n
     case 'restarted':
       return 'Services restarted and answering.';
     case 'offsite_sent':
-      return 'Encrypted copy stored off-site.' + (result.prune_error ? ' Old copies couldn’t be removed.' : '');
+      return (
+        (result.encrypted === false ? 'Copy stored off-site, not encrypted.' : 'Encrypted copy stored off-site.') +
+        (result.prune_error ? ' Old copies couldn’t be removed.' : '')
+      );
     case 'offsite_checked':
-      return 'The newest off-site copy opened with your passphrase and every file checked out.';
+      return 'The newest off-site copy opened and every file checked out.';
     case 'applied':
       return 'New settings are in use.';
     case 'apply_failed':
@@ -350,8 +353,8 @@ const offsiteErrors: Record<string, string> = {
   offsite_copy_truncated: 'The off-site copy is incomplete.',
   offsite_copy_damaged: 'The off-site copy is damaged.',
   offsite_backup_invalid: 'The copy opened, but a file inside didn’t match its checksum.',
-  offsite_passphrase_too_short: 'The passphrase is too short.',
-  offsite_low_disk: 'Not enough free disk space to make the encrypted copy. Free some space, then try again.',
+  offsite_passphrase_missing: 'Off-site copies need a passphrase.',
+  offsite_low_disk: 'Not enough free disk space to make the copy. Free some space, then try again.',
   offsite_copy_too_large: 'The backup is too large for one off-site copy.',
   offsite_needs_cryptography: 'This computer needs the Python cryptography package to open off-site copies.',
   offsite_storage_check_failed: 'The storage accepted a test file but gave back something else. Try again.',
