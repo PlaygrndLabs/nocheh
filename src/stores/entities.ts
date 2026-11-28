@@ -122,6 +122,13 @@ export async function accountPeopleNames(control:Pick<pg.Pool,'query'>,accountId
   for(const identity of identities){const name=names.get(identity.id);if(name)found.set(identity.account,name);}
   return found;
 }
+/** The owner's People name (ADR-0318): the name the owner chose for their own Telegram account on the People page, or
+ * null when there is none. Nocheh names the owner by it to everyone else. */
+export async function ownerPublicName(control:Pick<pg.Pool,'query'>,ownerId:string|null):Promise<string|null> {
+  if(!ownerId)return null;
+  const identity=telegramActor(ownerId);
+  return (await identityPeopleNames(control,[identity])).get(identity.id)??null;
+}
 const entityId=(value:unknown):string=>{const id=string(value,64);if(!/^[a-f0-9]{64}$/.test(id))throw new HttpError(400,'invalid_entity_id');return id;};
 export function attributedSpeaker(attribution:'direct'|'reported'|'inferred',subject:string,supplied:string|undefined,trusted:string|undefined):string|undefined {
   // A direct claim about the actual source speaker can omit a redundant speaker ID.

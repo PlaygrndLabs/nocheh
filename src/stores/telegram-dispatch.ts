@@ -23,7 +23,8 @@ import type {RuntimeTurnRepository} from './turns.js';
 import type {ActionCommandRepository} from './action-commands.js';
 import type {MemoryAccessRepository} from './memory-access.js';
 import {hermesTimings,recordHermesAttempt} from './stage-timings.js';
-import {fillTemplate,memberDailyLimitReply,memberPrivateDailyLimitReply,notAllowedPrivateReply,notAllowedReply,ownerPrompts,privateAnswerFrame,privateAnswerLines} from '../prompts.js';
+import {ownerPublicName} from './entities.js';
+import {fillTemplate,memberDailyLimitReply,memberPrivateDailyLimitReply,notAllowedPrivateReply,notAllowedReply,ownerPrompts,privateAnswerFrame,privateAnswerLines,withOwnerName} from '../prompts.js';
 import {otherPrivate,readSet,readSetGroups} from '../spaces.js';
 import {memberChatClosed,memberReads,recheckMemberGroups} from './member-reads.js';
 import {reloadMembers} from './members.js';
@@ -522,7 +523,8 @@ export class TelegramDispatchRepository {
     const botId=/^telegram:(\d+):update:/.exec(key)?.[1]??'',text=typeof message.text==='string'?message.text:typeof message.caption==='string'?message.caption:null;
     try {
       if(!groupTurn(this.groupReplies,groupAddressing(payload,botId),text,await this.identity(),true))return;
-      await this.groupRefusal(common,message,'not_allowed',texts['telegram.not_allowed']??notAllowedReply);
+      // The owner by their People name, or "the owner" without one (ADR-0318).
+      await this.groupRefusal(common,message,'not_allowed',withOwnerName(texts['telegram.not_allowed']??notAllowedReply,await ownerPublicName(this.control,policy.owner_id).catch(()=>null)));
     } catch {/* Best effort: the message stays archived either way. */}
   }
   /** The bot's fixed reply in a group, in the message's topic, sent at most once a UTC day per person, group and kind

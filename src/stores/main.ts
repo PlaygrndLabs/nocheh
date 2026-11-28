@@ -5,6 +5,7 @@ import {memoryEngine} from '../memory/engines.js';
 import {combinedAdapter,runtimeCall} from '../runtime.js';
 import {agentWithPrompts,withPrompts} from '../prompts.js';
 import {agent} from '../agent/agents.js';
+import {ownerPublicName} from './entities.js';
 import {agentOperation} from '../agent/agent.js';
 import {runtimeStoreGroups} from './runtime-pools.js';
 import {storageServices} from './services.js';
@@ -28,7 +29,7 @@ const memberBot=process.env.TELEGRAM_BOT_ID??'',memberKey=launchKey(process.env,
 const config=settings(),pools=runtimeStoreGroups(),adapter=combinedAdapter(telegramAdapter({url:config.telegramUrl,token:config.token}),hermesAdapter({url:config.hermesUrl,token:config.agentKey})),call=withPrompts(runtimeCall(adapter),pools.api.control);
 // Chats are served as the chat directory holds them (ADR-0252): the owner adds Nocheh to a group or turns it on (ADR-0253).
 const options={dataDir:config.dataDir,detectorVersion:config.detectorVersion,serviceToken:config.token,
-  policy:servedPolicy(()=>config.assistant),runtime:call,agent:agentWithPrompts(agent(config),pools.api.control),memoryEngine:memoryEngine(config)};
+  policy:servedPolicy(()=>config.assistant),runtime:call,agent:agentWithPrompts(agent(config),pools.api.control,()=>ownerPublicName(pools.api.control,config.assistant.owner_id)),memoryEngine:memoryEngine(config)};
 // In development nothing reads or runs before the store setup of this build has finished (dev-schema.ts).
 await schemaReady(pools.api.control);
 const services=storageServices(pools.api,options),workflowServices=storageServices(pools.workflow,options);

@@ -9,10 +9,11 @@ import type {Reader} from '../src/access.js';
 import {ownerChat} from '../src/assistant-policy.js';
 import {honchoEngine} from '../src/memory/honcho.js';
 import {installMembersForTest,memberDirectory,type MemberDirectory} from '../src/members.js';
-import {groupToolsLines,memberDailyLimitReply,notAllowedReply} from '../src/prompts.js';
+import {groupToolsLines,memberDailyLimitReply,notAllowedReply,withOwnerName} from '../src/prompts.js';
 import {policySnapshot,savePolicy} from '../src/security/store.js';
 import {connectStores,initializeStoreDatabases} from '../src/stores/connections.js';
 import {groupToolKind} from '../src/stores/controlled-actions.js';
+import {ownerPublicName,telegramActor} from '../src/stores/entities.js';
 import {claimHostWorkflow} from '../src/workflows/host-coordinator.js';
 import {fixtureServices} from './fixture-agent.js';
 import {BOB,GP1,GP2,GP3,GP4,GP_GROUP_IDS,MEMBER_GP,MEMBER_GP_ACCOUNT,MEMBER_GP_ID,MEMBER_NG,MEMBER_NG_ACCOUNT,MEMBER_NG_ID,NG1,NG1_TG,NG1_TOPIC,NG2,NG2_TG,NG_GROUP_IDS,OWNER,
@@ -253,14 +254,22 @@ test('members are checked before every effect in their groups, the owner first, 
 
     // Who may not talk there and addresses Nocheh, a stranger or a paused member, gets the owner's fixed reply, which the bot
     // sends at most once a day per group (`once`); nobody's message gets nothing.
-    const refused=async(label:string,from:number|string,changed:MemberDirectory|null)=>{
+    const refused=async(label:string,from:number|string,changed:MemberDirectory|null,name:string|null=null)=>{
       if(changed)use(changed);const count=refusals.length,result=await dispatch(GP1,from,'Nocheh, are you there?');use(fixtureMemberDirectory());
       assert.deepEqual([result.error_code,result.turn,refusals.length],['not_allowed',false,count+1],label);
-      assert.deepEqual([refusals.at(-1)!.once,refusals.at(-1)!.reply,refusals.at(-1)!.user_id],['not_allowed',notAllowedReply,String(from)],label);
+      assert.deepEqual([refusals.at(-1)!.once,refusals.at(-1)!.reply,refusals.at(-1)!.user_id],['not_allowed',withOwnerName(notAllowedReply,name),String(from)],label);
     };
     await refused('a stranger',BOB,null);
     await refused('a paused member',MEMBER_GP,fixtureMemberDirectory({[MEMBER_GP_ID]:{state:'paused'}}));
     await refused('a member switched off there',MEMBER_GP,switchedOff(MEMBER_GP_ID,GP1));
+    // Once the owner gives themselves a People name, the fixed reply names them by it (ADR-0318).
+    const ownerIdentity=telegramActor(OWNER),person=digest('owner-person:'+key);
+    await stores.control.query('DELETE FROM memory_entity_bindings WHERE source_object_id=$1',[ownerIdentity.id]);
+    await stores.control.query(`INSERT INTO memory_entities(id,kind,name,state,revision) VALUES($1,'person','Robin','active',2)`,[person]);
+    await stores.control.query(`INSERT INTO memory_entity_bindings(id,entity_id,binding_kind,source_object_id,label,state)
+      VALUES($1,$2,'source_identity',$3,'Robin','confirmed')`,[digest('owner-binding:'+key),person,ownerIdentity.id]);
+    assert.equal(await ownerPublicName(stores.control,OWNER),'Robin');assert.equal(await ownerPublicName(stores.control,null),null);
+    await refused('a stranger, with the owner\'s People name',BOB,null,'Robin');
     const quiet=refusals.length;
     const named=await dispatch(GP1,MEMBER_GP,'Nocheh, in the channel\'s name',{sender_chat:{id:-1003000000001,type:'channel',title:'Made-up channel'}});
     const proxy=await dispatch(GP1,777000,'Nocheh, from Telegram itself');
