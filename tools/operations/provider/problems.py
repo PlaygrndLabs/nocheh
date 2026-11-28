@@ -4,7 +4,9 @@ The dashboard runs `check` every two minutes. It reads what System › Health re
 today's model usage and the files Hermes's readers could not read, and, only when Settings › Telegram › Tell me about
 problems is on (off by default), sends the owner's private chat one message that lists every problem that is new or worse.
 System › Health and the count on System in the dashboard's menu show the same problems either way. A problem repeats at most once an hour, and only when it got
-worse; one that goes away and comes back is new again. Failed and uncertain background
+worse; one that goes away and comes back is new again. A memory-label step that fails is told only once it lasts:
+it is held until a check finds it still failing ten minutes on, or failing three more times, and a step that works
+before then drops it without a message (ADR-0314). Failed and uncertain background
 tasks are kept forever, so only their growth is news: the first check after an
 installation that can read them records the totals it finds without a message.
 
@@ -44,6 +46,11 @@ SOURCES = {'application': 'application', 'service': 'services', 'models': 'route
 # that works on one side never clears the other's.
 COUNTED_TODAY = ('model', 'reader', 'notes', 'memory_read', 'note_labels', 'forwards_read', 'source_tags', 'note_refs')
 NOTE_LINES = ('notes', 'memory_read', 'note_labels', 'forwards_read', 'source_tags', 'note_refs')
+# A note line falls back to a less exact source and usually works again on the next try, so a new or worse one is held:
+# told once it still fails HOLD_SECONDS after it was first held, or failed HOLD_FAILURES more times since it was last
+# told; dropped without a message when a step works after its last failure first (ADR-0314).
+HOLD_SECONDS = 600
+HOLD_FAILURES = 3
 # Sends of the notices themselves, left out of the 'sends' count so a notice that fails cannot feed itself.
 OWN_SENDS = ('notice', 'notice_update')
 # Background work families, as System › Work names them.
@@ -377,6 +384,8 @@ def due(current, record, now, first=False, seen=None, rows=True):
         elif now - value['at'] < QUIET_SECONDS:
             sent[key] = {**value, 'count': 0}
     before = set(record.get('seen') or [])
+    # Note lines waiting to show they last; a held one stays until it is told, works again, or its day is over.
+    held = {key: dict(value) for key, value in (record.get('held') or {}).items() if key in keys or unread(key)}
     report = []
     for problem in current:
         previous = sent.get(problem['key'])
@@ -392,8 +401,23 @@ def due(current, record, now, first=False, seen=None, rows=True):
             continue
         if previous and (problem['count'] <= previous['count'] or now - previous['at'] < QUIET_SECONDS):
             continue
+        if problem['kind'] in NOTE_LINES and type(problem.get('ok')) is int:
+            hold = held.get(problem['key'])
+            if hold is None:
+                hold = held[problem['key']] = {'since': now, 'count': problem['count'], 'ok': problem['ok'],
+                                               'told': previous['count'] if previous else 0}
+            elif problem['count'] > hold['count']:
+                # It failed again: wait for a step that works after this failure.
+                hold.update(count=problem['count'], ok=problem['ok'])
+            elif problem['ok'] > hold['ok']:
+                # It worked again before it lasted: these failures are no news, and later ones count from here.
+                del held[problem['key']]
+                sent[problem['key']] = {**(previous or {'at': 0}), 'count': problem['count']}
+                continue
+            if now - hold['since'] < HOLD_SECONDS and problem['count'] - hold['told'] < HOLD_FAILURES:
+                continue
         report.append((problem, problem['count'] - (previous['count'] if previous and problem['total'] else 0)))
-    kept = {'sent': sent, 'seen': sorted(keys)}
+    kept = {'sent': sent, 'seen': sorted(keys), 'held': held}
     kept['totals'] = {problem['key']: problem['count'] for problem in current if problem['total']} if 'work' in seen else totals
     return report, kept
 
@@ -640,5 +664,6 @@ def check(state, monitoring=None, usage_rows=None, send=None, now=None, enabled=
         result['state'] = 'turned_off'
     for problem, _ in report:
         sent[problem['key']] = {'count': problem['count'], 'at': now}
+        kept['held'].pop(problem['key'], None)
     _write(state, {**record, **kept})
     return result
