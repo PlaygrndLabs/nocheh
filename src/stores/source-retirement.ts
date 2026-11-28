@@ -1,11 +1,14 @@
 import type {Reader} from '../access.js';
 import {admin} from '../access.js';
 import {HttpError,object,string} from '../http.js';
+import type pg from 'pg';
 import type {StorePools} from './connections.js';
+import {digest} from '../archive.js';
 import type {ArchiveRepository,SourceReference} from './archive.js';
 import {factRecords} from './fact-sources.js';
 import {OwnerCommands} from './owner-commands.js';
 import {archiveReplyPreviews} from './archive-reply-links.js';
+import {telegramMessageObject} from '../observed-source.js';
 
 /** Verbatim excerpts long enough to identify a reply that repeats a message. */
 export function quotedExcerpts(text:string):string[] {
@@ -13,24 +16,44 @@ export function quotedExcerpts(text:string):string[] {
   return [...new Set([...(whole.length>=12?[whole]:[]),...parts])].map(part=>part.slice(0,500)).sort((a,b)=>b.length-a.length).slice(0,10);
 }
 
+/**
+ * Who hid a message: the owner, or Nocheh because Telegram said the message is gone when Nocheh replied to it, reacted
+ * to it or edited it (ADR-0317).
+ */
+export const retirementAuthorities=['owner','telegram'] as const;
+const authorities=retirementAuthorities.map(value=>`'${value}'`).join(',');
+/** How far back a failed send is checked for a gone message, and how long after hiding one its later replies are hidden too. */
+const GONE_LOOKBACK='1 day',GONE_REPLIES='1 hour';
+
 export const sourceRetirementSchema=`
 CREATE TABLE IF NOT EXISTS source_retirements (
  object_id text PRIMARY KEY,retired boolean NOT NULL,revision integer NOT NULL CHECK(revision>0),
- event_id text NOT NULL,decision_authority text NOT NULL DEFAULT 'owner' CHECK(decision_authority='owner'),
+ event_id text NOT NULL,decision_authority text NOT NULL DEFAULT 'owner',
  updated_at timestamptz NOT NULL DEFAULT now()
 );
 CREATE TABLE IF NOT EXISTS source_retirement_history (
  object_id text NOT NULL,revision integer NOT NULL,retired boolean NOT NULL,
  event_id text NOT NULL,operation_id text NOT NULL UNIQUE,
- decision_authority text NOT NULL DEFAULT 'owner' CHECK(decision_authority='owner'),
+ decision_authority text NOT NULL DEFAULT 'owner',
  created_at timestamptz NOT NULL DEFAULT now(),
  PRIMARY KEY(object_id,revision)
 );
-ALTER TABLE source_retirements ADD COLUMN IF NOT EXISTS decision_authority text NOT NULL DEFAULT 'owner' CHECK(decision_authority='owner');
-ALTER TABLE source_retirement_history ADD COLUMN IF NOT EXISTS decision_authority text NOT NULL DEFAULT 'owner' CHECK(decision_authority='owner');
+ALTER TABLE source_retirements ADD COLUMN IF NOT EXISTS decision_authority text NOT NULL DEFAULT 'owner';
+ALTER TABLE source_retirement_history ADD COLUMN IF NOT EXISTS decision_authority text NOT NULL DEFAULT 'owner';
+ALTER TABLE source_retirements DROP CONSTRAINT IF EXISTS source_retirements_decision_authority_check;
+ALTER TABLE source_retirements ADD CONSTRAINT source_retirements_decision_authority_check CHECK(decision_authority IN (${authorities}));
+ALTER TABLE source_retirement_history DROP CONSTRAINT IF EXISTS source_retirement_history_decision_authority_check;
+ALTER TABLE source_retirement_history ADD CONSTRAINT source_retirement_history_decision_authority_check CHECK(decision_authority IN (${authorities}));
+-- ADR-0317: each failed send Telegram answered with message_not_found is checked once.
+CREATE TABLE IF NOT EXISTS telegram_gone_checks (
+ send_id bigint PRIMARY KEY,object_id text NOT NULL,
+ outcome text NOT NULL CHECK(outcome IN ('hidden','not_archived','decided')),
+ checked_at timestamptz NOT NULL DEFAULT now()
+);
+CREATE INDEX IF NOT EXISTS telegram_gone_checks_hidden ON telegram_gone_checks(checked_at) WHERE outcome='hidden';
 `;
 
-/** A retirement is an owner control decision, never an observed Telegram deletion. */
+/** A retirement is an owner control decision, or Nocheh's when Telegram says a message it touched is gone (ADR-0317). */
 export class SourceRetirementRepository {
   constructor(readonly stores:StorePools,readonly archive:ArchiveRepository){}
   private async identity(eventId:string):Promise<string> {
@@ -201,7 +224,7 @@ export class SourceRetirementRepository {
     const state=(await this.stores.control.query('SELECT retired,revision,event_id,decision_authority,updated_at FROM source_retirements WHERE object_id=$1',[id])).rows[0];
     const history=(await this.stores.control.query('SELECT revision,retired,event_id,decision_authority,created_at FROM source_retirement_history WHERE object_id=$1 ORDER BY revision DESC',[id])).rows;
     return {event_id:eventId,source_object_id:id,retired:state?.retired??false,revision:state?.revision??0,
-      authority:state?.decision_authority??'owner',observation:'not_observed',updated_at:state?.updated_at??null,history,
+      authority:state?.decision_authority??'owner',observation:state?.decision_authority==='telegram'?'telegram_said_gone':'not_observed',updated_at:state?.updated_at??null,history,
       related_replies:await this.relatedReplies(eventId)};
   }
   /**
@@ -249,8 +272,9 @@ export class SourceRetirementRepository {
         const state=(await db.query('SELECT revision FROM source_retirements WHERE object_id=$1 FOR UPDATE',[id])).rows[0];
         if((state?.revision??0)!==body.expected_revision)throw new HttpError(409,'source_retirement_conflict');
         const revision=Number(body.expected_revision)+1;
+        // An owner decision is the owner's, also over one Nocheh made when Telegram said the message is gone.
         await db.query(`INSERT INTO source_retirements(object_id,retired,revision,event_id) VALUES($1,$2,$3,$4)
-          ON CONFLICT(object_id) DO UPDATE SET retired=$2,revision=$3,event_id=$4,updated_at=now()`,[id,body.retired,revision,eventId]);
+          ON CONFLICT(object_id) DO UPDATE SET retired=$2,revision=$3,event_id=$4,decision_authority='owner',updated_at=now()`,[id,body.retired,revision,eventId]);
         await db.query('INSERT INTO source_retirement_history(object_id,revision,retired,event_id,operation_id) VALUES($1,$2,$3,$4,$5)',
           [id,revision,body.retired,eventId,operationId]);
         if(body.retired)await db.query(`UPDATE dispatches SET state='cancelled',error_code='source_retired',revision=revision+1,updated_at=now()
@@ -259,5 +283,77 @@ export class SourceRetirementRepository {
       // Notes carry across a hide or restore; each carry removes the notes that rest on a hidden message (ADR-0292).
       },{notes:'all'});
     return result;
+  }
+  /**
+   * Hide the messages Telegram said are gone (ADR-0317): a reply, reaction or edit Nocheh sent to a message failed with
+   * message_not_found. Each such send is checked once. Its message is hidden as the owner's hide would, with Nocheh's own
+   * direct replies to it, unless the owner already decided about it; the owner's Undo stands. Replies Nocheh delivers to a
+   * hidden message within the next hour are hidden too. Returns each hidden message's events, for the caller to stop a
+   * reply that is running for them as the owner's hide does.
+   */
+  async hideGone(limit=20):Promise<string[][]> {
+    const hidden:string[][]=[];
+    const sends=(await this.stores.control.query(`SELECT s.id,s.chat,s.message_id FROM chat_sends s
+      WHERE s.state='failed' AND s.at>now()-interval '${GONE_LOOKBACK}' AND s.channel='telegram' AND s.error_code='message_not_found'
+      AND s.chat IS NOT NULL AND s.message_id IS NOT NULL AND NOT EXISTS (SELECT 1 FROM telegram_gone_checks c WHERE c.send_id=s.id)
+      ORDER BY s.id LIMIT $1`,[limit])).rows;
+    for(const send of sends) {
+      const object=telegramMessageObject(send.chat,send.message_id),event=await this.liveEvent(object);
+      const outcome=!event?'not_archived':await this.decided(object)?'decided':'hidden';
+      const replies=outcome==='hidden'?await this.undecidedReplies(event!):[];
+      const targets=[...(outcome==='hidden'?[{object,event:event!}]:[]),...replies];
+      await this.hideAll(`telegram-gone:${send.id}`,targets,async db=>{
+        await db.query(`INSERT INTO telegram_gone_checks(send_id,object_id,outcome) VALUES($1,$2,$3) ON CONFLICT(send_id) DO NOTHING`,[send.id,object,outcome]);
+      });
+      if(targets.length)hidden.push((await Promise.all(targets.map(target=>this.events(target.event)))).flat());
+    }
+    // Nocheh's reply to a hidden message can land after it was hidden; it follows the message while that stays hidden by Nocheh.
+    const recent=(await this.stores.control.query(`SELECT DISTINCT c.object_id FROM telegram_gone_checks c JOIN source_retirements r ON r.object_id=c.object_id
+      WHERE c.outcome='hidden' AND c.checked_at>now()-interval '${GONE_REPLIES}' AND r.retired AND r.decision_authority='telegram'`)).rows;
+    for(const row of recent) {
+      const event=await this.liveEvent(row.object_id),replies=event?await this.undecidedReplies(event):[];
+      if(!replies.length)continue;
+      await this.hideAll(`telegram-gone-replies:${digest(replies.map(reply=>reply.object).sort().join(','))}`,replies);
+      hidden.push((await Promise.all(replies.map(reply=>this.events(reply.event)))).flat());
+    }
+    return hidden;
+  }
+  /** One live Telegram event of this message, a captured update or a delivered reply; null when the archive has none. */
+  private async liveEvent(object:string):Promise<string|null> {
+    return (await this.archive.pool.query(`SELECT e.id FROM source_revisions r JOIN source_observations o ON o.revision_id=r.id JOIN events e ON e.id=o.event_id
+      WHERE r.object_id=$1 AND e.channel='telegram' AND e.kind IN ('telegram_update','telegram_delivered_message') ORDER BY e.received_at,e.id LIMIT 1`,[object])).rows[0]?.id??null;
+  }
+  private async decided(object:string):Promise<boolean> {
+    return (await this.stores.control.query('SELECT 1 FROM source_retirements WHERE object_id=$1',[object])).rowCount!==0;
+  }
+  /** Nocheh's delivered direct replies to this message that nobody has hidden or brought back yet. Quotes are not followed. */
+  private async undecidedReplies(eventId:string):Promise<{object:string;event:string}[]> {
+    const replies=(await this.relatedReplies(eventId)).filter(reply=>reply.relation==='reply'&&!reply.retired&&reply.revision===0);
+    const result:{object:string;event:string}[]=[];
+    for(const reply of replies){const object=await this.identity(reply.event_id);if(!await this.decided(object))result.push({object,event:reply.event_id});}
+    return result;
+  }
+  /** Hide these messages in one command, as the owner's hide does (set), under Telegram's authority; a message decided meanwhile is left as it is. */
+  private async hideAll(operationId:string,targets:{object:string;event:string}[],also?:(db:pg.PoolClient)=>Promise<void>):Promise<void> {
+    if(!targets.length&&also){
+      const db=await this.stores.control.connect();
+      try{await also(db);}finally{db.release();}
+      return;
+    }
+    const events=(await Promise.all(targets.map(target=>this.events(target.event)))).flat();
+    await new OwnerCommands(this.stores.control).run({admin:true,scope:null},operationId,
+      {kind:'source_retirement',authority:'telegram',objects:targets.map(target=>target.object)},async db=>{
+        for(const target of targets) {
+          const inserted=(await db.query(`INSERT INTO source_retirements(object_id,retired,revision,event_id,decision_authority) VALUES($1,true,1,$2,'telegram')
+            ON CONFLICT(object_id) DO NOTHING`,[target.object,target.event])).rowCount;
+          if(!inserted)continue;
+          await db.query(`INSERT INTO source_retirement_history(object_id,revision,retired,event_id,operation_id,decision_authority) VALUES($1,1,true,$2,$3,'telegram')`,
+            [target.object,target.event,`${operationId}:${target.object}`]);
+        }
+        await db.query(`UPDATE dispatches SET state='cancelled',error_code='source_retired',revision=revision+1,updated_at=now()
+          WHERE event_id=ANY($1::text[]) AND state IN ('pending','failed') AND attempts=0`,[events]);
+        await also?.(db);
+        return {authority:'telegram',objects:targets.map(target=>target.object)};
+      },{notes:'all'});
   }
 }

@@ -201,3 +201,67 @@ test('native history learns which recorded turns are retired or answered by a re
     assert.notEqual(restored.revision,after.revision);assert.deepEqual(restored.retired,[]);
   }finally{await stores.close();}
 });
+
+test('a message Telegram says is gone is hidden with Nocheh\'s reply, each failed send is checked once, and Undo stands',
+  {skip:process.env.NOCHEH_STORES_FIXTURE!=='1',timeout:180000},async()=>{
+  const config={host:process.env.PGHOST!,user:'nocheh',database:'nocheh',password:process.env.PGPASSWORD!};
+  const passwords={archive:digest('archive-fixture'),derived:digest('derived-fixture'),control:digest('control-fixture')};
+  await initializeStoreDatabases(config,passwords);
+  const stores=connectStores(config,passwords),chat=String(Date.now()%1000000000+3000),owner={admin:true,scope:null};
+  const s=fixtureServices(stores,{dataDir:'/tmp/nocheh-retirement-gone',detectorVersion:'fixture',policy:()=>({enabled:true,owner_id:chat,group_ids:[]}),
+    runtime:async()=>{throw Error('runtime_not_expected');},memoryEngine:honchoEngine(async()=>{throw Error('honcho_not_expected');})});
+  const prefix='gone:'+Date.now(),base=Date.now()%1000000000,update=(id:number)=>'telegram:fixture:update:'+(base+id);
+  const capture=async(key:string,id:number,text:string,kind='telegram_update')=>(await s.capture.capture({version:1,key,origin:'live',bot_id:'fixture',
+    kind,scope:chat,source_id:String(id),revision:String(id),occurred_at:null,text,
+    payload:{update_id:base+id,message:{message_id:id,chat:{id:Number(chat),type:'private'},from:kind==='telegram_update'?{id:Number(chat)}:{id:99,is_bot:true},text}}} as Envelope)).source.reference;
+  const answers=async(parent:number,reply:{id:string})=>{
+    const id=digest(prefix+':delivery:'+parent);
+    await stores.control.query(`INSERT INTO content_operations(id,generation,operation_key,kind,scope,input_hash)
+      VALUES($1,$2,$3,'outbound_result',$4,$5)`,[id,randomUUID(),'outbound:fixture:'+update(parent)+':sendMessage:'+id,chat,id]);
+    await stores.control.query(`INSERT INTO capture_effect_receipts(operation_id,derived_id,state,sources) VALUES($1,$1,'delivered',$2)`,[id,JSON.stringify([{id:reply.id}])]);
+  };
+  let sent=0;
+  const failed=async(message:string|null,code='message_not_found',kind='reaction',state='failed')=>stores.control.query(`INSERT INTO chat_sends(record_key,channel,at,kind,method,chat,message_id,state,status,error_code)
+    VALUES($1,'telegram',now(),$2,$3,$4,$5,$6,400,$7)`,[`send:telegram::${digest(prefix+':send:'+sent++).slice(0,32)}`,kind,kind==='reaction'?'setMessageReaction':'sendMessage',chat,message,state,code]);
+  try{
+    const deleted=await capture(update(1),1,'Synthetic note that was deleted.');
+    const reply=await capture(prefix+':reply',2,'Noted the synthetic note.','telegram_delivered_message');
+    await answers(1,reply);
+    const kept=await capture(update(3),3,'Synthetic message the owner decided about.');
+    await s.retirements.set(owner,kept.id,{retired:true,expected_revision:0,operation_id:prefix+':kept'});
+    await s.retirements.set(owner,kept.id,{retired:false,expected_revision:1,operation_id:prefix+':kept-undo'});
+    const waiting=await capture(update(4),4,'Synthetic question still waiting.');
+    await stores.control.query('INSERT INTO dispatches(event_id,source_reference,state) VALUES($1,$2,$3)',[waiting.id,waiting,'pending']);
+    const ignored=await capture(update(5),5,'Synthetic message whose send failed otherwise.');
+    await failed('1');await failed('3');await failed('99');await failed('5','message_not_modified');await failed('5','message_not_found','reaction','uncertain');
+    await failed('4','message_not_found','reply');
+
+    const hidden=await s.retirements.hideGone();
+    assert.deepEqual(hidden.map(events=>events.sort()),[[deleted.id,reply.id].sort(),[waiting.id]],'the message and Nocheh\'s direct reply are hidden in one decision');
+    assert.equal(await s.retirements.isRetired(deleted),true);assert.equal(await s.retirements.isRetired(reply),true);
+    const state=await s.retirements.get(owner,deleted.id);
+    assert.deepEqual([state.authority,state.observation,state.revision,state.history[0]?.decision_authority],['telegram','telegram_said_gone',1,'telegram']);
+    assert.equal(await s.retirements.isRetired(kept),false,'the owner\'s earlier decision stands');
+    assert.equal(await s.retirements.isRetired(ignored),false,'only a definite message_not_found hides a message');
+    assert.equal((await stores.control.query('SELECT state FROM dispatches WHERE event_id=$1',[waiting.id])).rows[0].state,'cancelled');
+    assert.deepEqual((await stores.control.query('SELECT c.outcome FROM telegram_gone_checks c JOIN chat_sends s ON s.id=c.send_id WHERE s.chat=$1 ORDER BY c.send_id',[chat])).rows.map(row=>row.outcome),
+      ['hidden','decided','not_archived','hidden']);
+    assert.deepEqual(await s.retirements.hideGone(),[],'each failed send is checked once');
+
+    // A reply delivered after the message was hidden follows it.
+    const late=await capture(prefix+':late',6,'Synthetic late answer.','telegram_delivered_message');
+    await answers(4,late);
+    assert.deepEqual(await s.retirements.hideGone(),[[late.id]]);
+    assert.equal(await s.retirements.isRetired(late),true);
+    assert.deepEqual(await s.retirements.hideGone(),[]);
+
+    // The owner's Undo is the owner's decision; a later failed send does not hide the message again.
+    const undone=await s.retirements.set(owner,deleted.id,{retired:false,expected_revision:1,operation_id:prefix+':undo'});
+    assert.equal(undone.authority,'owner');
+    assert.equal((await s.retirements.get(owner,deleted.id)).authority,'owner');
+    await failed('1');
+    assert.deepEqual(await s.retirements.hideGone(),[]);
+    assert.equal(await s.retirements.isRetired(deleted),false);
+    assert.equal(await s.retirements.isRetired(reply),true,'Undo of the message leaves its reply\'s own decision');
+  }finally{await stores.close();}
+});

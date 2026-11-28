@@ -19,7 +19,8 @@ Nocheh is in development mode and not yet released. Everything below is built an
   durable workflows; data tools reach the agent over Nocheh's MCP server.
 - Chats: groups reply only when addressed and capture every message and file from everyone
   ([ADR-0264](docs/adr/0264-groups-are-read-whole-from-everyone.md)); held messages are all answered; reactions show progress. A message
-  sent while the agent works joins its running turn ([ADR-0301](docs/adr/0301-a-message-joins-the-running-turn-in-its-chat.md)).
+  sent while the agent works joins its running turn ([ADR-0301](docs/adr/0301-a-message-joins-the-running-turn-in-its-chat.md)). A message Telegram says is gone when Nocheh
+  replies, reacts or edits is hidden with Nocheh's reply, with Undo ([ADR-0317](docs/adr/0317-hide-a-message-telegram-says-is-gone.md)).
 - Members: owner-added members use their joined groups and their own private chat; in a group
   Nocheh answers from that group only; the mini app is English only (members steps 1 to 5,
   [ADR-0242](docs/adr/0242-private-chats-stay-out-of-group-sharing.md) to [ADR-0265](docs/adr/0265-member-mini-app.md)).
