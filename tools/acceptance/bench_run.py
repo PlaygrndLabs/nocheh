@@ -70,6 +70,12 @@ def objects(text):
     return found
 
 
+def envelope(value):
+    """An action's own record, as Nocheh answers a call that may wait for a card: its id and state, with the request's
+    fingerprint or the action's kind and resolution."""
+    return isinstance(value.get('id'), str) and isinstance(value.get('state'), str) and bool({'fingerprint', 'kind', 'resolution'} & set(value))
+
+
 def strings(value):
     """Every string inside a decoded JSON value."""
     if isinstance(value, str):
@@ -119,10 +125,11 @@ def abstract(name, args):
 
 def status(name, answer):
     """executed, blocked (it waits for the owner's card or was saved paused) or failed, from the answer the agent got:
-    the first object, outermost first, that carries an error or a state decides."""
-    value = next((value for value in objects(answer) if value.get('error') or isinstance(value.get('state'), str)), None)
+    the first object, outermost first, that is an error or an action's own record decides. A listing or a task that
+    merely carries a state of its own (current, open) is data the call returned."""
+    value = next((value for value in objects(answer) if value.get('error') or envelope(value)), None)
     if value is not None:
-        if value.get('error'):
+        if value.get('error') or value['state'] == 'failed':
             return 'failed'
         if value['state'] not in RAN:
             return 'blocked'
