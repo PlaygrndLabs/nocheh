@@ -96,12 +96,29 @@ test('allowed members post freely in their own group; everything else waits for 
     await chatRowForTest(stores.control,other,{title:'Design team',is_forum:true});
     assert.deepEqual((await s.telegramActions.destinations(await actor(topic.id,group+'/topic/17'))).groups,
       [{destination:group,name:null,current:true},{destination:other,name:'Design team',current:false}],'only the groups where the person asking is allowed');
-    // A later update renaming the group does not rename it here until the owner refreshes again, as before step 2b.
+    // A later update renaming the group names it here at once, as the owner's directory and the card name it (ADR-0316).
     await stores.control.query(`UPDATE chats SET title='Design',title_source='observed' WHERE id=$1`,[other]);
+    assert.equal((await s.telegramActions.destinations(await actor(topic.id,group+'/topic/17'))).groups[1]!.name,'Design');
+    // A group whose name only a captured message gave, never refreshed, is named too: the live bug was a list of nameless groups.
+    await stores.control.query(`UPDATE chat_details SET refreshed_state=NULL,refreshed_title=NULL,refreshed_at=NULL WHERE chat_id=$1`,[other]);
+    assert.equal((await s.telegramActions.destinations(await actor(topic.id,group+'/topic/17'))).groups[1]!.name,'Design');
+    // With no title at all, the refresh's name is the fallback.
+    await stores.control.query(`UPDATE chats SET title=NULL,title_source=NULL WHERE id=$1`,[other]);
+    await stores.control.query(`UPDATE chat_details SET refreshed_state='available',refreshed_title='Design team',refreshed_at=now() WHERE chat_id=$1`,[other]);
     assert.equal((await s.telegramActions.destinations(await actor(topic.id,group+'/topic/17'))).groups[1]!.name,'Design team');
+    await stores.control.query(`UPDATE chats SET title='Design',title_source='observed' WHERE id=$1`,[other]);
+    // The other group's project: the owner sees its name beside each group, a member never sees project names.
+    const project=digest('destinations-project:'+key);
+    await stores.control.query(`INSERT INTO projects(id,name,description,state,revision) VALUES($1,'Lumen','','active',1)`,[project]);
+    await stores.control.query(`INSERT INTO project_assignments(space_id,project_id,mode,revision) VALUES($1,$2,'assigned',1)
+      ON CONFLICT(space_id) DO UPDATE SET project_id=$2,mode='assigned'`,[other,project]);
+    assert.ok((await s.telegramActions.destinations(await actor(topic.id,group+'/topic/17'))).groups.every(entry=>!('project' in entry)),'a member sees no project names');
     await assert.rejects(s.telegramActions.destinations(owner),{status:403});
     const ownerTurn=await message('owner-in-group',{},123);
-    assert.equal((await s.telegramActions.destinations(await actor(ownerTurn.id,group))).groups.length,4,'the owner is allowed in every group');
+    const ownerList=(await s.telegramActions.destinations(await actor(ownerTurn.id,group))).groups;
+    assert.equal(ownerList.length,4,'the owner is allowed in every group');
+    assert.deepEqual(ownerList.find(entry=>entry.destination===other),{destination:other,name:'Design',project:'Lumen',current:false});
+    assert.equal(ownerList.find(entry=>entry.destination===group)!.project,null,'a group in no project says so');
     // A message for another chat waits for the owner, with the card in the owner's private chat only.
     const plain=await message('plain');
     const elsewhere=await s.actionCommands.offer('telegram',await s.telegramActions.request(await actor(plain.id,group),{destination:'123',text:'Exact private message'}));
