@@ -5,6 +5,7 @@ import asyncio
 import os
 
 from .capture import clear_command_menu
+from .gateway import error_name, report
 from .sender import seconds
 
 POLL_TIMEOUT = 25
@@ -65,11 +66,15 @@ class Poller:
         service = self.service
         connected, failures, conflicts = False, 0, 0
         while not service.stopping:
+            step = 'poll'
             try:
                 if not connected:
+                    step = 'connect'
                     await self.connect()
                     connected = True
+                    step = 'poll'
                 updates = await service.bot.get_updates(offset=self.offset, timeout=POLL_TIMEOUT, limit=100, allowed_updates=list(ALLOWED_UPDATES))
+                if failures: report('telegram_poll_recovered', after_failures=failures)
                 failures = conflicts = 0
                 if updates:
                     self.offset = updates[-1].update_id + 1
@@ -84,8 +89,12 @@ class Poller:
                 await self.sleep(min(60, 10 + 10 * conflicts))
             except RetryAfter as error:
                 await self.sleep(min(300.0, seconds(error.retry_after)))
-            except Exception:
+            except Exception as error:
                 failures += 1
+                # Why polling reconnects: the step, the error's class and its cause's class (such as httpx's ReadError), and
+                # for a poll, the capture boundary's code (a refused HTTP answer, or a request or capture that failed).
+                report('telegram_poll_failed', step=step, failures=failures, error=error_name(error), cause=error_name(error.__cause__),
+                       code=(service.capture.polling.get('error_code') if step == 'poll' and service.capture else None))
                 connected = False
                 if service.status == 'connected':
                     service.status = 'recovering'

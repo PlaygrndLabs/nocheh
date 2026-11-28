@@ -1,5 +1,6 @@
 """Polling health and its error ladder: what restarts the service, what stops it, and what health shows meanwhile."""
 import asyncio
+import io
 import json
 import os
 import tempfile
@@ -41,7 +42,10 @@ class HealthTests(unittest.IsolatedAsyncioTestCase):
             service = self.service(folder, restarts)
             service.bot = Bot(error)
             async def sleep(seconds): waits.append(seconds)
-            await asyncio.wait_for(Poller(service, sleep).run(), 5)
+            with patch('sys.__stdout__', io.StringIO()) as output:
+                await asyncio.wait_for(Poller(service, sleep).run(), 5)
+            self.lines = [json.loads(line) for line in output.getvalue().splitlines()]
+            self.assertNotIn('secret-token', output.getvalue())
             incident = (Path(folder) / 'state/telegram-incident.json').read_text()
             return service, restarts, waits, incident
 
@@ -53,6 +57,35 @@ class HealthTests(unittest.IsolatedAsyncioTestCase):
         self.assertNotIn('secret-token', incident)
         self.assertEqual((json.loads(incident)['state'], json.loads(incident)['error_code']), ('failed', 'telegram_network_error'))
         self.assertEqual(service.health()['state'], 'failed')
+        self.assertEqual([(line['event'], line.get('failures')) for line in self.lines],
+                         [*(('telegram_poll_failed', count) for count in range(1, NETWORK_FAILURES + 1)), ('telegram_failed', None)])
+        self.assertEqual({key: self.lines[0][key] for key in ('step', 'error', 'cause')}, {'step': 'poll', 'error': 'NetworkError', 'cause': None})
+        self.assertEqual((self.lines[-1]['code'], self.lines[-1]['restart']), ('telegram_network_error', True))
+
+    async def test_each_reconnect_says_why_in_one_content_free_line(self):
+        with tempfile.TemporaryDirectory() as folder:
+            service = self.service(folder, [])
+            service.bot = Bot(None)
+            calls = []
+            async def get_updates(**options):
+                calls.append(options)
+                if len(calls) == 1:
+                    service.capture.polling['error_code'] = 'telegram_poll_or_capture_failed'
+                    try: raise OSError('read failed for 123456:secret-token')
+                    except OSError as cause: raise NetworkError('httpx.ReadError: 123456:secret-token') from cause
+                service.stopping = True
+                return []
+            service.bot.get_updates = get_updates
+            async def sleep(seconds): pass
+            poller = Poller(service, sleep)
+            with patch('sys.__stdout__', io.StringIO()) as output:
+                await asyncio.wait_for(poller.run(), 5)
+            if poller.menu: poller.menu.cancel()
+            self.assertNotIn('secret-token', output.getvalue())
+            self.assertEqual([json.loads(line) for line in output.getvalue().splitlines()], [
+                {'event': 'telegram_poll_failed', 'service': 'telegram', 'step': 'poll', 'failures': 1, 'error': 'NetworkError',
+                 'cause': 'OSError', 'code': 'telegram_poll_or_capture_failed'},
+                {'event': 'telegram_poll_recovered', 'service': 'telegram', 'after_failures': 1}])
 
     async def test_another_poller_is_waited_out_then_stops_without_restart(self):
         service, restarts, waits, incident = await self.ladder(Conflict('terminated by other getUpdates request'))

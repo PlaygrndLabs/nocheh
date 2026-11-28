@@ -11,6 +11,7 @@ import contextlib
 import hashlib
 import json
 import re
+import sys
 import threading
 import time
 import traceback
@@ -47,6 +48,21 @@ ACTION_CLASSES = ('approved_post', 'job_report', 'scheduled_run', 'notice')
 # goes only to the owner's private chat: a reply under the ask's own pass, or a notice there.
 MEMBER_READ = 'member_read'
 NOTICE_CLASSES = ('notice', 'reminder', MEMBER_READ)
+
+
+def report(event, **fields):
+    """One content-free line on the process's own output, which the token redirect in server.py does not cover. Fields are
+    fixed codes, counts and error class names only, never messages, which may carry the token or chat text."""
+    stream = sys.__stdout__
+    if stream is None: return
+    try: print(json.dumps({'event': event, 'service': 'telegram', **fields}), file=stream, flush=True)
+    except (OSError, ValueError): pass  # A lost line must not break polling.
+
+
+def error_name(error):
+    """An exception's class name, or None when it has none worth showing."""
+    name = type(error).__name__ if error is not None else None
+    return name if name and ERROR_NAME.fullmatch(name) else None
 
 
 def topic_of(value):
@@ -156,6 +172,7 @@ class TelegramService:
             temporary.replace(path)
         except OSError:
             pass  # Failed diagnostics must not prevent recovery.
+        report('telegram_failed', code=code, restart=bool(retryable and self.on_fatal))
         if retryable and self.on_fatal: self.on_fatal()
 
     def health(self):

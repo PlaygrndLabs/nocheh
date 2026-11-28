@@ -46,7 +46,7 @@ test('separated application captures through control outages, exposes owner repo
     if(operation==='telegram.status')return {ok:true,telegram:'connected',telegram_details:{state:'connected'}};
     if(operation==='guard.detect')return {literals:[]};
     if(operation==='prompts.defaults')return {defaults:{'reply.common':'Common','reply.owner':'Owner','reply.group':'Group','reply.private':'Private answer','reply.member':'Member','reply.member_read':'Member read','memory.limited':'Limited',
-      'memory.evidence':'Evidence','memory.notes_review':'Review','guard.secret_check':'Secrets','sharing.group_filter':'Filter','images.read':'Images','reply.scheduled':'Scheduled','reply.schedules':'Schedules','reply.member_schedules':'Member schedules'}};
+      'memory.evidence':'Evidence','memory.notes_review':'Review','guard.secret_check':'Secrets','sharing.group_filter':'Filter','images.read':'Images','reply.scheduled':'Scheduled','reply.schedules':'Schedules','reply.member_schedules':'Member schedules','reply.owner_name':'Owner name {name}'}};
     if(operation.startsWith('persona.')||operation==='config.read'||operation==='schedules.manage')return {operation,input};
     if(operation==='telegram.notice')return {state:'done'};
     if(operation==='memory.read')return {scope:input.scope,profile:'p-owner',memories:[{name:'MEMORY.md',text:'Juniper',

@@ -1,6 +1,6 @@
 import {test} from 'node:test';
 import assert from 'node:assert/strict';
-import {actionContinued,approvalCard,approvalLines,approvalTask,approvalTexts,backgroundCard,backgroundLines,backgroundMachine,backgroundTexts,agentWithPrompts,fillTemplate,labeledLines,labeledPlaceholders,learningInstruction,learningPrompt,memberReadLines,memberReminderLines,scheduleNoticeLines,ownerPrompts,privateAnswerFrame,privateAnswerLines,privateAnswerTexts,promptKeys,promptProblem,reminderLines,reminderTexts,sourceLines,sourceTexts,withPrompts} from '../src/prompts.js';
+import {actionContinued,approvalCard,approvalLines,approvalTask,approvalTexts,backgroundCard,notAllowedReply,ownerCalled,withOwnerName,backgroundLines,backgroundMachine,backgroundTexts,agentWithPrompts,fillTemplate,labeledLines,labeledPlaceholders,learningInstruction,learningPrompt,memberReadLines,memberReminderLines,scheduleNoticeLines,ownerPrompts,privateAnswerFrame,privateAnswerLines,privateAnswerTexts,promptKeys,promptProblem,reminderLines,reminderTexts,sourceLines,sourceTexts,withPrompts} from '../src/prompts.js';
 import {agentSummary} from '../src/agent/agent.js';
 import {fixtureAgent,type FakeCall} from './fixture-agent.js';
 
@@ -34,6 +34,26 @@ test('turns and calls that run an instruction text carry only the owner’s vali
   assert.deepEqual(agentSummary(bare).capabilities,{...agentSummary(fixtureAgent(record)).capabilities,review:false,settings:false});
   const failing=withPrompts(async()=>({}),{query:async()=>{throw Error('control unavailable');}} as any);
   await assert.rejects(failing('memory.filter',{}),/control unavailable/);
+});
+
+test('others hear the owner by their People name, never "the owner", and the owner\'s chat keeps saying you (ADR-0318)',async()=>{
+  const control={query:async()=>({rows:[{texts:{}}]})} as any;
+  const seen:[string,Record<string,unknown>][]=[],record:FakeCall=async(operation,input)=>{seen.push([operation,input]);return {};};
+  const ref={channel:'telegram',event_id:'e',attempt:1} as const;
+  // Every turn carries the name; the agent uses it only outside the owner's own chat.
+  await agentWithPrompts(fixtureAgent(record),control,async()=>'Robin').startTurn(ref,{owner:false});
+  await agentWithPrompts(fixtureAgent(record),control,async()=>null).startTurn(ref,{owner:false});
+  // A failed lookup never stops a turn: it reads as no name.
+  await agentWithPrompts(fixtureAgent(record),control,async()=>{throw Error('control unavailable');}).startTurn(ref,{owner:false});
+  await agentWithPrompts(fixtureAgent(record),control).startTurn(ref,{owner:false});
+  assert.deepEqual(seen.map(([,input])=>input.owner_name),['Robin',undefined,undefined,undefined]);
+  // The fixed group reply names the owner too, and reads as before without a name.
+  assert.equal(withOwnerName(notAllowedReply,'Robin'),'Sorry, in this group I only work with Robin and Robin\'s members.');
+  assert.equal(withOwnerName(notAllowedReply,null),'Sorry, in this group I only work with the owner and the owner\'s members.');
+  assert.equal(withOwnerName('No {owner} here',' '),'No the owner here');assert.equal(ownerCalled(' Robin '),'Robin');
+  // The owner's naming text must keep {name}.
+  assert.equal(promptProblem('reply.owner_name','Call them by name.'),'prompt_placeholder_missing');
+  assert.equal(promptProblem('reply.owner_name','Call the owner {name}.'),null);
 });
 
 test('approval card templates leave out a line whose value is missing and keep default texts the owner did not set',()=>{
