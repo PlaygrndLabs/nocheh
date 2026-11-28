@@ -448,6 +448,9 @@ before. The relay's latest requests show each tool call and its answer: the
 runner maps them to the benchmark's abstract tools, marks each executed,
 blocked (it waits for the owner's card) or failed, and scores the traces with
 the benchmark's own scorer twice, counting every call and only calls that ran.
+The answer decides: the first JSON object written as text in it, unwrapping
+the runtime's own result string, that carries a state or an error. Each case's
+calls with their answers are kept beside the traces in `calls/`.
 A case's turn may take 300 seconds; after three errored cases in a row the rest
 are marked skipped, so a broken run ends in minutes. The provider file is
 mounted where it is, read only, and never copied into the results.

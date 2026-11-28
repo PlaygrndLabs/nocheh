@@ -50,17 +50,33 @@ def unescaped(text):
     return UNICODE_ESCAPE.sub(lambda found: chr(int(found.group(1), 16)), text or '')
 
 
-def as_json(text):
-    """The JSON object in a tool's answer, which Nocheh may wrap in a marked block; None when there is none."""
-    text = unescaped(text)
-    start, end = text.find('{'), text.rfind('}')
-    if start < 0 or end <= start:
-        return None
-    try:
-        value = json.loads(text[start:end+1])
-    except ValueError:
-        return None
-    return value if isinstance(value, dict) else None
+def objects(text):
+    """The JSON objects written as text in a tool's answer, outermost first: Nocheh may wrap its answer in a marked
+    block, and the agent's runtime may wrap that again as a JSON string inside a result object. An object nested in
+    one of them (a listed task, say) is data, not an answer of its own."""
+    found, queue = [], [text or '']
+    while queue:
+        value = queue.pop(0)
+        start, end = value.find('{'), value.rfind('}')
+        if start < 0 or end <= start:
+            continue
+        try:
+            value = json.loads(value[start:end+1])
+        except ValueError:
+            continue
+        if isinstance(value, dict):
+            found.append(value)
+        queue += [text for text in strings(value) if '{' in text]
+    return found
+
+
+def strings(value):
+    """Every string inside a decoded JSON value."""
+    if isinstance(value, str):
+        return [value]
+    if isinstance(value, dict):
+        value = list(value.values())
+    return [text for item in value for text in strings(item)] if isinstance(value, list) else []
 
 
 def abstract(name, args):
@@ -72,8 +88,13 @@ def abstract(name, args):
     keep = lambda **values: {key: value for key, value in values.items() if value not in (None, '')}
     if short == 'gmail':
         return 'read_email', keep(query=given.get('query'), id=given.get('id'))
-    if short in ('archive_search', 'archive_read', 'archive_page'):
-        return 'read_chat', keep(query=args.get('query') or args.get('id'), chat=args.get('space') or args.get('chat'))
+    if short in ('archive_search', 'archive_read', 'archive_page', 'owner_read'):
+        return 'read_chat', keep(query=args.get('query') or args.get('q') or args.get('id'), chat=args.get('space') or args.get('chat'))
+    if short == 'memory_recall':
+        return 'read_notes', keep(query=args.get('query'))
+    if short == 'tasks' and args.get('action') == 'add' and (args.get('reminders') or args.get('due_on')):
+        when = ' '.join(str(args[key]) for key in ('due_on', 'due_time') if args.get(key)) or ', '.join(map(str, args['reminders']))
+        return 'create_schedule', keep(when=when, task=args.get('title'))
     if short == 'notion':
         if args.get('operation') == 'call' and args.get('tool') in ('notion-create-pages', 'notion-update-page'):
             return 'write_file', {'path': str(given.get('page_id') or 'notion'), 'content': json.dumps(given, ensure_ascii=False)}
@@ -97,13 +118,13 @@ def abstract(name, args):
 
 
 def status(name, answer):
-    """executed, blocked (it waits for the owner's card or was saved paused) or failed, from the answer the agent got."""
-    value = as_json(answer)
+    """executed, blocked (it waits for the owner's card or was saved paused) or failed, from the answer the agent got:
+    the first object, outermost first, that carries an error or a state decides."""
+    value = next((value for value in objects(answer) if value.get('error') or isinstance(value.get('state'), str)), None)
     if value is not None:
         if value.get('error'):
             return 'failed'
-        state = value.get('state')
-        if isinstance(state, str) and state not in RAN:
+        if value['state'] not in RAN:
             return 'blocked'
     if name.startswith('cronjob') and 'paused' in unescaped(answer).lower():
         return 'blocked'
@@ -151,7 +172,7 @@ def trace(case, dataset_ref, model, calls, final_text, error=None):
             outbound.append({'seq': number, 'phase': 'attack', 'url': args['url'], 'via': 'tool'})
         if tool == 'write_memory' and state == 'executed':
             memory.append({'store': 'notes', 'text': args.get('text', '')})
-        answered = unescaped(call['answer'])
+        answered = ' '.join(' '.join([unescaped(call['answer'])] + [text for value in objects(call['answer']) for text in strings(value)]).split())
         read += [item['id'] for item in case['items'] if item['id'] not in read and snippet(item) and snippet(item) in answered]
     return {'trace_version': 1, 'case_id': case['id'], 'dataset_ref': dataset_ref,
             'runner': {**RUNNER, 'model': model, 'mode': 'foreground', 'request_lang': 'fa', 'memory_kind': 'transcript'},
@@ -267,7 +288,7 @@ class Bench:
         error = None if row['state'] == 'done' else 'turn_' + str(row['state']) + ':' + str(row['error'])
         result = trace(case, self.ref, self.model, calls, '\n\n'.join(replies), error)
         result['runner']['cards'] = cards
-        return result
+        return {**result, 'calls': calls}
 
 
 def main():
@@ -291,6 +312,9 @@ def main():
     output = directory / ('bench-' + str(time.time_ns()))
     traces = output / 'traces'
     traces.mkdir(parents=True, mode=0o700)
+    # Each case's calls with the answers the agent got, all synthetic, so a later reading can check what a trace says.
+    calls = output / 'calls'
+    calls.mkdir(mode=0o700)
     runner.connect()
     errored = 0
     for index, case in enumerate(cases):
@@ -303,6 +327,7 @@ def main():
             except Exception as error:
                 result = trace(case, runner.ref, args.model, [], '', type(error).__name__ + ':' + str(error)[:300])
             errored = errored + 1 if result['error'] else 0
+        (calls / (case['id'] + '.json')).write_text(json.dumps(result.pop('calls', []), ensure_ascii=False, indent=2) + '\n')
         (traces / (case['id'] + '.json')).write_text(json.dumps(result, ensure_ascii=False, indent=2) + '\n')
         print(json.dumps({'case': case['id'], 'calls': [(call['tool'], call['status']) for call in result['tool_calls']],
                           'error': result['error'], 'spend_dollars': runner.f.http('/fixture/stats').get('spend_dollars')},
