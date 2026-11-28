@@ -23,6 +23,8 @@ test('only 64-hex values under id keys of Nocheh\'s own answers count as its ids
   assert.deepEqual([...ownIds(answer)].sort(),[taskId,parentId,projectId].sort());
   assert.deepEqual([...ownIds(JSON.stringify(answer))],[],'text is never read for ids');
   assert.deepEqual([...ownIds({id:taskId.toUpperCase()})],[],'only Nocheh\'s lowercase digests');
+  // A send's chat, as telegram_destinations lists it, so the agent can name it in its message request (ADR-0316).
+  assert.deepEqual([...ownIds({groups:[{destination:projectId,name:'Lumen group',project:'Lumen',current:false}]})],[projectId]);
 });
 
 test('a task id the secret check would hide passes once Nocheh answered with it; secrets beside it are still hidden',
